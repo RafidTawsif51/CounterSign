@@ -207,6 +207,22 @@ Not in the spec; this shape is ours. Sent right after `run.completed`.
  "findings": ["Summit Concrete: bank-change email from a lookalike domain, denied on the verification call."]}
 ```
 
+### attack.queued
+
+Not in the spec. An attack or bounty email arrived while a full run (or an earlier attack) was running, so it waits its turn. Sent to the attack's own run channel and to the leaderboard channel, right after the first `attack.logged` (result null). Processing starts with that run's `run.started`.
+
+| Field | Type |
+|---|---|
+| attack_id | str |
+| position | int, 1 = next to run |
+| waiting_for | run_id it is waiting behind, or null |
+
+```json
+{"type": "attack.queued", "run_id": "run_8f2c", "attack_id": "atk_17", "position": 1, "waiting_for": "run_042"}
+```
+
+An attack that is not queued goes `attack.logged` (result null), `run.started`, ..., `run.completed`, with a second `attack.logged` carrying the result when it finishes.
+
 ### attack.logged
 
 Not in the spec. Goes to the leaderboard channel always, and to the run channel when `run_id` is set. Emit it for every attempt, including pending bounty emails; the leaderboard screen should only show rows with `moderation_status: "approved"`.

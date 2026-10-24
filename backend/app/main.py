@@ -8,14 +8,16 @@ from sqlmodel import Session
 from app import dev, events
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
-from app.services import ingest, review, run, vendors
+from app.services import attacks, ingest, review, run, vendors
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_all()
     run.mark_stale_runs()
+    await attacks.start()
     yield
+    await attacks.stop()
 
 
 settings = get_settings()
@@ -48,6 +50,7 @@ api.include_router(ingest.router)
 api.include_router(run.router)
 api.include_router(review.router)
 api.include_router(vendors.router)
+api.include_router(attacks.router)
 api.include_router(dev.router)
 
 app.include_router(api)

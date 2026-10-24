@@ -367,6 +367,11 @@ def test_contacts_differ():
     assert run.contacts_differ("call me on +1 415 555 0177", known) is True
     assert run.contacts_differ("our line is (415) 555-0100", known) is False
     assert run.contacts_differ("no phone here", known) is False
+    # bank numbers are not phone numbers
+    assert run.contacts_differ("Bank: X\nRouting number: 996031174\nAccount number: 4410886213", known) is False
+    assert run.contacts_differ("account 000123456789 routing 021000021", known) is False
+    assert run.contacts_differ("call 415-555-0177 or 415.555.0177", known) is True
+    assert run.contacts_differ("call +14155550100 or (415) 555-0100", known) is False
 
 
 # ---------------------------------------------------------------- scripted vs live outcomes

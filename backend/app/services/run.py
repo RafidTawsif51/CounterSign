@@ -59,9 +59,12 @@ router = APIRouter()
 CONCURRENCY = 5
 BACKEND = Path(__file__).resolve().parents[2]
 _ORDER = [Decision.auto_pay, Decision.controller_review, Decision.hold, Decision.hold_and_verify]
-_PHONE_RE = re.compile(r"\+?\d[\d\s().-]{8,}\d")
+# A phone number has a leading + or the usual separators. A bare run of digits is more likely a routing or account number.
+_PHONE_RE = re.compile(r"\+\d[\d\s().-]{8,}\d|(?<!\d)\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)")
 
-_active: set[str] = set()  # run ids being processed in this process
+_active: set[str] = set()  # full runs being processed in this process (a second full run gets a 409)
+_mini: set[str] = set()  # one-invoice attack runs being processed (see services/attacks.py); they never block a full run
+_claimed: set[str] = set()  # invoices owned by a queued or running attack run; a full run leaves them alone
 _tasks: set[asyncio.Task] = set()
 
 
@@ -376,14 +379,22 @@ async def process_invoice(run_id: str, invoice_id: str, stats: Stats) -> None:
 
 async def _hold_on_error(run_id: str, invoice_id: str, reason: str, stats: Stats) -> None:
     pid = _payment_id(invoice_id)
+    atk = None
     with Session(engine) as s:
         inv = s.get(Invoice, invoice_id)
         if s.get(Payment, pid) is None:
             s.add(Payment(id=pid, run_id=run_id, invoice_id=invoice_id, amount_usd=inv.amount_usd or 0.0, status=PaymentStatus.held))
             write_audit("payment", pid, "agent", "held", {"reason": reason}, session=s)
+            msg = s.get(Message, inv.message_id) if inv.message_id else None
+            atk = _attack_for(s, msg, False, None, PaymentStatus.held)  # held counts as caught: an attack that could not move money
             s.commit()
+            if atk:
+                s.refresh(atk)
+                s.expunge(atk)
     stats.notes[pid] = reason
     await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=[reason]))
+    if atk:
+        await _emit_attack(run_id, atk)
 
 
 async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> None:
@@ -407,7 +418,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
         else:
             failure = "no_pdf_and_no_fields"
     amount = ex.amount_usd if ex else (inv.amount_usd or 0.0)
-    if ex:
+    if ex or not failure:  # an invoice with no PDF (an emailed request) is "parsed" from its row
         await ev.emit(ev.InvoiceParsed(run_id=run_id, invoice_id=inv.id, vendor=vendor.name, amount_usd=amount))
     if failure:
         reason = f"extraction_failed: {failure}"
@@ -525,12 +536,25 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
 
 
 def _open_invoice_ids(s: Session) -> list[str]:
-    return list(s.exec(select(Invoice.id).where(~Invoice.id.in_(select(Payment.invoice_id))).order_by(Invoice.id)).all())
+    return [i for i in s.exec(select(Invoice.id).where(~Invoice.id.in_(select(Payment.invoice_id))).order_by(Invoice.id)).all() if i not in _claimed]
 
 
 def is_active(run_id: str) -> bool:
     """True while this process is still processing the run."""
-    return run_id in _active
+    return run_id in _active or run_id in _mini
+
+
+def full_run_active() -> bool:
+    return bool(_active)
+
+
+async def start_mini_run(run_id: str, invoice_id: str) -> None:
+    """Process one invoice as its own run (an attack). The caller has already claimed the invoice."""
+    _mini.add(run_id)
+    try:
+        await execute_run(run_id, [invoice_id], _mini)
+    finally:
+        _claimed.discard(invoice_id)
 
 
 def mark_stale_runs() -> None:
@@ -548,7 +572,8 @@ def _totals(s: Session, run_id: str) -> dict:
             "total_usd": round(g("paid")[1], 2), "blocked_usd": round(g("blocked")[1], 2)}
 
 
-async def execute_run(run_id: str, invoice_ids: list[str]) -> None:
+async def execute_run(run_id: str, invoice_ids: list[str], registry: Optional[set[str]] = None) -> None:
+    registry = _active if registry is None else registry
     started = time.perf_counter()
     stats = Stats()
     try:
@@ -589,7 +614,7 @@ async def execute_run(run_id: str, invoice_ids: list[str]) -> None:
             s.add(run)
             s.commit()
     finally:
-        _active.discard(run_id)
+        registry.discard(run_id)
 
 
 # ---------------------------------------------------------------- routes

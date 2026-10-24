@@ -128,6 +128,17 @@ class PaymentBlocked(EventBase):
     reason: str
 
 
+class AttackQueued(EventBase):
+    """An attack arrived while something else was running; it will be processed in order. Sent to the run channel of the
+    attack's own run_id (the console subscribes there) and to the leaderboard channel."""
+
+    type: Literal["attack.queued"] = "attack.queued"
+    run_id: str
+    attack_id: str
+    position: int  # 1 = next
+    waiting_for: Optional[str] = None  # the run it is waiting behind, if any
+
+
 class PaymentReviewed(EventBase):
     """A person decided a held payment. Followed by payment.paid (approved) or payment.blocked (rejected)."""
 
@@ -188,6 +199,7 @@ EVENT_MODELS: dict[str, type[EventBase]] = {
         CallOutcomeEvent,
         PaymentBlocked,
         PaymentReviewed,
+        AttackQueued,
         RunCompleted,
         RunReport,
         AttackLogged,
@@ -250,7 +262,7 @@ class Broadcaster:
             log.exception("could not persist event %s", event.type)
         if event.run_id:
             self._publish(event.run_id, msg)
-        if isinstance(event, AttackLogged):
+        if isinstance(event, (AttackLogged, AttackQueued)):
             self._publish(LEADERBOARD, msg)
         return msg
 
