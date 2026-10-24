@@ -74,7 +74,7 @@ export function Inbox() {
   );
 
   return (
-    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className="flex flex-col lg:h-[calc(100dvh/var(--present-zoom)-3rem)]">
       <div className="flex min-h-0 flex-1">
         <section
           aria-label="Threads"

@@ -142,6 +142,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | Red team chart | `redteam/catch-rate-chart.tsx` | Recharts grouped bars: baseline in muted ink, Countersign in accent, square marks, 2px gap, rate printed on every bar, inline legend above the plot, axes labeled in place, hover tooltip with counts. |
 | `InlineError` | `shared/inline-error.tsx` | Every failed fetch: "{What} did not load." plus a plain sentence from `ApiError` and a "Try again" button. Never JSON, never a stack trace, never a status color. A cell-sized lookup (a row's invoice number) shows a quiet dash instead. |
 | System status | `pages/SystemStatus.tsx` | One list: Real (accent badge), Sandboxed or Simulated (neutral), each with one line on how we know. A component whose MOCK_* flag is on says "Running on its mock on this server" under its line, so a label never overstates what is running. |
+| `DemoShortcuts` | `shared/demo-shortcuts.tsx` | S start run, R reset (confirms), A attack console, L leaderboard window, F presentation mode, ? this list. Never while typing, never as the second key of a G chord; with a dialog open only F and ?. The list is a dialog of hairline rows, keys in `Kbd`. |
+| Presentation mode | `lib/presentation.ts` | F: no sidebar, `zoom: 1.15` on the root, so type and spacing scale together. Anything sized to the viewport divides by `--present-zoom` to still fit one screen. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
@@ -160,6 +162,8 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 
 - A dropped event stream reconnects on its own (1 s, 2 s, 4 s, 8 s, then every 10 s). The top bar's run line reads "Reconnecting…" in muted ink meanwhile; nothing else changes and nothing flashes.
 - A run the server stopped while restarting reads "Stopped when the server restarted. Start a new run." and Start is enabled again.
+- Server silent for 5 s (health probe every 2 s while live): one line under the top bar, in ink on `bg-surface` with a hairline, never a status color: what is not answering, what the offline demo is, then "Keep waiting" (ghost) and "Switch to offline demo" (secondary). The board does not change under it.
+- Offline demo (mock mode): the top bar's Sandbox chip becomes "Offline demo", outlined in ink so it is noticed without a status color, and "Back to live" appears beside it once the server answers. The leaderboard window follows the switch.
 
 ## Icons
 

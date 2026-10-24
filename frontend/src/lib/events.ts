@@ -1,8 +1,10 @@
 // Live run events. Screens use useRunEvents(runId) and never learn whether events come from the mock run
-// (VITE_USE_MOCKS=true) or from the server's SSE stream. Wire format: docs/events.md.
+// (mock mode) or from the server's SSE stream. Wire format: docs/events.md.
 
 import { useEffect, useState } from "react";
-import { USE_MOCKS, streamUrl } from "@/lib/api";
+import { streamUrl } from "@/lib/api";
+import { reportFailure } from "@/lib/connection";
+import { isMock, useDataMode } from "@/lib/data-mode";
 import { mockSubscribe } from "@/lib/mock";
 import type { AttackLoggedEvent, RunEvent } from "@/lib/types";
 
@@ -48,6 +50,7 @@ const sseTransport: Transport = {
       source.onerror = () => {
         source?.close();
         if (closed) return;
+        reportFailure();
         onStatus("reconnecting");
         timer = setTimeout(connect, backoff(attempt++));
       };
@@ -68,7 +71,8 @@ const mockTransport: Transport = {
   },
 };
 
-const transport = USE_MOCKS ? mockTransport : sseTransport;
+// Chosen per subscription: the offline-demo switch closes live streams and reopens them on the mock.
+const transport = () => (isMock() ? mockTransport : sseTransport);
 
 const runPath = (runId: string) => `/api/payment-runs/${encodeURIComponent(runId)}/events`;
 
@@ -86,6 +90,7 @@ export interface RunEventsState {
  */
 export function useRunEvents(runId: string | null): RunEventsState {
   const [state, setState] = useState<RunEventsState>({ events: [], status: runId ? "connecting" : "idle" });
+  const mode = useDataMode();
 
   useEffect(() => {
     if (!runId) {
@@ -97,7 +102,7 @@ export function useRunEvents(runId: string | null): RunEventsState {
     const seen = new Set<string>();
     let closed = false;
     let done = false;
-    const close = transport.open(
+    const close = transport().open(
       runPath(runId),
       (event) => {
         if (closed || seen.has(event.id)) return;
@@ -116,7 +121,7 @@ export function useRunEvents(runId: string | null): RunEventsState {
       closed = true;
       close();
     };
-  }, [runId]);
+  }, [runId, mode]);
 
   return state;
 }
@@ -126,5 +131,5 @@ export function useRunEvents(runId: string | null): RunEventsState {
  * a reconnect (onStatus reports "live" once the stream is back).
  */
 export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void, onStatus: (s: StreamStatus) => void = () => {}): Unsubscribe {
-  return transport.open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), onStatus);
+  return transport().open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), onStatus);
 }

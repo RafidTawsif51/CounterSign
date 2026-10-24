@@ -170,6 +170,10 @@ function useRunPayments() {
   }, [events]);
 }
 
+// Set between G and the next key, so the single-key demo shortcuts (demo-shortcuts.tsx) leave G then A to this chord.
+let chordPending = false;
+export const isGoChordPending = () => chordPending;
+
 /** Cmd/Ctrl+K toggles the palette. G then a letter jumps to a page, outside text fields. */
 function useGlobalShortcuts(onOpenChange: Dispatch<SetStateAction<boolean>>, go: (to: string, newTab?: boolean) => void) {
   const pendingG = useRef<number | null>(null);
@@ -191,6 +195,9 @@ function useGlobalShortcuts(onOpenChange: Dispatch<SetStateAction<boolean>>, go:
       if (pendingG.current !== null) {
         window.clearTimeout(pendingG.current);
         pendingG.current = null;
+        // Cleared once this keydown has reached every listener (microtasks would run between listeners), so a demo
+        // shortcut handled after this one still sees the chord.
+        window.setTimeout(() => (chordPending = false), 0);
         const item = NAV.find((n) => n.key === key);
         if (item) {
           e.preventDefault();
@@ -198,7 +205,13 @@ function useGlobalShortcuts(onOpenChange: Dispatch<SetStateAction<boolean>>, go:
         }
         return;
       }
-      if (key === "G") pendingG.current = window.setTimeout(() => (pendingG.current = null), 1000);
+      if (key === "G") {
+        chordPending = true;
+        pendingG.current = window.setTimeout(() => {
+          pendingG.current = null;
+          chordPending = false;
+        }, 1000);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

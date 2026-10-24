@@ -18,8 +18,8 @@ import { iconProps } from "@/components/shared/icon";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { api } from "@/lib/api";
 
-export function ResetDemoDialog() {
-  const [open, setOpen] = useState(false);
+/** Controlled by the shell, so the R shortcut can open it too. */
+export function ResetDemoDialog({ open, onOpenChange: setOpen }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [pending, setPending] = useState(false);
   const queryClient = useQueryClient();
   const { clearRun } = useCurrentRun();

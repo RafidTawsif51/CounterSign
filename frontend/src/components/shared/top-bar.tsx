@@ -1,14 +1,23 @@
-import { Link } from "react-router-dom";
-import { FlaskRound, Search } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Keyboard, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { iconProps } from "@/components/shared/icon";
 import { Kbd, modKey } from "@/components/shared/kbd";
+import { DataModeIndicator } from "@/components/shared/offline-demo";
 import { ResetDemoDialog } from "@/components/shared/reset-demo-dialog";
 import { useCurrentRun } from "@/components/shared/run-context";
-import { USE_MOCKS } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
+export function TopBar({
+  onOpenPalette,
+  onOpenShortcuts,
+  resetOpen,
+  onResetOpenChange,
+}: {
+  onOpenPalette: () => void;
+  onOpenShortcuts: () => void;
+  resetOpen: boolean;
+  onResetOpenChange: (open: boolean) => void;
+}) {
   return (
     <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-4 border-b border-rule bg-paper px-4 sm:px-6">
       {/* On a phone the live run line matters more than the company name, which the board already shows. */}
@@ -27,20 +36,13 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           <Kbd>{modKey}K</Kbd>
         </button>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Link
-              to="/status"
-              className="hidden h-7 items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 text-sm text-ink-muted transition-colors hover:text-ink md:inline-flex"
-            >
-              <FlaskRound {...iconProps} />
-              {USE_MOCKS ? "Sandbox, mock data" : "Sandbox"}
-            </Link>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">All money is sandbox money. See what is real and what is simulated.</TooltipContent>
-        </Tooltip>
+        <DataModeIndicator />
 
-        <ResetDemoDialog />
+        <Button size="icon-sm" variant="ghost" onClick={onOpenShortcuts} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" className="hidden sm:inline-flex">
+          <Keyboard {...iconProps} />
+        </Button>
+
+        <ResetDemoDialog open={resetOpen} onOpenChange={onResetOpenChange} />
       </div>
     </header>
   );

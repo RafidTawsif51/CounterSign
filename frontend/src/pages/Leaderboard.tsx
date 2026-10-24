@@ -9,6 +9,7 @@ import { NumberTicker } from "@/components/board/number-ticker";
 import { iconProps } from "@/components/shared/icon";
 import { InlineError } from "@/components/shared/inline-error";
 import { BOUNTY_EMAIL, api } from "@/lib/api";
+import { useDataMode } from "@/lib/data-mode";
 import { subscribeLeaderboard } from "@/lib/events";
 import { formatClock, formatUSD } from "@/lib/format";
 import type { AttackLoggedEvent, LeaderboardRow } from "@/lib/types";
@@ -35,9 +36,12 @@ export function Leaderboard() {
   // Attempts seen on the stream before the next fetch includes them, by attack id.
   const [live, setLive] = useState<Map<string, AttackLoggedEvent>>(new Map());
   const idle = useIdleCursor(tv);
+  // The offline-demo switch in the main window flips this window too; attempts from the other source do not carry over.
+  const mode = useDataMode();
 
   useEffect(() => {
     let dropped = false;
+    setLive(new Map());
     return subscribeLeaderboard(
       (e) => {
         if (e.moderation_status === "hidden") return;
@@ -54,7 +58,7 @@ export function Leaderboard() {
         }
       },
     );
-  }, [queryClient]);
+  }, [queryClient, mode]);
 
   const rows = useMemo(() => merge(board.data?.attempts ?? [], live), [board.data, live]);
   const totals = board.data?.totals;

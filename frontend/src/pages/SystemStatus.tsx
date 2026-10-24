@@ -3,7 +3,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InlineError } from "@/components/shared/inline-error";
 import { PageHeader } from "@/components/shared/page-header";
-import { API_URL, USE_MOCKS, api } from "@/lib/api";
+import { API_URL, api } from "@/lib/api";
+import { useDataMode } from "@/lib/data-mode";
 import { formatClock } from "@/lib/format";
 import { DOCUMENTED_STATUS, MODE_LABEL } from "@/lib/system-status";
 import type { ComponentMode, HealthResponse, SystemComponentStatus } from "@/lib/types";
@@ -61,9 +62,10 @@ function ServerLine({
   retrying: boolean;
   updatedAt: number;
 }) {
+  const mode = useDataMode();
   if (error && !health) return <InlineError what="The server's health check" error={error} onRetry={onRetry} retrying={retrying} />;
   if (!health) return <Skeleton className="h-4 w-96" />;
-  const where = USE_MOCKS ? "Mock data in this browser" : `Connected to ${API_URL || window.location.origin}`;
+  const where = mode === "mock" ? "Offline demo: built-in data in this browser" : `Connected to ${API_URL || window.location.origin}`;
   const mocks = Object.entries(health.mocks).filter(([, on]) => on).length;
   return (
     <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-muted">

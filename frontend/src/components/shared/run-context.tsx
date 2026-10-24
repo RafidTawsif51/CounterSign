@@ -1,6 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { USE_MOCKS, api } from "@/lib/api";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/api-error";
+import { getDataMode, isMock, useDataMode, type DataMode } from "@/lib/data-mode";
 import { useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
 import type { RunEvent } from "@/lib/types";
@@ -41,7 +44,7 @@ const PIN_KEY = "countersign-pinned-attack";
 
 // A real run outlives a reload, so remember it. A mock run lives in memory and is gone after a reload.
 function readStoredRun(): string | null {
-  if (USE_MOCKS) return null;
+  if (isMock()) return null;
   try {
     return sessionStorage.getItem(STORAGE_KEY);
   } catch {
@@ -50,7 +53,7 @@ function readStoredRun(): string | null {
 }
 
 function storeRun(runId: string | null) {
-  if (USE_MOCKS) return;
+  if (isMock()) return;
   try {
     if (runId) sessionStorage.setItem(STORAGE_KEY, runId);
     else sessionStorage.removeItem(STORAGE_KEY);
@@ -60,7 +63,7 @@ function storeRun(runId: string | null) {
 }
 
 function readPinned(): PinnedAttack | null {
-  if (USE_MOCKS) return null;
+  if (isMock()) return null;
   try {
     const raw = sessionStorage.getItem(PIN_KEY);
     return raw ? (JSON.parse(raw) as PinnedAttack) : null;
@@ -70,7 +73,7 @@ function readPinned(): PinnedAttack | null {
 }
 
 function storePinned(p: PinnedAttack | null) {
-  if (USE_MOCKS) return;
+  if (isMock()) return;
   try {
     if (p) sessionStorage.setItem(PIN_KEY, JSON.stringify(p));
     else sessionStorage.removeItem(PIN_KEY);
@@ -79,11 +82,26 @@ function storePinned(p: PinnedAttack | null) {
   }
 }
 
+interface Owned<T> {
+  value: T;
+  mode: DataMode;
+}
+
+const owned = <T,>(value: T | null): Owned<T> | null => (value === null ? null : { value, mode: getDataMode() });
+
 export function RunProvider({ children }: { children: ReactNode }) {
-  const [runId, setRunId] = useState<string | null>(readStoredRun);
+  // A run id belongs to the server or to the mock. Each is tagged with the mode it started in and only followed in that
+  // mode: on the offline-demo switch the stream hook re-subscribes before the switch effect below clears the run, and a
+  // live id handed to the mock would start a mock run under it.
+  const mode = useDataMode();
+  const [run, setRun] = useState<Owned<string> | null>(() => owned(readStoredRun()));
+  const runId = run && run.mode === mode ? run.value : null;
+  const setRunId = useCallback((id: string | null) => setRun(owned(id)), []);
   const { events, status } = useRunEvents(runId);
   const summary = useMemo(() => summarizeRun(events), [events]);
-  const [pinned, setPinned] = useState<PinnedAttack | null>(readPinned);
+  const [pin, setPin] = useState<Owned<PinnedAttack> | null>(() => owned(readPinned()));
+  const pinned = pin && pin.mode === mode ? pin.value : null;
+  const setPinned = useCallback((p: PinnedAttack | null) => setPin(owned(p)), []);
   const { events: pinnedEvents } = useRunEvents(pinned?.runId ?? null);
   const allEvents = useMemo(() => (pinnedEvents.length ? [...events, ...pinnedEvents] : events), [events, pinnedEvents]);
   const attackDone = pinnedEvents.some((e) => e.type === "run.completed");
@@ -118,23 +136,45 @@ export function RunProvider({ children }: { children: ReactNode }) {
     storeRun(run_id);
     setRunId(run_id);
     return run_id;
-  }, []);
+  }, [setRunId]);
+
+  // When the mode flips, drop the run and the pin, and if a run was underway, start one on the new side so the board
+  // keeps moving (the offline demo's whole point).
+  const lastMode = useRef(mode);
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => {
+    if (lastMode.current === mode) return;
+    lastMode.current = mode;
+    const hadRun = runRef.current !== null;
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+      sessionStorage.removeItem(PIN_KEY);
+    } catch {
+      // Nothing stored to clear.
+    }
+    setRunId(null);
+    setPinned(null);
+    setFailedRun(null);
+    if (mode === "mock" && hadRun)
+      void startRun().catch((err) => toast.error("Offline payment run not started", { description: errorMessage(err) }));
+  }, [mode, startRun, setRunId, setPinned]);
 
   const pinAttack = useCallback((a: PinnedAttack) => {
     storePinned(a);
     setPinned(a);
-  }, []);
+  }, [setPinned]);
 
   const unpin = useCallback(() => {
     storePinned(null);
     setPinned(null);
-  }, []);
+  }, [setPinned]);
 
   const clearRun = useCallback(() => {
     storeRun(null);
     setRunId(null);
     unpin();
-  }, [unpin]);
+  }, [unpin, setRunId]);
 
   const value = useMemo(
     () => ({ runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents }),

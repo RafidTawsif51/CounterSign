@@ -12,7 +12,8 @@ import { PdfDropzone, type PdfChoice } from "@/components/attack/pdf-dropzone";
 import { iconProps } from "@/components/shared/icon";
 import { PageHeader } from "@/components/shared/page-header";
 import { useCurrentRun } from "@/components/shared/run-context";
-import { USE_MOCKS, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useDataMode } from "@/lib/data-mode";
 import { errorMessage } from "@/lib/api-error";
 import { CARDS, SAMPLE_PDFS, type AttackPayloadDraft } from "@/lib/attack-cards";
 import type { AttackCard, LaunchAttackRequest } from "@/lib/types";
@@ -32,6 +33,7 @@ function readName() {
 
 export function AttackConsole() {
   const navigate = useNavigate();
+  const mode = useDataMode();
   const { pinAttack } = useCurrentRun();
   const [name, setName] = useState(readName);
   const [card, setCard] = useState<AttackCard | null>(null);
@@ -134,7 +136,7 @@ export function AttackConsole() {
                 <div className="mt-4">
                   <p className="mb-1 text-sm font-medium">Invoice PDF</p>
                   {/* The mock cannot scan an uploaded PDF, so only the sample is offered there. */}
-                  <PdfDropzone value={pdf} onChange={setPdf} allowUpload={!USE_MOCKS} />
+                  <PdfDropzone value={pdf} onChange={setPdf} allowUpload={mode !== "mock"} />
                 </div>
               )}
             </section>

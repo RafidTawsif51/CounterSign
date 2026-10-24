@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { Phone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -80,11 +80,14 @@ export function PaymentTable({
               </TableCell>
             </TableRow>
           ) : (
-            <AnimatePresence initial={false}>
-              {rows.map((row) => (
-                <PaymentRow key={row.paymentId} row={row} mountedAt={mountedAt.current} />
-              ))}
-            </AnimatePresence>
+            // Memoized rows do not re-render when a new one lands above them; the group still has them measure and slide.
+            <LayoutGroup>
+              <AnimatePresence initial={false}>
+                {rows.map((row) => (
+                  <PaymentRow key={row.paymentId} row={row} mountedAt={mountedAt.current} />
+                ))}
+              </AnimatePresence>
+            </LayoutGroup>
           )}
         </TableBody>
       </Table>
@@ -96,7 +99,27 @@ function Head({ className, children }: { className?: string; children: React.Rea
   return <TableHead className={className}>{children}</TableHead>;
 }
 
-function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
+// foldBoard rebuilds every row object on each event, so compare what a row shows: with 40 rows streaming, an event
+// re-renders the one row it touched instead of all of them.
+const sameRow = (a: BoardRow, b: BoardRow) =>
+  a.paymentId === b.paymentId &&
+  a.status === b.status &&
+  a.stage === b.stage &&
+  a.score === b.score &&
+  a.decision === b.decision &&
+  a.changedTo === b.changedTo &&
+  a.technique === b.technique &&
+  a.callOutcome === b.callOutcome &&
+  a.reason === b.reason &&
+  a.reviewed?.decision === b.reviewed?.decision &&
+  a.reviewed?.by === b.reviewed?.by &&
+  a.updatedAt === b.updatedAt &&
+  a.vendor === b.vendor &&
+  a.amount === b.amount;
+
+const PaymentRow = memo(PaymentRowView, (a, b) => a.mountedAt === b.mountedAt && sameRow(a.row, b.row));
+
+function PaymentRowView({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
   const navigate = useNavigate();
   const [slideIn] = useState(() => Date.now() - mountedAt > SETTLE_MS);
   const flagged = row.status === "held" || row.status === "blocked";

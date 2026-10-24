@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "react-router-dom";
 import { CallStrips } from "@/components/call/call-strip";
 import { Money } from "@/components/shared/money";
@@ -40,7 +41,10 @@ export function ActivityRail({ entries, calls, hasRun }: { entries: ActivityEntr
   );
 }
 
-function Entry({ entry }: { entry: ActivityEntry }) {
+// Entries are rebuilt on every event like the rows; an entry never changes once logged, so its id is enough.
+const Entry = memo(EntryView, (a, b) => a.entry.id === b.entry.id && a.entry.text === b.entry.text);
+
+function EntryView({ entry }: { entry: ActivityEntry }) {
   const quiet = entry.tone === "paid";
   const body = (
     <>

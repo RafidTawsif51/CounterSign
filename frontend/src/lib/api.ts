@@ -1,7 +1,10 @@
 // HTTP client for the FastAPI backend. Routes mirror the API table in CLAUDE.md.
-// With VITE_USE_MOCKS=true every call is answered by lib/mock instead of the network.
+// In mock mode (VITE_USE_MOCKS=true, or the offline-demo switch) every call is answered by lib/mock instead.
 
 import { ApiError, detailText, statusText } from "@/lib/api-error";
+import { API_URL } from "@/lib/api-url";
+import { reportFailure } from "@/lib/connection";
+import { isMock } from "@/lib/data-mode";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
@@ -23,15 +26,14 @@ import type {
   VendorHistory,
 } from "@/lib/types";
 
-export const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
+export { API_URL };
 /** The Rob Countersign bounty inbox, or "" until the organizers approve advertising it. */
 export const BOUNTY_EMAIL = (import.meta.env.VITE_BOUNTY_EMAIL ?? "").trim();
 
 type Method = "GET" | "POST";
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
-  if (USE_MOCKS) return mockRequest<T>(method, path, body);
+  if (isMock()) return mockRequest<T>(method, path, body);
 
   const isForm = body instanceof FormData;
   let res: Response;
@@ -42,8 +44,11 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
       body: body == null ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
+    reportFailure();
     throw new ApiError(0, path, `${statusText(0)} at ${API_URL || window.location.origin}`);
   }
+  // A proxy in front of a stopped server answers 502 to 504 instead of failing the request.
+  if (res.status >= 502 && res.status <= 504) reportFailure();
   if (!res.ok) {
     let detail: string | null = null;
     try {

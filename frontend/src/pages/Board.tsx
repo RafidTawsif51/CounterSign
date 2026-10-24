@@ -60,7 +60,7 @@ export function Board() {
   const rows = board.rows.filter(active.test);
 
   return (
-    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className="flex flex-col lg:h-[calc(100dvh/var(--present-zoom)-3rem)]">
       <RunHeader
         rows={board.rows}
         invoiceCount={board.invoiceCount}
