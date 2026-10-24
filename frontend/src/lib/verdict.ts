@@ -17,6 +17,8 @@ export function requestedAccount(d: PaymentDetail): RemittanceDetails | null {
 export function destinationChanged(d: PaymentDetail) {
   const req = requestedAccount(d);
   const last = d.last_verified_account;
+  // The live API decides this (it holds the routing hashes); the mock leaves the flag unset and is compared here.
+  if (d.invoice.requested_account_differs !== undefined) return Boolean(req) && d.invoice.requested_account_differs;
   return Boolean(req && (!last || req.account_last4 !== last.account_last4 || (req.routing_hash && req.routing_hash !== last.routing_hash)));
 }
 

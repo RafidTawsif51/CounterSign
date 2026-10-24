@@ -83,6 +83,16 @@ export interface Invoice {
   remittance_json: Record<string, unknown> | null;
   pdf_path: string | null;
   extracted_json: Record<string, unknown> | null;
+  /** From GET /api/payments/{id}: the backend compares the requested account with the verified one (no routing hash is exposed). */
+  requested_account_differs?: boolean;
+}
+
+/** 201 from POST /api/invoices/upload. */
+export interface UploadInvoiceResponse {
+  invoice_id: string;
+  message_id: string | null;
+  vendor_id: string | null;
+  size_bytes: number;
 }
 
 export interface RunTotals {
@@ -211,6 +221,7 @@ export interface PaymentPaidEvent extends EventBase {
   type: "payment.paid";
   payment_id: string;
   nessie_transfer_id: string;
+  transfer_mode?: "nessie" | "mock_fallback" | "mock" | null;
 }
 export interface PaymentHeldEvent extends EventBase {
   type: "payment.held";
@@ -265,6 +276,33 @@ export interface AttackLoggedEvent extends EventBase {
   moderation_status: ModerationStatus;
 }
 
+/** A controller decided a held payment; followed by payment.paid or payment.blocked. */
+export interface PaymentReviewedEvent extends EventBase {
+  type: "payment.reviewed";
+  payment_id: string;
+  decision: "approved" | "rejected";
+  approver: string;
+  reason: string; // untrusted
+}
+
+/** A verification call finished after run.completed and moved a payment. Carries the run's new totals. */
+export interface RunUpdatedEvent extends EventBase {
+  type: "run.updated";
+  payment_id: string;
+  status: PaymentStatus;
+  paid: number;
+  held: number;
+  blocked: number;
+  total_usd: number;
+  blocked_usd: number;
+}
+
+/** Global channel only: the demo was reset, reload everything. */
+export interface DemoResetEvent extends EventBase {
+  type: "demo.reset";
+  kept_leaderboard: boolean;
+}
+
 export interface AttackQueuedEvent extends EventBase {
   type: "attack.queued";
   attack_id: string;
@@ -286,7 +324,10 @@ export type RunEvent =
   | RunCompletedEvent
   | RunReportEvent
   | AttackLoggedEvent
-  | AttackQueuedEvent;
+  | AttackQueuedEvent
+  | PaymentReviewedEvent
+  | RunUpdatedEvent
+  | DemoResetEvent;
 
 export type RunEventType = RunEvent["type"];
 
@@ -294,7 +335,8 @@ export type RunEventType = RunEvent["type"];
 // Shapes below are not yet documented by the backend. Confirm with the backend lead before relying on extra fields.
 
 /**
- * GET /api/payments/{id}. Proposed shape: the backend route does not exist yet (confirm with the backend lead).
+ * GET /api/payments/{id}, after lib/api.ts adaptPayment maps the backend's field names (requested_remittance, signals,
+ * injection_findings, detail) onto these.
  * The requested destination is invoice.remittance_json ({bank_name, routing_hash, account_last4}); the drawer compares it
  * with last_verified_account. Signals that were checked but did not fire are derived client-side from the signal list.
  */

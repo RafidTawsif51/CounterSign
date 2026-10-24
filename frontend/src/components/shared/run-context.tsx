@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { USE_MOCKS, api } from "@/lib/api";
-import { useRunEvents, type StreamStatus } from "@/lib/events";
+import { mergeEvents, useGlobalEvents, useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
 import type { RunEvent } from "@/lib/types";
 
@@ -79,10 +79,16 @@ function storePinned(p: PinnedAttack | null) {
 
 export function RunProvider({ children }: { children: ReactNode }) {
   const [runId, setRunId] = useState<string | null>(readStoredRun);
-  const { events, status } = useRunEvents(runId);
+  const { events: runEvents, status } = useRunEvents(runId);
+  const global = useGlobalEvents();
+  const events = useMemo(() => mergeEvents(runEvents, global.events.filter((e) => e.run_id === runId)), [runEvents, global.events, runId]);
   const summary = useMemo(() => summarizeRun(events), [events]);
   const [pinned, setPinned] = useState<PinnedAttack | null>(readPinned);
-  const { events: pinnedEvents } = useRunEvents(pinned?.runId ?? null);
+  const { events: ownPinnedEvents } = useRunEvents(pinned?.runId ?? null);
+  const pinnedEvents = useMemo(
+    () => mergeEvents(ownPinnedEvents, global.events.filter((e) => e.run_id === (pinned?.runId ?? null))),
+    [ownPinnedEvents, global.events, pinned?.runId],
+  );
   const allEvents = useMemo(() => (pinnedEvents.length ? [...events, ...pinnedEvents] : events), [events, pinnedEvents]);
   const attackDone = pinnedEvents.some((e) => e.type === "run.completed");
 
@@ -93,6 +99,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
     void queryClient.invalidateQueries({ queryKey: ["vendors"] });
     void queryClient.invalidateQueries({ queryKey: ["vendor-history"] });
   }, [summary.completed, attackDone, runId, queryClient]);
+
+  // A late call outcome changes a payment's record, and the global channel has no replay: refetch every payment record
+  // when one arrives and when the channel reconnects.
+  const lateSettled = global.events.filter((e) => e.type !== "call.transcript" && e.type !== "call.started").length;
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["payment"] });
+  }, [lateSettled, global.connections, queryClient]);
 
   const startRun = useCallback(async () => {
     const { run_id } = await api.startRun();
@@ -116,6 +129,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setRunId(null);
     unpin();
   }, [unpin]);
+
+  // The demo was reset (here or elsewhere): the run and every cached record are gone.
+  const resets = global.events.filter((e) => e.type === "demo.reset").length;
+  useEffect(() => {
+    if (resets === 0) return;
+    clearRun();
+    void queryClient.invalidateQueries();
+  }, [resets, clearRun, queryClient]);
 
   const value = useMemo(
     () => ({ runId, events, status, summary, startRun, clearRun, pinned, pinnedEvents, pinAttack, unpin, allEvents }),

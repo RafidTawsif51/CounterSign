@@ -12,9 +12,20 @@ import type {
   InboxThreadSummary,
   LaunchAttackRequest,
   LaunchAttackResponse,
-  Invoice,
+  UploadInvoiceResponse,
   PaymentDetail,
   PaymentRun,
+  RunTotals,
+  Payment,
+  Invoice,
+  Vendor,
+  Message,
+  VendorBankAccount,
+  RiskAssessment,
+  InjectionFinding,
+  VerificationCall,
+  VendorContact,
+  AuditLogEntry,
   StartRunResponse,
   SystemComponentStatus,
   VendorSummary,
@@ -41,7 +52,9 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     let detail = res.statusText;
     try {
       const data = await res.json();
+      // The backend sends either detail: "text" or detail: {error: "text", ...} (409 conflicts).
       if (typeof data?.detail === "string") detail = data.detail;
+      else if (typeof data?.detail?.error === "string") detail = data.detail.error;
     } catch {
       // Non-JSON error body; keep the status text.
     }
@@ -69,13 +82,17 @@ export const api = {
   uploadInvoice: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return post<Invoice>("/api/invoices/upload", form);
+    return post<UploadInvoiceResponse>("/api/invoices/upload", form);
   },
 
   startRun: () => post<StartRunResponse>("/api/payment-runs"),
-  run: (runId: string) => get<PaymentRun>(`/api/payment-runs/${runId}`),
+  run: async (runId: string): Promise<PaymentRun> => {
+    const r = await get<BackendRun>(`/api/payment-runs/${runId}`);
+    return { id: r.id, started_at: r.started_at, completed_at: r.completed_at, status: r.status, totals_json: r.totals };
+  },
 
-  payment: (paymentId: string) => get<PaymentDetail>(`/api/payments/${paymentId}`),
+  payment: async (paymentId: string): Promise<PaymentDetail> =>
+    USE_MOCKS ? get<PaymentDetail>(`/api/payments/${paymentId}`) : adaptPayment(await get<BackendPayment>(`/api/payments/${paymentId}`)),
   approve: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/approve`, { reason }),
   reject: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/reject`, { reason }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
@@ -93,4 +110,87 @@ export const api = {
 /** Absolute URL for an SSE endpoint. */
 export function streamUrl(path: string) {
   return `${API_URL}${path}`;
+}
+
+// ---------- GET /api/payments/{id}: backend shape -> PaymentDetail ----------
+// The backend names several fields differently from the table columns the screens were written against
+// (requested_remittance, signals, injection_findings, detail). Mapping here keeps the screens and the mock unchanged.
+
+interface BackendAccount {
+  id: string;
+  bank_name: string;
+  account_last4: string;
+  valid_from: string;
+  valid_to: string | null;
+  verified_by_call_id: string | null;
+  trusted: boolean;
+}
+
+interface BackendRun {
+  id: string;
+  status: PaymentRun["status"];
+  started_at: string;
+  completed_at: string | null;
+  totals: RunTotals | null;
+}
+
+interface BackendPayment {
+  payment: Pick<Payment, "id" | "run_id" | "status" | "amount_usd" | "nessie_transfer_id"> & {
+    destination: BackendAccount | null;
+    last_verified_account: BackendAccount | null;
+  };
+  invoice: {
+    id: string;
+    number: string | null;
+    amount_usd: number | null;
+    due_date: string | null;
+    has_pdf: boolean;
+    requested_remittance: Record<string, unknown> | null;
+    requested_account_differs_from_verified: boolean;
+  } | null;
+  vendor: (Vendor & { identity?: unknown }) | null;
+  message: (Message & { is_attack: boolean }) | null;
+  risk: (Omit<RiskAssessment, "payment_id" | "signals_json"> & { signals: RiskAssessment["signals_json"] }) | null;
+  injection_findings: InjectionFinding[];
+  calls: (Omit<VerificationCall, "contact_id"> & { contact: (Pick<VendorContact, "id" | "source" | "source_url" | "phone">) | null })[];
+  audit: (Omit<AuditLogEntry, "detail_json"> & { detail: Record<string, unknown> | null })[];
+}
+
+function adaptPayment(b: BackendPayment): PaymentDetail {
+  const p = b.payment;
+  const vendorId = b.vendor?.id ?? "";
+  const account = (a: BackendAccount | null): VendorBankAccount | null =>
+    a && { ...a, vendor_id: vendorId, routing_hash: "" }; // the API never returns a routing hash
+  const payment: Payment = {
+    id: p.id,
+    run_id: p.run_id,
+    invoice_id: b.invoice?.id ?? "",
+    amount_usd: p.amount_usd,
+    destination_account_id: p.destination?.id ?? null,
+    status: p.status,
+    nessie_transfer_id: p.nessie_transfer_id,
+  };
+  const invoice: Invoice = {
+    id: b.invoice?.id ?? "",
+    vendor_id: b.vendor?.id ?? null,
+    message_id: b.message?.id ?? null,
+    number: b.invoice?.number ?? null,
+    amount_usd: b.invoice?.amount_usd ?? null,
+    due_date: b.invoice?.due_date ?? null,
+    remittance_json: b.invoice?.requested_remittance ?? null,
+    pdf_path: null,
+    extracted_json: null,
+    requested_account_differs: b.invoice?.requested_account_differs_from_verified,
+  };
+  return {
+    payment,
+    invoice,
+    vendor: b.vendor as Vendor,
+    message: b.message,
+    last_verified_account: account(p.last_verified_account),
+    risk: b.risk && { ...b.risk, payment_id: p.id, signals_json: b.risk.signals },
+    findings: b.injection_findings,
+    calls: b.calls.map((c) => ({ ...c, contact_id: c.contact?.id ?? null, contact: c.contact && ({ ...c.contact, vendor_id: vendorId, first_seen: "", last_verified: null } as VendorContact) })),
+    audit: b.audit.map(({ detail, ...a }) => ({ ...a, detail_json: detail })),
+  };
 }

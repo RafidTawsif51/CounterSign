@@ -412,12 +412,20 @@ async def answer(session: Session, payment_id: str, question: str) -> dict:
         user = (f"Evidence for payment {payment_id} (all of it comes from the database):\n{render_evidence(list(evidence.values()))}\n\n"
                 f"<untrusted_question>\n{safe_q}\n</untrusted_question>\n\nCall answer_question. Cite evidence ids exactly as given.")
         deadline = started + DEADLINE_SECONDS
-        try:
-            raw = await asyncio.wait_for(asyncio.to_thread(_ask_claude, model, user, deadline), timeout=DEADLINE_SECONDS)
-        except asyncio.TimeoutError:
-            log.warning("ask timed out after %.1fs; using the template answer", DEADLINE_SECONDS)
-        except Exception:  # noqa: BLE001  (the explanation must still come back)
-            log.exception("ask call failed; using the template answer")
+        for attempt in range(2):  # the model sometimes answers without citing anything; one retry inside the same deadline
+            try:
+                got = await asyncio.wait_for(asyncio.to_thread(_ask_claude, model, user, deadline), timeout=max(0.1, deadline - time.monotonic()))
+            except asyncio.TimeoutError:
+                log.warning("ask timed out after %.1fs; using the template answer", DEADLINE_SECONDS)
+                break
+            except Exception:  # noqa: BLE001  (the explanation must still come back)
+                log.exception("ask call failed; using the template answer")
+                break
+            if got is None:
+                break
+            raw = got if (raw is None or got.claims) else raw
+            if got.claims:
+                break
         if raw is not None:
             source = "claude"
     if raw is None:

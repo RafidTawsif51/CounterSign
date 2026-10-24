@@ -89,6 +89,62 @@ export function useRunEvents(runId: string | null): RunEventsState {
   return state;
 }
 
+/** Events the board needs from the global channel: they can arrive after the run's own stream was closed. */
+const LATE_TYPES = new Set<string>([
+  "call.started",
+  "call.transcript",
+  "call.outcome",
+  "payment.paid",
+  "payment.held",
+  "payment.blocked",
+  "payment.reviewed",
+  "run.updated",
+  "demo.reset",
+]);
+
+export interface GlobalEventsState {
+  events: RunEvent[];
+  /** Counts every (re)connection of the stream. The channel has no replay, so a change means events may have been missed. */
+  connections: number;
+}
+
+/**
+ * The global channel (GET /api/leaderboard/events), kept open for the whole session. In real mode a verification call can
+ * finish after the run stream closed; its events (and the payment's final status) arrive here. No replay.
+ */
+export function useGlobalEvents(): GlobalEventsState {
+  const [state, setState] = useState<GlobalEventsState>({ events: [], connections: 0 });
+  useEffect(() => {
+    const seen = new Set<string>();
+    let wasLive = false;
+    const close = transport.open(
+      "/api/leaderboard/events",
+      (event) => {
+        if (!LATE_TYPES.has(event.type) || seen.has(event.id)) return;
+        seen.add(event.id);
+        setState((s) => ({ ...s, events: [...s.events.slice(-1999), event] }));
+      },
+      (status) => {
+        if (status === "live" && !wasLive) {
+          wasLive = true;
+          setState((s) => ({ ...s, connections: s.connections + 1 }));
+        } else if (status !== "live") wasLive = false;
+      },
+    );
+    return close;
+  }, []);
+  return state;
+}
+
+/** A run's own events plus the global channel's events for the same run, de-duplicated by id and in time order. */
+export function mergeEvents(own: RunEvent[], late: RunEvent[]): RunEvent[] {
+  if (late.length === 0) return own;
+  const ids = new Set(own.map((e) => e.id));
+  const extra = late.filter((e) => !ids.has(e.id));
+  if (extra.length === 0) return own;
+  return [...own, ...extra].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)); // stable
+}
+
 /** Live attack.logged events for the leaderboard. No replay: load history with api.leaderboard() first. */
 export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void): Unsubscribe {
   return transport.open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), () => {});
