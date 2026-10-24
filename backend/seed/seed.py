@@ -400,7 +400,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         run_totals[rd][0] += 1
         run_totals[rd][1] += d.amount
         pay = Payment(id=f"pay_{n:04d}", run_id=runs[rd].id, invoice_id=inv.id, amount_usd=d.amount, destination_account_id=a.row.id,
-                      status=PaymentStatus.paid, nessie_transfer_id=f"nes_seed_{n:04d}")
+                      status=PaymentStatus.paid, nessie_transfer_id=f"nes_seed_{n:04d}", transfer_mode="mock")  # simulated history
         rows += [msg, inv, pay]
         history_amounts.setdefault(key, []).append(d.amount)
         hist_rec.setdefault(key, []).append((inv, d, due, a))
@@ -593,7 +593,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
             pdfs += 1
 
         # three poisoned HTML emails
-        for key, technique in (("alder", "html_comment"), ("bayview", "display_none"), ("granite", "same_color")):
+        for key, technique in (("alder", "html_comment"), ("bayview", "display_none"), ("granite", "same_color"), ("tidewater", "css_class")):
             v = BY_KEY[key]
             html = html_email(technique, vendor=v.name, number=f"{key[:3].upper()}-9101", amount=round(v.base * 0.9, 2), terms=v.terms, hidden=attack_text)
             (EMAIL_DIR / f"poisoned_{technique}.html").write_text(html)

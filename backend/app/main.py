@@ -5,17 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app import dev, events
+from app import dev, events, integrations
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
-from app.services import ingest, run
+from app.services import ask, attacks, ingest, reset, review, run, vendors
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_all()
     run.mark_stale_runs()
+    await attacks.start()
     yield
+    await attacks.stop()
 
 
 settings = get_settings()
@@ -46,6 +48,12 @@ def health(session: Session = Depends(get_session)) -> dict:
 api.include_router(events.router)
 api.include_router(ingest.router)
 api.include_router(run.router)
+api.include_router(review.router)
+api.include_router(ask.router)
+api.include_router(vendors.router)
+api.include_router(attacks.router)
+api.include_router(reset.router)
 api.include_router(dev.router)
+api.include_router(integrations.router)
 
 app.include_router(api)

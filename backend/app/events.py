@@ -90,6 +90,7 @@ class PaymentPaid(EventBase):
     run_id: str
     payment_id: str
     nessie_transfer_id: str
+    transfer_mode: Optional[Literal["nessie", "mock_fallback", "mock"]] = None  # "mock_fallback": Nessie failed, the id is a mock
 
 
 class PaymentHeld(EventBase):
@@ -125,6 +126,36 @@ class PaymentBlocked(EventBase):
     type: Literal["payment.blocked"] = "payment.blocked"
     run_id: str
     payment_id: str
+    reason: str
+
+
+class AttackQueued(EventBase):
+    """An attack arrived while something else was running; it will be processed in order. Sent to the run channel of the
+    attack's own run_id (the console subscribes there) and to the leaderboard channel."""
+
+    type: Literal["attack.queued"] = "attack.queued"
+    run_id: str
+    attack_id: str
+    position: int  # 1 = next
+    waiting_for: Optional[str] = None  # the run it is waiting behind, if any
+
+
+class DemoReset(EventBase):
+    """The demo was reset to the seeded state. Leaderboard channel only: clients should reload everything."""
+
+    type: Literal["demo.reset"] = "demo.reset"
+    run_id: Optional[str] = None
+    kept_leaderboard: bool
+
+
+class PaymentReviewed(EventBase):
+    """A person decided a held payment. Followed by payment.paid (approved) or payment.blocked (rejected)."""
+
+    type: Literal["payment.reviewed"] = "payment.reviewed"
+    run_id: str
+    payment_id: str
+    decision: Literal["approved", "rejected"]
+    approver: str
     reason: str
 
 
@@ -176,6 +207,9 @@ EVENT_MODELS: dict[str, type[EventBase]] = {
         CallTranscript,
         CallOutcomeEvent,
         PaymentBlocked,
+        PaymentReviewed,
+        AttackQueued,
+        DemoReset,
         RunCompleted,
         RunReport,
         AttackLogged,
@@ -238,8 +272,8 @@ class Broadcaster:
             log.exception("could not persist event %s", event.type)
         if event.run_id:
             self._publish(event.run_id, msg)
-        if isinstance(event, AttackLogged):
-            self._publish(LEADERBOARD, msg)
+        if isinstance(event, (AttackLogged, AttackQueued, DemoReset)) and getattr(event, "source", None) != AttackSource.seeded:
+            self._publish(LEADERBOARD, msg)  # (a seeded attack's events stay on its run channel)
         return msg
 
 

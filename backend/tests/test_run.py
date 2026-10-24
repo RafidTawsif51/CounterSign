@@ -118,6 +118,7 @@ def test_the_three_attacks_and_why(env):
         atks = s.exec(select(Attack)).all()
         assert len(atks) == 3 and all(a.result.value == "caught" for a in atks)
         assert {a.card for a in atks} == {"classic_bank_change", "poisoned_invoice", "ceo_pressure"}
+        assert {a.source.value for a in atks} == {"seeded"}  # stored for the record, but never on the leaderboard
         assert s.get(Message, "msg_atk_poisoned_pdf").is_attack
 
 
@@ -219,7 +220,7 @@ def test_verification_confirmed_releases_to_the_new_verified_account(env):
 def test_other_rules_keep_a_confirmed_payment_held(env, monkeypatch):
     client, eng = env
     verify.MOCK_OUTCOMES[BANK] = CallOutcome.confirmed
-    real = risk.MockRiskAssessor.assess
+    real = risk.RealRiskAssessor.assess
 
     def with_extra_rule(self, payment, ctx):
         a = real(self, payment, ctx)
@@ -227,7 +228,7 @@ def test_other_rules_keep_a_confirmed_payment_held(env, monkeypatch):
             a.hard_rules_fired = a.hard_rules_fired + ["amount_over_max"]
         return a
 
-    monkeypatch.setattr(risk.MockRiskAssessor, "assess", with_extra_rule)
+    monkeypatch.setattr(risk.RealRiskAssessor, "assess", with_extra_rule)
     go(client)
     assert pay_status(eng, BANK) == PaymentStatus.held  # the call settled the account, not the amount
 
@@ -265,7 +266,7 @@ def test_a_number_not_on_the_allow_list_stays_held_and_is_logged(env, monkeypatc
 def test_backstop_refuses_a_destination_that_is_not_the_last_verified_account(env, monkeypatch):
     client, eng = env
     # A broken assessor AND a broken decision rule both say "pay". The backstop must still stop the money.
-    class Liar(risk.MockRiskAssessor):
+    class Liar(risk.RealRiskAssessor):
         def assess(self, payment, ctx):
             a = super().assess(payment, ctx)
             return a.model_copy(update={"score": 0, "decision": Decision.auto_pay, "hard_rules_fired": [], "reasons": []})
@@ -273,20 +274,20 @@ def test_backstop_refuses_a_destination_that_is_not_the_last_verified_account(en
     monkeypatch.setattr(risk, "get_assessor", lambda: Liar())
     monkeypatch.setattr(run, "effective_decision", lambda a, changed: Decision.auto_pay)
     sent = []
-    real = payments.send_transfer
+    real = payments.create_transfer
 
-    async def spy(p):
-        sent.append(p.id)
-        return await real(p)
+    async def spy(dest, amount, description):
+        sent.append(description.rsplit(" ", 1)[-1])  # "Countersign payment pay_xxx"
+        return await real(dest, amount, description)
 
-    monkeypatch.setattr(payments, "send_transfer", spy)
+    monkeypatch.setattr(payments, "create_transfer", spy)
     body, g = go(client)
     assert BANK not in sent and CEO not in sent
     assert pay_status(eng, BANK) == pay_status(eng, CEO) == PaymentStatus.held
     assert g["totals"]["paid"] == 37 - 0 and len(sent) == 37
     with Session(eng) as s:
         refused = s.exec(select(AuditLog).where(AuditLog.entity_id == BANK, AuditLog.action == "held")).one()
-        assert refused.detail_json["reason"].startswith("backstop_refused")
+        assert refused.detail_json["reason"].startswith("backstop_refused") and "only requested" in refused.detail_json["reason"]
 
 
 def test_check_destination_reads_the_database_fresh(env):
@@ -303,7 +304,7 @@ def test_check_destination_reads_the_database_fresh(env):
         s.add(VendorBankAccount(id="bac_swapped", vendor_id=vendor_id, routing_hash="x" * 64, account_last4="0000", bank_name="B", valid_from=ev_mod.utcnow()))
         s.commit()
     ok, why = run.check_destination(pid)
-    assert ok is False and "not the last verified" in why
+    assert ok is False and "closed" in why
 
 
 def test_a_failed_transaction_leaves_no_partial_records(env, monkeypatch):
@@ -367,6 +368,11 @@ def test_contacts_differ():
     assert run.contacts_differ("call me on +1 415 555 0177", known) is True
     assert run.contacts_differ("our line is (415) 555-0100", known) is False
     assert run.contacts_differ("no phone here", known) is False
+    # bank numbers are not phone numbers
+    assert run.contacts_differ("Bank: X\nRouting number: 996031174\nAccount number: 4410886213", known) is False
+    assert run.contacts_differ("account 000123456789 routing 021000021", known) is False
+    assert run.contacts_differ("call 415-555-0177 or 415.555.0177", known) is True
+    assert run.contacts_differ("call +14155550100 or (415) 555-0100", known) is False
 
 
 # ---------------------------------------------------------------- scripted vs live outcomes

@@ -59,3 +59,18 @@ def get_finder() -> ContactFinder:
 
 async def lookup_phone(vendor: Vendor) -> Optional[IndependentContact]:
     return await get_finder().lookup_phone(vendor)
+
+
+async def find_independent_number(vendor_id: str) -> dict:
+    """{phone, source, source_url} for a vendor id, or {} if nothing is found. Read-only."""
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    with Session(engine) as s:
+        vendor = s.get(Vendor, vendor_id)
+        if vendor is None:
+            raise ValueError("vendor not found")
+        s.expunge(vendor)
+    found = await lookup_phone(vendor)
+    return {"phone": found.phone, "source": found.source, "source_url": found.source_url} if found else {}

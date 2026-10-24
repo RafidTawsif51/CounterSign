@@ -69,6 +69,7 @@ class AttackSource(str, enum.Enum):
     console = "console"
     judge = "judge"
     bounty_email = "bounty_email"
+    seeded = "seeded"  # the planted attacks in the seed; never shown on the leaderboard or counted in its totals
 
 
 class AttackResult(str, enum.Enum):
@@ -214,6 +215,9 @@ class Payment(SQLModel, table=True):
         default=PaymentStatus.pending, sa_column=enum_col(PaymentStatus)
     )
     nessie_transfer_id: Optional[str] = None
+    # How the transfer was made: "nessie" (a real sandbox transfer), "mock_fallback" (Nessie failed, a mock id was used and the
+    # failure audited), "mock" (MOCK_NESSIE on, or seeded history). Not part of the spec's table.
+    transfer_mode: Optional[str] = None
 
 
 class RiskAssessment(SQLModel, table=True):
@@ -271,6 +275,9 @@ class Attack(SQLModel, table=True):
     moderation_status: ModerationStatus = Field(
         default=ModerationStatus.pending, sa_column=enum_col(ModerationStatus)
     )
+    # What the leaderboard shows, kept on the row so it survives a demo reset that keeps the leaderboard:
+    # subject, from_addr, body, has_pdf, amount_usd, outcome, reasons, paid_usd. Not part of the spec's table.
+    detail_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
 
 class AuditLog(SQLModel, table=True):

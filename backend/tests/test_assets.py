@@ -80,10 +80,10 @@ def seedmod_sample(s, vendor_id):
 def test_layout_changed_signal_uses_the_fingerprint(world):
     s, _ = world
     payment, ctx = build_context(s, s.get(Invoice, "inv_atk_bank_change"))
-    assert ctx.layout_changed is True
-    assert any(sig.name == "invoice_format_changed" for sig in risk.assess(payment, ctx).signals)
+    sig = next(sig for sig in risk.assess(payment, ctx).signals if sig.name == "invoice_format_changed")
+    assert sig.weight == 10 and "Layout differs from all" in sig.detail
     payment, ctx = build_context(s, s.get(Invoice, "inv_atk_poisoned_pdf"))
-    assert ctx.layout_changed is False
+    assert not any(sig.name == "invoice_format_changed" for sig in risk.assess(payment, ctx).signals)
     assert layout.layout_changed(b"x", set()) is False  # no past layouts, nothing to compare
 
 
@@ -190,7 +190,8 @@ def test_planted_poisoned_invoice_hides_white_text():
 
 @pytest.mark.parametrize(
     "name, technique",
-    [("poisoned_html_comment.html", "html_comment"), ("poisoned_display_none.html", "hidden_element"), ("poisoned_same_color.html", "same_color_text")],
+    [("poisoned_html_comment.html", "html_comment"), ("poisoned_display_none.html", "hidden_element"), ("poisoned_same_color.html", "same_color_text"),
+     ("poisoned_css_class.html", "hidden_element")],
 )
 def test_poisoned_html_email_is_caught(name, technique):
     html = (EMAIL_DIR / name).read_text()

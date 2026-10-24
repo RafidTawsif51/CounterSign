@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.models import Invoice, Message, Payment, PaymentStatus, Vendor, VendorBankAccount, VendorContact
-from app.services import injection, layout
+from app.services import injection, layout, verify
 from app.services.run import contacts_differ
 from app.services.injection import ScanItem
 from app.services.risk import Destination, RiskContext
@@ -18,9 +18,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
     msg = session.get(Message, invoice.message_id) if invoice.message_id else None
     rem = invoice.remittance_json
     requested = Destination(rem["routing_hash"], rem["account_last4"]) if rem else None
-    current = session.exec(
-        select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor.id, VendorBankAccount.valid_to.is_(None))
-    ).first()
+    current = verify.open_verified_account(session, vendor.id)
     last = Destination(current.routing_hash, current.account_last4) if current else None
 
     paid = session.exec(
@@ -35,8 +33,12 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         select(Invoice.pdf_path).join(Payment, Payment.invoice_id == Invoice.id)
         .where(Invoice.vendor_id == vendor.id, Invoice.pdf_path.is_not(None), Payment.status == PaymentStatus.paid)
     ).all()
-    past_fps = {layout.fingerprint((BACKEND / pth).read_bytes()) for pth in past}
-    layout_changed = bool(invoice.pdf_path) and layout.layout_changed((BACKEND / invoice.pdf_path).read_bytes(), past_fps)
+    past_features = []
+    for pth in past:
+        f = layout.features((BACKEND / pth).read_bytes())
+        if f not in past_features:
+            past_features.append(f)
+    features = layout.features((BACKEND / invoice.pdf_path).read_bytes()) if (invoice.pdf_path and past_features) else None
 
     phones = [c.phone for c in session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id))]
 
@@ -55,7 +57,8 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         prior_payment_count=len(paid),
         known_sender_addresses={p[1] for p in paid},
         usual_send_hours={p[2].hour for p in paid},
-        layout_changed=layout_changed,
+        layout_features=features,
+        past_layout_features=past_features,
         requested_contacts_differ=contacts_differ(msg.body if msg else "", phones),
         injection_findings=findings,
         now=msg.received_at if msg else None or vendor.created_at,
@@ -67,7 +70,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
 def use_engine(monkeypatch, eng) -> None:
     """Point the app, the event log, the audit log, verify and the run at one database (a test copy)."""
     from app import audit, db, events
-    from app.services import run, verify
+    from app.services import attacks, reset, review, run, vendors, verify
 
-    for module in (db, events, audit, verify, run):
+    for module in (db, events, audit, verify, run, review, attacks, reset):
         monkeypatch.setattr(module, "engine", eng)

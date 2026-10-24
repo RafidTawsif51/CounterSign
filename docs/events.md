@@ -98,9 +98,10 @@ At least one of invoice_id and message_id is set.
 |---|---|
 | payment_id | str |
 | nessie_transfer_id | str |
+| transfer_mode | "nessie" \| "mock_fallback" \| "mock", null | how the transfer was made. "mock_fallback" means Nessie failed and the id is a mock_tr_ id (the failure is audited). "mock" means MOCK_NESSIE is on |
 
 ```json
-{"type": "payment.paid", "run_id": "run_042", "payment_id": "pay_mock_001", "nessie_transfer_id": "nes_mock_0001"}
+{"type": "payment.paid", "run_id": "run_042", "payment_id": "pay_mock_001", "nessie_transfer_id": "nes_mock_0001", "transfer_mode": "mock"}
 ```
 
 ### payment.held
@@ -161,6 +162,21 @@ One event per spoken line.
 {"type": "payment.blocked", "run_id": "run_042", "payment_id": "pay_mock_012", "reason": "Vendor denied the bank change on the verification call"}
 ```
 
+### payment.reviewed
+
+Not in the spec. A controller decided a held payment (`POST /api/payments/{id}/approve` or `/reject`). It is followed by `payment.paid` (approved) or `payment.blocked` (rejected).
+
+| Field | Type |
+|---|---|
+| payment_id | str |
+| decision | approved or rejected |
+| approver | str |
+| reason | str |
+
+```json
+{"type": "payment.reviewed", "run_id": "run_042", "payment_id": "pay_atk_ceo_pressure", "decision": "rejected", "approver": "Dev", "reason": "The CEO never asked for this."}
+```
+
 ### run.completed
 
 | Field | Type |
@@ -191,6 +207,34 @@ Not in the spec; this shape is ours. Sent right after `run.completed`.
  "paid": 37, "held": 1, "blocked": 2, "paid_usd": 239559.28, "blocked_usd": 28250.0,
  "findings": ["Summit Concrete: bank-change email from a lookalike domain, denied on the verification call."]}
 ```
+
+### demo.reset
+
+Not in the spec. `POST /api/demo/reset` rebuilt the seeded state. Leaderboard channel only (no run). Screens should reload everything.
+
+| Field | Type |
+|---|---|
+| kept_leaderboard | bool |
+
+```json
+{"type": "demo.reset", "run_id": null, "kept_leaderboard": false}
+```
+
+### attack.queued
+
+Not in the spec. An attack or bounty email arrived while a full run (or an earlier attack) was running, so it waits its turn. Sent to the attack's own run channel and to the leaderboard channel, right after the first `attack.logged` (result null). Processing starts with that run's `run.started`.
+
+| Field | Type |
+|---|---|
+| attack_id | str |
+| position | int, 1 = next to run |
+| waiting_for | run_id it is waiting behind, or null |
+
+```json
+{"type": "attack.queued", "run_id": "run_8f2c", "attack_id": "atk_17", "position": 1, "waiting_for": "run_042"}
+```
+
+An attack that is not queued goes `attack.logged` (result null), `run.started`, ..., `run.completed`, with a second `attack.logged` carrying the result when it finishes.
 
 ### attack.logged
 

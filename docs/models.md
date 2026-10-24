@@ -118,6 +118,7 @@ Only verify.py writes (seed excepted).
 | destination_account_id | str FK vendor_bank_accounts.id, null | |
 | status | PaymentStatus | default pending. Drives the board |
 | nessie_transfer_id | str, null | |
+| transfer_mode | str, null | "nessie" (real sandbox transfer), "mock_fallback" (Nessie failed, mock id used, audited as payment `nessie_failed` and integration `transfer_failed`), "mock" (MOCK_NESSIE on, or seeded history). Not in the spec table |
 
 ### risk_assessments (`ras_`)
 
@@ -170,12 +171,13 @@ Signal object inside `signals_json` (Pydantic `Signal` in models.py):
 |---|---|---|
 | id | str PK | |
 | attacker_name | str | |
-| source | AttackSource | console, judge, bounty_email |
+| source | AttackSource | console, judge, bounty_email, and `seeded` (not in the spec): the seed's 3 planted attacks, stored when a run logs them, never listed or counted on the leaderboard |
 | card | str | e.g. classic_bank_change, ai_hijack, ceo_pressure, freestyle |
 | payload_ref | str, null | usually a messages.id or invoices.id |
 | result | AttackResult, null | null until scored |
 | created_at | datetime | |
-| moderation_status | ModerationStatus | default pending. Only approved rows show on the leaderboard screen |
+| moderation_status | ModerationStatus | default pending. The leaderboard shows the row for pending and approved, but the attack text only when approved; hidden rows are left out |
+| detail_json | JSON, null | not in the spec. What the leaderboard shows, kept on the row so it survives a reset that keeps the leaderboard: subject, from_addr, body, has_pdf, amount_usd, outcome, reasons, paid_usd. A database created before this column existed must be recreated (delete `countersign.db` and re-seed) |
 
 ### audit_log (`aud_`)
 
