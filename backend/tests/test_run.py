@@ -219,7 +219,7 @@ def test_verification_confirmed_releases_to_the_new_verified_account(env):
 def test_other_rules_keep_a_confirmed_payment_held(env, monkeypatch):
     client, eng = env
     verify.MOCK_OUTCOMES[BANK] = CallOutcome.confirmed
-    real = risk.MockRiskAssessor.assess
+    real = risk.RealRiskAssessor.assess
 
     def with_extra_rule(self, payment, ctx):
         a = real(self, payment, ctx)
@@ -227,7 +227,7 @@ def test_other_rules_keep_a_confirmed_payment_held(env, monkeypatch):
             a.hard_rules_fired = a.hard_rules_fired + ["amount_over_max"]
         return a
 
-    monkeypatch.setattr(risk.MockRiskAssessor, "assess", with_extra_rule)
+    monkeypatch.setattr(risk.RealRiskAssessor, "assess", with_extra_rule)
     go(client)
     assert pay_status(eng, BANK) == PaymentStatus.held  # the call settled the account, not the amount
 
@@ -265,7 +265,7 @@ def test_a_number_not_on_the_allow_list_stays_held_and_is_logged(env, monkeypatc
 def test_backstop_refuses_a_destination_that_is_not_the_last_verified_account(env, monkeypatch):
     client, eng = env
     # A broken assessor AND a broken decision rule both say "pay". The backstop must still stop the money.
-    class Liar(risk.MockRiskAssessor):
+    class Liar(risk.RealRiskAssessor):
         def assess(self, payment, ctx):
             a = super().assess(payment, ctx)
             return a.model_copy(update={"score": 0, "decision": Decision.auto_pay, "hard_rules_fired": [], "reasons": []})

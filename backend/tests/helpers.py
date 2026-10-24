@@ -35,8 +35,12 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         select(Invoice.pdf_path).join(Payment, Payment.invoice_id == Invoice.id)
         .where(Invoice.vendor_id == vendor.id, Invoice.pdf_path.is_not(None), Payment.status == PaymentStatus.paid)
     ).all()
-    past_fps = {layout.fingerprint((BACKEND / pth).read_bytes()) for pth in past}
-    layout_changed = bool(invoice.pdf_path) and layout.layout_changed((BACKEND / invoice.pdf_path).read_bytes(), past_fps)
+    past_features = []
+    for pth in past:
+        f = layout.features((BACKEND / pth).read_bytes())
+        if f not in past_features:
+            past_features.append(f)
+    features = layout.features((BACKEND / invoice.pdf_path).read_bytes()) if (invoice.pdf_path and past_features) else None
 
     phones = [c.phone for c in session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id))]
 
@@ -55,7 +59,8 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         prior_payment_count=len(paid),
         known_sender_addresses={p[1] for p in paid},
         usual_send_hours={p[2].hour for p in paid},
-        layout_changed=layout_changed,
+        layout_features=features,
+        past_layout_features=past_features,
         requested_contacts_differ=contacts_differ(msg.body if msg else "", phones),
         injection_findings=findings,
         now=msg.received_at if msg else None or vendor.created_at,

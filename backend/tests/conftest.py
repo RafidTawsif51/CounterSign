@@ -7,11 +7,13 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
 os.environ["EXTRACT_CACHE_DIR"] = os.path.join(_tmp, "extract_cache")
 os.environ["INJECTION_CACHE_DIR"] = os.path.join(_tmp, "injection_cache")
+os.environ["RISK_CACHE_DIR"] = os.path.join(_tmp, "risk_cache")
 os.environ["FRONTEND_URL"] = "https://countersign.example"
 # Tests never use the live .env: environment variables beat the .env file, so these pin every mock on and the key off.
-for _flag in ("NESSIE", "CRS", "APIFY", "TWILIO", "CARTESIA", "CLAUDE", "RISK"):
+for _flag in ("NESSIE", "CRS", "APIFY", "TWILIO", "CARTESIA", "CLAUDE"):
     os.environ[f"MOCK_{_flag}"] = "true"
 os.environ["MOCK_INJECTION"] = "false"
+os.environ["MOCK_RISK"] = "false"  # the real assessor; its Claude classifier stays off because MOCK_CLAUDE is true
 os.environ["ANTHROPIC_API_KEY"] = ""
 
 

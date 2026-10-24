@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     mock_cartesia: bool = True
     mock_claude: bool = True  # extraction only
     mock_injection: bool = False  # the real scanner needs no external service: layer 1 is local, the Claude classifier follows mock_claude
-    mock_risk: bool = True
+    mock_risk: bool = False  # the real assessor needs no external service; its Claude classifier follows mock_claude
 
     anthropic_api_key: str = ""
     claude_model_main: str = "claude-sonnet-5-5"
@@ -53,6 +53,9 @@ class Settings(BaseSettings):
 
     # Injection classifier verdicts keyed by content hash.
     injection_cache_dir: str = "./.cache/injection"
+
+    # Urgency / secrecy / authority classifier verdicts keyed by content hash.
+    risk_cache_dir: str = "./.cache/risk"
 
     frontend_url: str = ""
 

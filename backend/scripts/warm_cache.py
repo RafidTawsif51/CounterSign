@@ -4,7 +4,7 @@
 
 For every PDF in DIR: extract it (fills the extraction cache) and, when the real scanner is on, scan it
 (fills the injection classifier cache). Then, if the database is seeded, scan the emails of this week's open
-invoices. Five documents are processed at a time.
+invoices (injection classifier and, with the real risk assessor, the urgency classifier). Five documents are processed at a time.
 
 Needs MOCK_CLAUDE=false and a real key to fill the caches; with mocks on it only previews the mock output and
 writes nothing. Live runs spend API credits, once per new document.
@@ -23,6 +23,7 @@ from app.config import get_settings  # noqa: E402
 from app.services import injection  # noqa: E402
 from app.services.extract import ExtractionFailed, extract_pdf  # noqa: E402
 from app.services.injection import ScanItem  # noqa: E402
+from app.services.risk import RealRiskAssessor, pressure_classifier  # noqa: E402
 
 WORKERS = 5
 
@@ -45,8 +46,9 @@ def _open_invoice_messages():
 
     try:
         with Session(engine) as s:
-            rows = s.exec(select(Message.id, Message.body).join(Invoice, Invoice.message_id == Message.id).where(~Invoice.id.in_(select(Payment.invoice_id)))).all()
-            return [(i, b) for i, b in rows]
+            msgs = s.exec(select(Message).join(Invoice, Invoice.message_id == Message.id).where(~Invoice.id.in_(select(Payment.invoice_id)))).all()
+            s.expunge_all()
+            return msgs
     except Exception:
         return []
 
@@ -85,10 +87,18 @@ def main(argv: list[str]) -> int:
     if scan:
         msgs = _open_invoice_messages()
         if msgs:
+            assessor = RealRiskAssessor()
+
+            def warm(m):
+                injection.scan(ScanItem(kind="email", text=m.body, message_id=m.id))  # injection classifier
+                if not settings.mock_risk:
+                    assessor.pressure_detail(m)  # urgency classifier
+
             with ThreadPoolExecutor(WORKERS) as pool:
-                list(pool.map(lambda m: injection.scan(ScanItem(kind="email", text=m[1], message_id=m[0])), msgs))
+                list(pool.map(warm, msgs))
             print(f"Emails: classified {len(msgs)} messages behind the open invoices")
-        print(f"Classifier: {injection.classifier.calls} live calls, {injection.classifier.errors} errors")
+        print(f"Injection classifier: {injection.classifier.calls} live calls, {injection.classifier.errors} errors")
+        print(f"Urgency classifier: {pressure_classifier.calls} live calls, {pressure_classifier.errors} errors")
     print(f"Done in {time.perf_counter() - started:.1f}s")
     return 0 if failed == 0 else 2
 

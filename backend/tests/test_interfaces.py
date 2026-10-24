@@ -246,10 +246,11 @@ def test_assessment_to_row_roundtrip():
     assert row.decision == Decision.hold_and_verify
 
 
-def test_risk_real_flag_not_built(monkeypatch):
+def test_risk_flag_selects_the_assessor(monkeypatch):
     monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_risk=False))
-    with pytest.raises(NotImplementedError):
-        risk.assess(pay(), ctx())
+    assert isinstance(risk.get_assessor(), risk.RealRiskAssessor)
+    monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_risk=True))
+    assert isinstance(risk.get_assessor(), risk.MockRiskAssessor)
 
 
 # ================================================================ identity

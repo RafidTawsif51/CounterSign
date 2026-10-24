@@ -90,9 +90,9 @@ def _resolve(path: str) -> Path:
 
 
 @lru_cache(maxsize=512)
-def _fingerprint(path: str, mtime: float) -> Optional[str]:
+def _features(path: str, mtime: float) -> Optional[tuple]:
     try:
-        return layout.fingerprint(_resolve(path).read_bytes())
+        return tuple(sorted(layout.features(_resolve(path).read_bytes()).items()))  # tuple: hashable for the cache
     except Exception:
         return None
 
@@ -145,7 +145,7 @@ class Loaded:
     known_senders: set[str]
     usual_hours: set[int]
     prior_paid: int
-    past_layouts: set[str]
+    past_layouts: list[dict]  # layout features of the vendor's past invoices (distinct)
 
 
 def _load(invoice_id: str, run_id: str) -> Loaded:
@@ -155,7 +155,7 @@ def _load(invoice_id: str, run_id: str) -> Loaded:
         msg = s.get(Message, inv.message_id) if inv.message_id else None
         pdf = _resolve(inv.pdf_path).read_bytes() if inv.pdf_path and _resolve(inv.pdf_path).exists() else None
         current = phones = None
-        hist, senders, hours, past, prior = [], set(), set(), set(), 0
+        hist, senders, hours, past, prior = [], set(), set(), [], 0
         if vendor:
             current = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor.id, VendorBankAccount.valid_to.is_(None))).first()
             phones = [c.phone for c in s.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id))]
@@ -176,9 +176,9 @@ def _load(invoice_id: str, run_id: str) -> Loaded:
                 if path:
                     pp = _resolve(path)
                     if pp.exists():
-                        fp = _fingerprint(path, pp.stat().st_mtime)
-                        if fp:
-                            past.add(fp)
+                        feats = _features(path, pp.stat().st_mtime)
+                        if feats and dict(feats) not in past:
+                            past.append(dict(feats))
         s.expunge_all()
         return Loaded(inv, vendor, msg, pdf, current, phones or [], hist, senders, hours, prior, past)
 
@@ -446,17 +446,15 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
 
     # 5. risk
     with timer(stats, "risk", marks):
-        layout_changed = False
-        if ld.pdf is not None and ld.past_layouts:
-            layout_changed = await asyncio.to_thread(layout.layout_changed, ld.pdf, ld.past_layouts)
+        features = await asyncio.to_thread(layout.features, ld.pdf) if (ld.pdf is not None and ld.past_layouts) else None
         ctx = RiskContext(
             vendor=vendor, requested_destination=requested, last_verified_destination=last, message=msg, history_amounts=ld.history_amounts,
             prior_payment_count=ld.prior_paid, known_sender_addresses=ld.known_senders, usual_send_hours=ld.usual_hours or None,
-            layout_changed=layout_changed, requested_contacts_differ=contacts_differ(msg.body if msg else "", ld.contact_phones),
+            layout_features=features, past_layout_features=ld.past_layouts, requested_contacts_differ=contacts_differ(msg.body if msg else "", ld.contact_phones),
             injection_findings=findings, identity=ident,
         )
         payment = Payment(id=pid, run_id=run_id, invoice_id=inv.id, amount_usd=amount, destination_account_id=dest_id, status=PaymentStatus.pending)
-        a = risk.assess(payment, ctx)
+        a = await asyncio.to_thread(risk.assess, payment, ctx)  # may call Claude: keep it off the event loop
     decision = effective_decision(a, destination_changed)
 
     # 6a. quarantined: block
