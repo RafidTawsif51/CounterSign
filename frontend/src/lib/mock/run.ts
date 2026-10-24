@@ -7,6 +7,8 @@
 // Timing is a deterministic jittered schedule per run id, scaled to about 25 seconds.
 
 import { ApiError } from "@/lib/api-error";
+import { identityFor } from "@/lib/mock/inbox";
+import { hardRuleInfo } from "@/lib/risk-catalog";
 import { createRng, hashSeed, type Rng } from "@/lib/mock/prng";
 import {
   ATTACKER_ACCOUNTS,
@@ -30,7 +32,7 @@ import type {
   InjectionTechnique,
   Payment,
   PaymentDetail,
-  PaymentRun,
+  RunStatusResponse,
   PaymentStatus,
   RiskAssessment,
   RunEvent,
@@ -609,31 +611,104 @@ function vendorKey(rec: PaymentRecord) {
 }
 
 /** GET /api/payments/{id}: the newest run that has this payment. */
+/** GET /api/payments/{id} in review.py's shape: the newest run that has this payment. */
 export function getMockPaymentDetail(pid: string): PaymentDetail | null {
-  const rec = [...runs.values()].reverse().map((r) => r.records.get(pid)).find(Boolean);
-  if (!rec) return null;
-  const { planted: _planted, ...invoice } = openInvoices.find((i) => i.id === rec.payment.invoice_id)!;
+  const run = [...runs.values()].reverse().find((r) => r.records.has(pid));
+  const rec = run?.records.get(pid);
+  if (!run || !rec) return null;
+  const inv = openInvoices.find((i) => i.id === rec.payment.invoice_id)!;
+  const vendor = vendorById.get(inv.vendor_id)!;
+  const current = accountByVendor.get(inv.vendor_id) ?? null;
+  const verified = current && { ...accountView(current), trusted: true };
+  const remit = (inv.remittance_json ?? null) as Partial<{ bank_name: string; routing_hash: string; account_last4: string }> | null;
+  const differs = Boolean(remit?.account_last4 && current && remit.account_last4 !== current.account_last4);
+  // run.py records an account an invoice asks for as an unverified candidate, and the payment points at it until decided.
+  const requested = differs
+    ? { id: `bac_${inv.vendor_id.slice(4)}_requested`, bank_name: remit!.bank_name ?? "", account_last4: remit!.account_last4!, valid_from: run.startedAt, valid_to: null, verified_by_call_id: null, trusted: false }
+    : null;
+  const msg = messages.find((m) => m.id === inv.message_id);
+  const risk = rec.risk;
+  const held = rec.payment.status === "held";
+  const quarantined = rec.findings.length > 0;
+  const identity = identityFor(inv.vendor_id);
   return {
-    payment: rec.payment,
-    invoice,
-    vendor: vendorById.get(invoice.vendor_id)!,
-    message: messages.find((m) => m.id === invoice.message_id) ?? null,
-    last_verified_account: accountByVendor.get(invoice.vendor_id) ?? null,
-    risk: rec.risk,
-    findings: rec.findings,
-    calls: rec.calls.map((c) => ({ ...c, contact: contacts.find((x) => x.id === c.contact_id) ?? null })),
-    audit: [...rec.audit],
+    payment: {
+      id: rec.payment.id,
+      run_id: run.id,
+      status: rec.payment.status,
+      amount_usd: rec.payment.amount_usd,
+      nessie_transfer_id: rec.payment.nessie_transfer_id,
+      transfer_mode: rec.payment.nessie_transfer_id ? "mock" : null,
+      destination: rec.payment.status === "paid" ? verified : (requested ?? verified),
+      last_verified_account: verified,
+      approve_pays: verified,
+    },
+    invoice: {
+      id: inv.id,
+      number: inv.number,
+      amount_usd: inv.amount_usd,
+      due_date: inv.due_date,
+      has_pdf: Boolean(inv.pdf_path),
+      requested_remittance: remit,
+      requested_account_differs_from_verified: differs,
+      quarantined,
+      extraction_status: null,
+    },
+    vendor: { ...vendor, identity },
+    message: msg
+      ? { id: msg.id, thread_id: msg.thread_id, from_addr: msg.from_addr, reply_to: msg.reply_to, subject: msg.subject, body: msg.body, received_at: msg.received_at, is_attack: msg.is_attack }
+      : null,
+    risk: risk && {
+      id: risk.id,
+      score: risk.score,
+      decision: risk.decision,
+      hard_rules_fired: risk.hard_rules_fired,
+      hard_rule_actions: Object.fromEntries(risk.hard_rules_fired.map((r) => [r, hardRuleInfo(r).action])),
+      signals: risk.signals_json,
+      model_version: risk.model_version,
+      reasons: [
+        ...risk.hard_rules_fired.map((r) => `${r}: ${hardRuleInfo(r).action}`),
+        ...risk.signals_json.filter((x) => x.weight > 0).slice(0, 4).map((x) => `${x.name}: ${x.detail}`),
+      ],
+    },
+    injection_findings: rec.findings,
+    identity,
+    calls: rec.calls.map((c) => {
+      const contact = contacts.find((x) => x.id === c.contact_id);
+      return {
+        id: c.id,
+        payment_id: c.payment_id,
+        started_at: c.started_at,
+        outcome: c.outcome,
+        transcript: c.transcript ?? [],
+        recording_url: c.recording_url,
+        contact: contact ? { id: contact.id, source: contact.source, source_url: contact.source_url, phone: maskPhone(contact.phone) } : null,
+      };
+    }),
+    audit: rec.audit.map(({ detail_json, ...a }) => ({ ...a, detail: detail_json })),
+    actions: {
+      can_approve: held && !quarantined && Boolean(current),
+      approve_blocked_reason: !held ? `payment is ${rec.payment.status}` : quarantined ? "quarantined document: reject it" : current ? null : "the vendor has no verified bank account to pay",
+      can_reject: held,
+    },
   };
 }
 
+function accountView(a: { id: string; bank_name: string; account_last4: string; valid_from: string; valid_to: string | null; verified_by_call_id: string | null }) {
+  return { id: a.id, bank_name: a.bank_name, account_last4: a.account_last4, valid_from: a.valid_from, valid_to: a.valid_to, verified_by_call_id: a.verified_by_call_id };
+}
+
+const maskPhone = (phone: string) => (phone.length > 6 ? `${phone.slice(0, 2)}***${phone.slice(-4)}` : "***");
+
 /** POST /api/payments/{id}/approve or /reject by the controller. Only a held payment can be decided. */
-export function decideMockPayment(pid: string, decision: "approve" | "reject", reason: string) {
+export function decideMockPayment(pid: string, decision: "approve" | "reject", reason: string, approver: string) {
   const run = [...runs.values()].reverse().find((r) => r.records.has(pid));
   const rec = run?.records.get(pid);
   const path = `/api/payments/${pid}/${decision}`;
-  if (!run || !rec) throw new ApiError(404, path, `POST ${path} failed (404): payment not found`);
-  if (rec.payment.status !== "held") throw new ApiError(409, path, `POST ${path} failed (409): payment is ${rec.payment.status}, not held`);
-  if (!reason.trim()) throw new ApiError(422, path, `POST ${path} failed (422): a reason is required`);
+  if (!run || !rec) throw new ApiError(404, path, `Payment not found`);
+  if (rec.payment.status !== "held") throw new ApiError(409, path, `Payment is ${rec.payment.status}, not held`);
+  if (reason.trim().length < 3) throw new ApiError(422, path, `A reason is required`);
+  if (!approver.trim()) throw new ApiError(422, path, `An approver is required`);
 
   rec.audit.push({
     id: `aud_${run.rng.hex(12)}`,
@@ -642,10 +717,16 @@ export function decideMockPayment(pid: string, decision: "approve" | "reject", r
     entity_id: pid,
     actor: "human",
     action: decision === "approve" ? "approved" : "rejected",
-    detail_json: { reason, by: "Dev (controller)" },
+    detail_json: { approver, reason },
   });
-  if (decision === "approve") emit(run, { type: "payment.paid", payment_id: pid, nessie_transfer_id: `nes_mock_c${run.rng.hex(3)}` });
-  else emit(run, { type: "payment.blocked", payment_id: pid, reason: `Rejected by the controller: ${reason}` });
+  emit(run, { type: "payment.reviewed", payment_id: pid, decision: decision === "approve" ? "approved" : "rejected", approver, reason });
+  if (decision === "approve") {
+    const transfer = `nes_mock_c${run.rng.hex(3)}`;
+    emit(run, { type: "payment.paid", payment_id: pid, nessie_transfer_id: transfer, transfer_mode: "mock" });
+    return { payment_id: pid, status: "paid" as const, nessie_transfer_id: transfer, transfer_mode: "mock" as const };
+  }
+  emit(run, { type: "payment.blocked", payment_id: pid, reason: `Rejected by ${approver}: ${reason}` });
+  return { payment_id: pid, status: "blocked" as const };
 }
 
 /** POST /api/demo/reset in mock mode: stop any run and forget every run, back to the seeded week. */
@@ -685,16 +766,24 @@ export function subscribeMockLeaderboard(onEvent: (e: AttackLoggedEvent) => void
   return () => leaderboardListeners.delete(onEvent);
 }
 
-export function getMockRun(runId: string): PaymentRun | null {
+/** GET /api/payment-runs/{id} in run.py's shape: totals counted from the payments so far. */
+export function getMockRun(runId: string): RunStatusResponse | null {
   const run = runs.get(runId);
   if (!run) return null;
-  const done = run.events.find((e) => e.type === "run.completed");
+  const done = run.events.some((e) => e.type === "run.completed");
+  const started = run.events.find((e) => e.type === "run.started");
+  const recs = [...run.records.values()];
+  const n = (st: PaymentStatus) => recs.filter((r) => r.payment.status === st).length;
+  const usd = (st: PaymentStatus) => round2(recs.filter((r) => r.payment.status === st).reduce((t, r) => t + r.payment.amount_usd, 0));
   return {
     id: run.id,
+    status: done ? "completed" : "running",
     started_at: run.startedAt,
     completed_at: run.completedAt,
-    status: done ? "completed" : "running",
-    totals_json: done && done.type === "run.completed" ? { paid: done.paid, held: done.held, blocked: done.blocked, total_usd: done.total_usd } : null,
+    invoice_count: started?.type === "run.started" ? started.invoice_count : null,
+    totals: { paid: n("paid"), held: n("held"), blocked: n("blocked"), pending: n("pending"), total_usd: usd("paid"), blocked_usd: usd("blocked") },
+    wall_seconds: null,
+    timings_ms: null,
   };
 }
 

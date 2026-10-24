@@ -10,6 +10,7 @@ import { PinnedAttack } from "@/components/board/pinned-attack";
 import { RunHeader } from "@/components/board/run-header";
 import { iconProps } from "@/components/shared/icon";
 import { useCurrentRun } from "@/components/shared/run-context";
+import { errorMessage } from "@/lib/api-error";
 import { foldBoard, type BoardRow } from "@/lib/board";
 import { foldCalls } from "@/lib/calls";
 
@@ -29,7 +30,7 @@ const FILTERS: { value: Filter; label: string; test: (r: BoardRow) => boolean; e
 ];
 
 export function Board() {
-  const { runId, events, status, summary, startRun, pinned, pinnedEvents, unpin } = useCurrentRun();
+  const { runId, events, summary, startRun, runFailed, pinned, pinnedEvents, unpin } = useCurrentRun();
   const [starting, setStarting] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const board = useMemo(() => foldBoard(events), [events]);
@@ -40,8 +41,8 @@ export function Board() {
     () => (attack.activity.length ? [...board.activity, ...attack.activity].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)) : board.activity),
     [board.activity, attack.activity],
   );
-  const running = Boolean(runId) && !summary.completed;
-  const loading = Boolean(runId) && board.rows.length === 0 && status !== "error";
+  const running = Boolean(runId) && !summary.completed && !runFailed;
+  const loading = Boolean(runId) && !runFailed && board.rows.length === 0;
 
   async function start() {
     setStarting(true);
@@ -49,7 +50,7 @@ export function Board() {
       await startRun();
       setFilter("all");
     } catch (err) {
-      toast.error("Payment run not started", { description: err instanceof Error ? err.message : "The server did not respond." });
+      toast.error("Payment run not started", { description: errorMessage(err) });
     } finally {
       setStarting(false);
     }

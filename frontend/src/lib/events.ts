@@ -8,27 +8,56 @@ import type { AttackLoggedEvent, RunEvent } from "@/lib/types";
 
 export type Unsubscribe = () => void;
 
-/** connecting: waiting for the stream. live: events flowing. complete: run.report received, stream closed. */
-export type StreamStatus = "idle" | "connecting" | "live" | "complete" | "error";
+/**
+ * connecting: first connection. live: events flowing. reconnecting: the stream dropped and is being reopened (backoff).
+ * complete: run.report received, stream closed.
+ */
+export type StreamStatus = "idle" | "connecting" | "live" | "reconnecting" | "complete";
 
 interface Transport {
   open(path: string, onEvent: (e: RunEvent) => void, onStatus: (s: StreamStatus) => void): Unsubscribe;
 }
 
+/** Backoff between reconnects: 1 s, 2 s, 4 s, 8 s, then every 10 s until the server is back. */
+export const RECONNECT_MAX_MS = 10_000;
+const backoff = (attempt: number) => Math.min(RECONNECT_MAX_MS, 1000 * 2 ** attempt);
+
 const sseTransport: Transport = {
   open(path, onEvent, onStatus) {
-    const source = new EventSource(streamUrl(path));
-    source.onopen = () => onStatus("live");
-    source.onmessage = (msg) => {
-      try {
-        onEvent(JSON.parse(msg.data) as RunEvent);
-      } catch {
-        // A malformed frame is dropped; the next one still arrives.
-      }
+    let source: EventSource | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let closed = false;
+
+    // EventSource retries on its own, but gives up for good on some failures (a 5xx, a proxy error page) and never backs
+    // off. So every error closes it and this reopens on our schedule. The server replays a run's stored events on each
+    // connection; useRunEvents drops the repeats by event id.
+    const connect = () => {
+      source = new EventSource(streamUrl(path));
+      source.onopen = () => {
+        attempt = 0;
+        onStatus("live");
+      };
+      source.onmessage = (msg) => {
+        try {
+          onEvent(JSON.parse(msg.data) as RunEvent);
+        } catch {
+          // A malformed frame is dropped; the next one still arrives.
+        }
+      };
+      source.onerror = () => {
+        source?.close();
+        if (closed) return;
+        onStatus("reconnecting");
+        timer = setTimeout(connect, backoff(attempt++));
+      };
     };
-    // EventSource retries on its own (server sends retry: 3000); CLOSED means it gave up.
-    source.onerror = () => onStatus(source.readyState === EventSource.CLOSED ? "error" : "connecting");
-    return () => source.close();
+    connect();
+    return () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      source?.close();
+    };
   },
 };
 
@@ -89,7 +118,10 @@ export function useRunEvents(runId: string | null): RunEventsState {
   return state;
 }
 
-/** Live attack.logged events for the leaderboard. No replay: load history with api.leaderboard() first. */
-export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void): Unsubscribe {
-  return transport.open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), () => {});
+/**
+ * Live attack.logged events for the leaderboard. No replay: load history with api.leaderboard() first, and again after
+ * a reconnect (onStatus reports "live" once the stream is back).
+ */
+export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void, onStatus: (s: StreamStatus) => void = () => {}): Unsubscribe {
+  return transport.open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), onStatus);
 }

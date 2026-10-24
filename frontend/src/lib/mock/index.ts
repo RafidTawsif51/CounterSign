@@ -13,9 +13,11 @@ import {
 import { mockAsk } from "@/lib/mock/ask";
 import { mockLaunchAttack, mockLeaderboard, resetMockAttacks } from "@/lib/mock/attacks";
 import { MOCK_REDTEAM } from "@/lib/mock/redteam";
+import { openInvoices } from "@/lib/mock/seed";
 import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, mockVendors, resetMockInbox } from "@/lib/mock/inbox";
 import { ApiError } from "@/lib/api-error";
-import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
+import { DOCUMENTED_STATUS } from "@/lib/system-status";
+import type { AttackLoggedEvent, HealthResponse, RunEvent, StartRunResponse } from "@/lib/types";
 
 export class MockNotImplementedError extends Error {
   constructor(method: string, path: string) {
@@ -24,21 +26,19 @@ export class MockNotImplementedError extends Error {
   }
 }
 
-const systemStatus: SystemComponentStatus[] = [
-  { name: "Claude extraction", mode: "mock" },
-  { name: "Risk engine", mode: "mock" },
-  { name: "Injection defense", mode: "mock" },
-  { name: "Verification call (Twilio + Cartesia)", mode: "mock" },
-  { name: "Bank payments (Nessie sandbox)", mode: "mock" },
-  { name: "Vendor identity (CRS sandbox)", mode: "mock" },
-  { name: "Independent phone lookup (Apify)", mode: "mock" },
-];
+/** In mock mode every component is its mock: health reports every flag on, as the real server would with all MOCK_* set. */
+const health: HealthResponse = {
+  status: "ok",
+  database: "sqlite",
+  mocks: { nessie: true, crs: true, apify: true, twilio: true, cartesia: true, claude: true, injection: true, risk: true },
+};
 
 type Handler = (params: Record<string, string>, body: unknown) => unknown;
 
 // "METHOD /path/:param" patterns, matched in order.
 const routes: [string, Handler][] = [
-  ["GET /api/system/status", () => systemStatus],
+  ["GET /api/system/status", () => DOCUMENTED_STATUS],
+  ["GET /api/health", () => health],
   ["GET /api/vendors", () => mockVendors()],
   ["GET /api/vendors/:vendorId/history", ({ vendorId }) => mockVendorHistory(vendorId)],
   ["GET /api/inbox/threads", () => mockThreads()],
@@ -59,13 +59,13 @@ const routes: [string, Handler][] = [
     "POST /api/payment-runs",
     (): StartRunResponse => {
       const run_id = startMockRun();
-      return { run_id, events_url: `/api/payment-runs/${run_id}/events` };
+      return { run_id, invoice_count: openInvoices.filter((i) => !i.attack).length, events_url: `/api/payment-runs/${run_id}/events` };
     },
   ],
   ["GET /api/payments/:paymentId", ({ paymentId }) => getMockPaymentDetail(paymentId) ?? notFound(`/api/payments/${paymentId}`)],
   ["POST /api/payments/:paymentId/ask", ({ paymentId }, body) => mockAsk(paymentId, questionOf(body))],
-  ["POST /api/payments/:paymentId/approve", ({ paymentId }, body) => decideMockPayment(paymentId, "approve", reasonOf(body))],
-  ["POST /api/payments/:paymentId/reject", ({ paymentId }, body) => decideMockPayment(paymentId, "reject", reasonOf(body))],
+  ["POST /api/payments/:paymentId/approve", ({ paymentId }, body) => decideMockPayment(paymentId, "approve", reasonOf(body), approverOf(body))],
+  ["POST /api/payments/:paymentId/reject", ({ paymentId }, body) => decideMockPayment(paymentId, "reject", reasonOf(body), approverOf(body))],
   [
     "GET /api/payment-runs/:runId",
     ({ runId }) => getMockRun(runId) ?? notFound(`/api/payment-runs/${runId}`),
@@ -90,12 +90,16 @@ function questionOf(body: unknown): string {
   return typeof body === "object" && body && "question" in body ? String((body as { question: unknown }).question) : "";
 }
 
+function approverOf(body: unknown): string {
+  return typeof body === "object" && body && "approver" in body ? String((body as { approver: unknown }).approver) : "";
+}
+
 function reasonOf(body: unknown): string {
   return typeof body === "object" && body && "reason" in body ? String((body as { reason: unknown }).reason) : "";
 }
 
 function notFound(path: string): never {
-  throw new ApiError(404, path, `GET ${path} failed (404): not found`);
+  throw new ApiError(404, path, `Not found`);
 }
 
 export async function mockRequest<T>(method: string, path: string, body?: unknown): Promise<T> {

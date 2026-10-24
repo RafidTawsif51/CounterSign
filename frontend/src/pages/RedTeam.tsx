@@ -4,7 +4,8 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import { CatchRateChart, type CatchRateDatum } from "@/components/redteam/catch-rate-chart";
 import { Money } from "@/components/shared/money";
 import { PageHeader } from "@/components/shared/page-header";
-import { api } from "@/lib/api";
+import { InlineError } from "@/components/shared/inline-error";
+import { ApiError, api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { RedTeamFamily, RedTeamResults } from "@/lib/types";
 
@@ -20,7 +21,8 @@ const FAMILY: Record<RedTeamFamily, string> = {
 };
 
 export function RedTeam() {
-  const { data, isLoading, isError, error } = useQuery({ queryKey: ["redteam"], queryFn: api.redTeamResults });
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({ queryKey: ["redteam"], queryFn: api.redTeamResults, retry: false });
+  const notBuilt = error instanceof ApiError && error.status === 404;
 
   return (
     <>
@@ -31,8 +33,13 @@ export function RedTeam() {
       <div className="mx-auto max-w-[1120px] space-y-8 px-4 py-6 sm:px-6">
         {isLoading ? (
           <Loading />
+        ) : isError && notBuilt ? (
+          <p className="text-sm text-ink-muted">
+            No red-team results on the server yet. Catch rates, money that would have been lost and false positives per attack family
+            appear here once the red-team harness has run.
+          </p>
         ) : isError ? (
-          <p className="text-sm">Red-team results did not load: {error.message}</p>
+          <InlineError what="Red-team results" error={error} onRetry={() => void refetch()} retrying={isFetching} />
         ) : data ? (
           <Results data={data} />
         ) : null}

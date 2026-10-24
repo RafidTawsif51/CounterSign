@@ -31,10 +31,14 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
   return <EvidenceContext.Provider value={value}>{children}</EvidenceContext.Provider>;
 }
 
-/** `evd_1a2b3c4d5e6f` shown as `evd_1a2b`. The full id is in the title and the accessible name. */
+/**
+ * `evd_1a2b3c4d5e6f` shown as `evd_1a2b`. Readable ids (seeded `pay_atk_bank_change`, derived `rule:destination_changed`)
+ * are cut at 14 characters instead, so they never end on a bare separator. The full id is in the title and the label.
+ */
 export function shortId(id: string) {
   const [prefix, rest = ""] = id.split(/_(.*)/s);
-  return `${prefix}_${rest.slice(0, 4)}`;
+  if (/^[0-9a-f]{8,}$/.test(rest)) return `${prefix}_${rest.slice(0, 4)}`;
+  return id.length <= 14 ? id : `${id.slice(0, 13).replace(/[_:]$/, "")}…`;
 }
 
 /**

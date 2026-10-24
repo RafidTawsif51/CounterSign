@@ -12,6 +12,7 @@ import { PdfDropzone, type PdfChoice } from "@/components/attack/pdf-dropzone";
 import { iconProps } from "@/components/shared/icon";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { USE_MOCKS, api } from "@/lib/api";
+import { errorMessage } from "@/lib/api-error";
 import { CARDS, SAMPLE_PDFS, type AttackPayloadDraft } from "@/lib/attack-cards";
 import type { AttackCard, LaunchAttackRequest } from "@/lib/types";
 
@@ -147,7 +148,7 @@ export function AttackConsole() {
               : tried && missing
                 ? <span className="text-ink">{missing}</span>
                 : launch.isError
-                  ? <span className="text-ink">The attack was not sent: {launch.error.message}</span>
+                  ? <span className="text-ink">The attack was not sent. {errorMessage(launch.error)}. Launch again to retry.</span>
                   : "It goes through the same checks as every invoice this week. Watch the result on the board."}
           </p>
         </div>

@@ -14,11 +14,11 @@ export function CallSlot({ detail }: { detail: PaymentDetail }) {
   const record = detail.calls.at(-1);
   const live = useMemo(() => foldCalls(events).find((c) => c.paymentId === detail.payment.id), [events, detail.payment.id]);
   const call = live ?? callFromDetail(detail);
-  const trust = useNumberTrust(detail.vendor.id, record?.contact ?? null, call?.contactSource ?? null);
+  const trust = useNumberTrust(detail.vendor?.id ?? null, record?.contact ?? null, call?.contactSource ?? null);
   const source = useEvidenceSource([record?.id]);
 
   if (!call) {
-    const quarantined = detail.findings.length > 0;
+    const quarantined = detail.injection_findings.length > 0;
     return (
       <Section title="Verification call">
         <p className="text-sm text-ink-muted">

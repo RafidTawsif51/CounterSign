@@ -13,6 +13,7 @@ import { HardRules } from "@/components/payment/hard-rules";
 import { InjectionFindings } from "@/components/payment/injection-findings";
 import { PaymentHeader } from "@/components/payment/payment-header";
 import { RiskBreakdown } from "@/components/payment/risk-breakdown";
+import { InlineError } from "@/components/shared/inline-error";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { ApiError, api } from "@/lib/api";
 import { invoiceIdFor } from "@/lib/run-summary";
@@ -36,20 +37,28 @@ export function PaymentDetail() {
               <HardRules risk={detail.risk} />
               <RiskBreakdown risk={detail.risk} />
               <Destination detail={detail} />
-              <InjectionFindings findings={detail.findings} />
+              <InjectionFindings findings={detail.injection_findings} />
               <CallSlot detail={detail} />
               <AuditTrail entries={detail.audit} />
             </div>
-            {detail.payment.status === "held" && <DecisionFooter paymentId={detail.payment.id} vendor={detail.vendor.name} />}
+            {detail.payment.status === "held" && <DecisionFooter detail={detail} />}
           </EvidenceProvider>
         ) : query.isError ? (
           <div className="px-5 pt-4">
-            <SheetTitle>Payment not found</SheetTitle>
-            <SheetDescription className="mt-1">
-              {query.error instanceof ApiError && query.error.status === 404
-                ? `${paymentId} is not part of a payment run yet. Start a payment run, then open the payment from the board.`
-                : query.error.message}
-            </SheetDescription>
+            {query.error instanceof ApiError && query.error.status === 404 ? (
+              <>
+                <SheetTitle>Payment not found</SheetTitle>
+                <SheetDescription className="mt-1">
+                  {paymentId} is not part of a payment run yet. Start a payment run, then open the payment from the board.
+                </SheetDescription>
+              </>
+            ) : (
+              <>
+                <SheetTitle className="sr-only">Payment did not load</SheetTitle>
+                <SheetDescription className="sr-only">The payment detail could not be loaded.</SheetDescription>
+                <InlineError what="This payment" error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} className="pr-10" />
+              </>
+            )}
           </div>
         ) : (
           <LoadingState />

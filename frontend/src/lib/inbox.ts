@@ -74,7 +74,7 @@ export interface Detection {
 /** What the run caught on this payment, or null if nothing did. Built from the payment record, never the seed's is_attack. */
 export function detectionFor(d: PaymentDetail): Detection | null {
   const call = d.calls.at(-1);
-  const reason = d.findings.length
+  const reason = d.injection_findings.length
     ? "Hidden instructions in the invoice"
     : call?.outcome === "denied"
       ? "Vendor denied the bank change on the call"

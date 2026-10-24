@@ -139,6 +139,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `PinnedAttack` | `board/pinned-attack.tsx` | A judge's attack pinned above the ledger in an accent outline, with its own row that reveals the result. The attack console never shows the result. |
 | Leaderboard | `pages/Leaderboard.tsx` | Second screen, always dark. "Money moved to attackers" is the one headline figure (text-2xl mono). New attempts slide in at the top; a miss stays, marked "Logged as new test case". `?tv=1`: zoom 1.5, refresh every 10 s, cursor hidden after 3 s idle. The bounty QR (fixed dark-on-white print colors) shows only when `VITE_BOUNTY_EMAIL` is set. |
 | Red team chart | `redteam/catch-rate-chart.tsx` | Recharts grouped bars: baseline in muted ink, Countersign in accent, square marks, 2px gap, rate printed on every bar, inline legend above the plot, axes labeled in place, hover tooltip with counts. |
+| `InlineError` | `shared/inline-error.tsx` | Every failed fetch: "{What} did not load." plus a plain sentence from `ApiError` and a "Try again" button. Never JSON, never a stack trace, never a status color. A cell-sized lookup (a row's invoice number) shows a quiet dash instead. |
+| System status | `pages/SystemStatus.tsx` | One list: Real (accent badge), Sandboxed or Simulated (neutral), each with one line on how we know. A component whose MOCK_* flag is on says "Running on its mock on this server" under its line, so a label never overstates what is running. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
@@ -152,6 +154,11 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 - Arrivals: a new message or thread gets the accent tint at once and fades it over 1s (the one transition longer than 200ms; it fades, it never moves).
 - One exception loops: the mark of a verification call in progress pulses with `animate-call-pulse` (opacity, 2s). It stops when the call ends. Nothing else loops; no audio-wave graphics.
 - `prefers-reduced-motion` is respected globally in `globals.css`. Do not override it.
+
+## Connection
+
+- A dropped event stream reconnects on its own (1 s, 2 s, 4 s, 8 s, then every 10 s). The top bar's run line reads "Reconnecting…" in muted ink meanwhile; nothing else changes and nothing flashes.
+- A run the server stopped while restarting reads "Stopped when the server restarted. Start a new run." and Start is enabled again.
 
 ## Icons
 

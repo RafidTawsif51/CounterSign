@@ -7,6 +7,7 @@ import { ShieldCheck } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NumberTicker } from "@/components/board/number-ticker";
 import { iconProps } from "@/components/shared/icon";
+import { InlineError } from "@/components/shared/inline-error";
 import { BOUNTY_EMAIL, api } from "@/lib/api";
 import { subscribeLeaderboard } from "@/lib/events";
 import { formatClock, formatUSD } from "@/lib/format";
@@ -35,16 +36,25 @@ export function Leaderboard() {
   const [live, setLive] = useState<Map<string, AttackLoggedEvent>>(new Map());
   const idle = useIdleCursor(tv);
 
-  useEffect(
-    () =>
-      subscribeLeaderboard((e) => {
+  useEffect(() => {
+    let dropped = false;
+    return subscribeLeaderboard(
+      (e) => {
         if (e.moderation_status === "hidden") return;
         setLive((m) => new Map(m).set(e.attack_id, e));
         // A result can move money; the totals come from the server.
         if (e.result) void queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-      }),
-    [queryClient],
-  );
+      },
+      (s) => {
+        // The leaderboard stream does not replay, so attempts made while it was down come from a fresh fetch.
+        if (s === "reconnecting") dropped = true;
+        if (s === "live" && dropped) {
+          dropped = false;
+          void queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+        }
+      },
+    );
+  }, [queryClient]);
 
   const rows = useMemo(() => merge(board.data?.attempts ?? [], live), [board.data, live]);
   const totals = board.data?.totals;
@@ -80,7 +90,7 @@ export function Leaderboard() {
         {board.isLoading ? (
           <TableSkeleton />
         ) : board.isError && rows.length === 0 ? (
-          <p className="py-8 text-md">The leaderboard did not load: {board.error.message}. It retries every 10 seconds on the TV view.</p>
+          <InlineError what="The leaderboard" error={board.error} onRetry={() => void board.refetch()} retrying={board.isFetching} className="py-8 text-md" />
         ) : rows.length === 0 ? (
           <p className="py-8 text-md text-ink-muted">No attempts yet. Open the attack console{BOUNTY_EMAIL ? " or email the bounty inbox" : ""} and try.</p>
         ) : (

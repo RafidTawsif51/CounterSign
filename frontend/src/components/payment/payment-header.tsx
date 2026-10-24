@@ -15,13 +15,13 @@ export function PaymentHeader({ detail }: { detail: PaymentDetail }) {
   return (
     <div className="px-5 pt-4 pb-5">
       <div className="pr-10">
-        <SheetTitle>{vendor.name}</SheetTitle>
+        <SheetTitle>{vendor?.name ?? "Vendor not identified yet"}</SheetTitle>
         <SheetDescription className="mt-0.5 flex flex-wrap gap-x-3">
           <span>
-            Invoice <span className="figure text-ink">{invoice.number}</span>
+            Invoice <span className="figure text-ink">{invoice?.number ?? "not extracted"}</span>
           </span>
-          <span>Due {formatDate(invoice.due_date)}</span>
-          <span className="capitalize">{vendor.trade}</span>
+          {invoice?.due_date && <span>Due {formatDate(invoice.due_date)}</span>}
+          {vendor && <span className="capitalize">{vendor.trade}</span>}
         </SheetDescription>
       </div>
 

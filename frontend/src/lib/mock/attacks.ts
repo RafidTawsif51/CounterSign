@@ -24,7 +24,7 @@ const SAMPLE_TECHNIQUE: Record<string, AttackPlan["technique"]> = {
 };
 
 const hex = (n: number) => crypto.randomUUID().replace(/-/g, "").slice(0, n);
-const bad = (why: string) => new ApiError(422, PATH, `POST ${PATH} failed (422): ${why}`);
+const bad = (why: string) => new ApiError(422, PATH, `${why}`);
 
 // attacks.py parse_bank_details and parse_amount
 const ROUTING = /routing(?:\s*(?:number|no\.?|#))?\s*[:-]?\s*(\d{9})/i;

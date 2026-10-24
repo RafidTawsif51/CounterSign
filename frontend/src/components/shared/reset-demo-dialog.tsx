@@ -2,6 +2,7 @@ import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,7 +33,7 @@ export function ResetDemoDialog() {
       setOpen(false);
       toast.success("Demo reset", { description: "40 open invoices, no payment runs. The leaderboard was kept." });
     } catch (err) {
-      toast.error("Demo not reset", { description: err instanceof Error ? err.message : "The server did not respond." });
+      toast.error("Demo not reset", { description: errorMessage(err) });
     } finally {
       setPending(false);
     }

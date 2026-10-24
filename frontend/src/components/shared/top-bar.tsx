@@ -46,12 +46,13 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
 }
 
 function RunStatus() {
-  const { runId, status, summary } = useCurrentRun();
+  const { runId, status, summary, runFailed } = useCurrentRun();
   const total = summary.invoiceCount;
 
   let detail: React.ReactNode;
   if (!runId) detail = <span className="text-ink-muted">Not started</span>;
-  else if (status === "error") detail = <span className="text-ink-muted">Lost the connection to this run</span>;
+  else if (status === "reconnecting") detail = <span className="text-ink-muted">Reconnecting…</span>;
+  else if (runFailed) detail = <span className="text-ink-muted">Stopped when the server restarted. Start a new run.</span>;
   else if (total == null) detail = <span className="text-ink-muted">Starting</span>;
   else
     detail = (
@@ -60,7 +61,7 @@ function RunStatus() {
       </span>
     );
 
-  const live = runId && !summary.completed && status !== "error";
+  const live = runId && !summary.completed && !runFailed && status === "live";
 
   return (
     <div className="flex min-w-0 items-center gap-2 text-sm" aria-live="polite">

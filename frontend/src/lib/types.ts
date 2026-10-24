@@ -13,7 +13,8 @@ export type RunStatus = "running" | "completed" | "failed";
 export type PaymentStatus = "pending" | "paid" | "held" | "blocked";
 export type Decision = "auto_pay" | "controller_review" | "hold" | "hold_and_verify";
 export type CallOutcome = "confirmed" | "denied" | "no_answer" | "unclear";
-export type AttackSource = "console" | "judge" | "bounty_email";
+/** "seeded": the three planted attacks, logged on the run but never listed or counted on the leaderboard. */
+export type AttackSource = "console" | "judge" | "bounty_email" | "seeded";
 export type AttackResult = "caught" | "missed";
 export type ModerationStatus = "pending" | "approved" | "hidden";
 export type AuditActor = "agent" | "human" | "system";
@@ -83,21 +84,6 @@ export interface Invoice {
   remittance_json: Record<string, unknown> | null;
   pdf_path: string | null;
   extracted_json: Record<string, unknown> | null;
-}
-
-export interface RunTotals {
-  paid: number;
-  held: number;
-  blocked: number;
-  total_usd: number;
-}
-
-export interface PaymentRun {
-  id: string;
-  started_at: ISODateTime;
-  completed_at: ISODateTime | null;
-  status: RunStatus;
-  totals_json: RunTotals | null;
 }
 
 export interface Payment {
@@ -211,6 +197,21 @@ export interface PaymentPaidEvent extends EventBase {
   type: "payment.paid";
   payment_id: string;
   nessie_transfer_id: string;
+  /** "mock_fallback": Nessie failed and the id is a mock. Missing on events from before the field existed. */
+  transfer_mode?: TransferMode | null;
+}
+/** The controller approved or rejected a held payment; payment.paid or payment.blocked follows. */
+export interface PaymentReviewedEvent extends EventBase {
+  type: "payment.reviewed";
+  payment_id: string;
+  decision: "approved" | "rejected";
+  approver: string;
+  reason: string; // untrusted
+}
+/** POST /api/demo/reset finished. Sent on the leaderboard channel. */
+export interface DemoResetEvent extends EventBase {
+  type: "demo.reset";
+  kept_leaderboard: boolean;
 }
 export interface PaymentHeldEvent extends EventBase {
   type: "payment.held";
@@ -286,30 +287,112 @@ export type RunEvent =
   | RunCompletedEvent
   | RunReportEvent
   | AttackLoggedEvent
-  | AttackQueuedEvent;
+  | AttackQueuedEvent
+  | PaymentReviewedEvent
+  | DemoResetEvent;
 
 export type RunEventType = RunEvent["type"];
 
 // ---------- API responses ----------
-// Shapes below are not yet documented by the backend. Confirm with the backend lead before relying on extra fields.
+// Shapes below are taken from the backend's route code (docs/ does not cover them yet) and checked against a live run.
+// Two are still proposals with no backend behind them: InboxThreadSummary.attachment_count and RedTeamResults, plus the
+// GET /api/system/status row shape.
 
-/**
- * GET /api/payments/{id}. Proposed shape: the backend route does not exist yet (confirm with the backend lead).
- * The requested destination is invoice.remittance_json ({bank_name, routing_hash, account_last4}); the drawer compares it
- * with last_verified_account. Signals that were checked but did not fire are derived client-side from the signal list.
- */
+/** How a transfer went out (payments.py): "nessie" sandbox, "mock" adapter, or "mock_fallback" when Nessie failed. */
+export type TransferMode = "nessie" | "mock" | "mock_fallback";
+
+/** 200 from POST /api/payments/{id}/approve or /reject. */
+export interface ReviewResult {
+  payment_id: string;
+  status: PaymentStatus;
+  nessie_transfer_id?: string;
+  transfer_mode?: TransferMode | null;
+  paid_account_last4?: string;
+  invoice_asked_for_a_different_account?: boolean;
+}
+
+/** A bank account as the payment detail shows it. `trusted` is false for an account that only came from a payment request. */
+export interface AccountView {
+  id: string;
+  bank_name: string;
+  account_last4: string;
+  valid_from: ISODateTime;
+  valid_to: ISODateTime | null;
+  verified_by_call_id: string | null;
+  trusted: boolean;
+}
+
+/** A verification call with the number dialed (masked to the last four) and where that number came from. */
+export interface PaymentCall {
+  id: string;
+  payment_id: string;
+  started_at: ISODateTime;
+  outcome: CallOutcome | null;
+  transcript: TranscriptLine[]; // untrusted (vendor speech)
+  recording_url: string | null;
+  contact: { id: string; source: ContactSource; source_url: string | null; phone: string } | null;
+}
+
+export interface AuditEntry {
+  id: string;
+  at: ISODateTime;
+  entity: string;
+  entity_id: string;
+  actor: AuditActor;
+  action: string;
+  detail: Record<string, unknown> | null; // may quote untrusted text
+}
+
+/** GET /api/payments/{id}. Shape from backend/app/services/review.py. */
 export interface PaymentDetail {
-  payment: Payment;
-  invoice: Invoice;
-  vendor: Vendor;
-  /** The email that carried the invoice, for sender and Reply-To checks. Untrusted text. */
-  message: Message | null;
-  /** The vendor's current verified account (valid_to null). */
-  last_verified_account: VendorBankAccount | null;
-  risk: RiskAssessment | null;
-  findings: InjectionFinding[];
-  calls: (VerificationCall & { contact: VendorContact | null })[];
-  audit: AuditLogEntry[];
+  payment: {
+    id: string;
+    run_id: string;
+    status: PaymentStatus;
+    amount_usd: number;
+    nessie_transfer_id: string | null;
+    transfer_mode: TransferMode | null;
+    /** Where the payment points: the verified account, or the unverified one an invoice asked for. */
+    destination: AccountView | null;
+    /** The vendor's verified account (verify.open_verified_account). */
+    last_verified_account: AccountView | null;
+    /** Approving always pays this account, never the requested one. */
+    approve_pays: AccountView | null;
+  };
+  /** Null only for a payment whose invoice row is gone. */
+  invoice: {
+    id: string;
+    number: string | null;
+    amount_usd: number | null;
+    due_date: ISODate | null;
+    has_pdf: boolean;
+    /** The bank details the invoice or email asked for, hash and last four only. */
+    requested_remittance: Partial<RemittanceDetails> | null;
+    requested_account_differs_from_verified: boolean;
+    quarantined: boolean;
+    extraction_status: string | null;
+  } | null;
+  /** Null for an uploaded PDF that has no vendor yet. */
+  vendor: (Vendor & { identity: IdentityResult | null }) | null;
+  /** The email that carried the invoice. Untrusted text. */
+  message: Pick<Message, "id" | "thread_id" | "from_addr" | "reply_to" | "subject" | "body" | "received_at" | "is_attack"> | null;
+  risk: {
+    id: string;
+    score: number;
+    decision: Decision;
+    hard_rules_fired: (HardRule | string)[];
+    hard_rule_actions: Record<string, string | null>;
+    signals: Signal[];
+    model_version: string;
+    /** The hold reasons in one line each, hard rules first. */
+    reasons: string[];
+  } | null;
+  injection_findings: InjectionFinding[];
+  identity: IdentityResult | null;
+  calls: PaymentCall[];
+  audit: AuditEntry[];
+  /** What the controller may do now, and why not. */
+  actions: { can_approve: boolean; approve_blocked_reason: string | null; can_reject: boolean };
 }
 
 export interface RemittanceDetails {
@@ -446,9 +529,38 @@ export interface AskAnswer {
   elapsed_ms: number;
 }
 
+/** 202 from POST /api/payment-runs (run.py start_run). */
 export interface StartRunResponse {
   run_id: string;
-  events_url?: string;
+  invoice_count: number;
+  events_url: string;
+}
+
+/** GET /api/payment-runs/{id} (run.py get_run). Totals are computed from the payments, so they are live mid-run. */
+export interface RunStatusResponse {
+  id: string;
+  status: RunStatus;
+  started_at: ISODateTime;
+  completed_at: ISODateTime | null;
+  invoice_count: number | null;
+  totals: { paid: number; held: number; blocked: number; pending: number; total_usd: number; blocked_usd: number };
+  wall_seconds: number | null;
+  timings_ms: Record<string, number> | null;
+}
+
+/** 201 from POST /api/invoices/upload (ingest.py). */
+export interface UploadResult {
+  invoice_id: string;
+  message_id: string | null;
+  vendor_id: string | null;
+  size_bytes: number;
+}
+
+/** GET /api/health (main.py). `mocks` is every MOCK_* flag, true when that component runs on its mock. */
+export interface HealthResponse {
+  status: "ok";
+  database: "sqlite" | "postgres";
+  mocks: Record<string, boolean>;
 }
 
 /** POST /api/attacks body (backend services/attacks.py AttackIn). The vendor always comes from thread_id. */
@@ -548,10 +660,18 @@ export interface RedTeamResults {
   median_run_seconds: { baseline: number; countersign: number };
 }
 
-export type ComponentMode = "real" | "simulated" | "mock" | "down";
+/** Real: runs live. Sandboxed: a provider's sandbox (sandbox money, test identities). Simulated: generated demo data. */
+export type ComponentMode = "real" | "sandboxed" | "simulated";
 
+/**
+ * One row of GET /api/system/status. Proposed shape: the route is not on the backend yet (404), so /status shows the
+ * documented list (lib/system-status.ts) with GET /api/health's mock flags on top.
+ */
 export interface SystemComponentStatus {
   name: string;
   mode: ComponentMode;
-  detail?: string;
+  /** One line: what it does and how we know. */
+  detail: string;
+  /** The MOCK_* flags (health's keys) that put this component on its mock when true. */
+  mock_flags?: string[];
 }

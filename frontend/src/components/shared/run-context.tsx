@@ -27,6 +27,8 @@ interface CurrentRun {
   pinned: PinnedAttack | null;
   /** The pinned attack's mini-run, from attack.logged through run.report. */
   pinnedEvents: RunEvent[];
+  /** The server marked this run failed (it restarted mid-run, run.mark_stale_runs). No more events will come. */
+  runFailed: boolean;
   pinAttack: (a: PinnedAttack) => void;
   unpin: () => void;
   /** The run's events and the pinned attack's, for views keyed by payment (drawer, call panel, inbox markers). */
@@ -86,6 +88,23 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const allEvents = useMemo(() => (pinnedEvents.length ? [...events, ...pinnedEvents] : events), [events, pinnedEvents]);
   const attackDone = pinnedEvents.some((e) => e.type === "run.completed");
 
+  // A server that restarts mid-run marks the run failed without an event. Each time the stream (re)connects, ask.
+  const [failedRun, setFailedRun] = useState<string | null>(null);
+  useEffect(() => {
+    if (!runId || status !== "live" || summary.completed) return;
+    let stale = false;
+    api
+      .run(runId)
+      .then((r) => !stale && setFailedRun(r.status === "failed" ? runId : null))
+      .catch(() => {
+        // The stream is live, so the server is up; a failed lookup is not worth surfacing.
+      });
+    return () => {
+      stale = true;
+    };
+  }, [runId, status, summary.completed]);
+  const runFailed = failedRun !== null && failedRun === runId;
+
   // A run records requested accounts and changes vendor history, so vendor data is stale once it completes.
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -118,8 +137,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [unpin]);
 
   const value = useMemo(
-    () => ({ runId, events, status, summary, startRun, clearRun, pinned, pinnedEvents, pinAttack, unpin, allEvents }),
-    [runId, events, status, summary, startRun, clearRun, pinned, pinnedEvents, pinAttack, unpin, allEvents],
+    () => ({ runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents }),
+    [runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents],
   );
   return <RunContext.Provider value={value}>{children}</RunContext.Provider>;
 }

@@ -9,15 +9,15 @@ export interface Verdict {
   evidence: string[];
 }
 
+/** The bank details the invoice or email asked for, if it named an account. */
 export function requestedAccount(d: PaymentDetail): RemittanceDetails | null {
-  const r = d.invoice.remittance_json as Partial<RemittanceDetails> | null;
+  const r = d.invoice?.requested_remittance;
   return r?.account_last4 ? { bank_name: r.bank_name ?? "", routing_hash: r.routing_hash ?? "", account_last4: r.account_last4 } : null;
 }
 
+/** The backend compares routing hash and last four against the verified account (review.py). */
 export function destinationChanged(d: PaymentDetail) {
-  const req = requestedAccount(d);
-  const last = d.last_verified_account;
-  return Boolean(req && (!last || req.account_last4 !== last.account_last4 || (req.routing_hash && req.routing_hash !== last.routing_hash)));
+  return Boolean(d.invoice?.requested_account_differs_from_verified);
 }
 
 export function verdictFor(d: PaymentDetail): Verdict | null {
@@ -25,14 +25,14 @@ export function verdictFor(d: PaymentDetail): Verdict | null {
   if (status !== "held" && status !== "blocked") return null;
 
   const call = d.calls.at(-1);
-  const finding = d.findings[0];
+  const finding = d.injection_findings[0];
   const decided = [...d.audit].reverse().find((a) => a.actor === "human" && (a.action === "approved" || a.action === "rejected"));
-  const bankSignal = d.risk?.signals_json.find((s) => s.name === "bank_details_changed");
+  const bankSignal = d.risk?.signals.find((s) => s.name === "bank_details_changed");
   const req = requestedAccount(d);
 
   if (status === "blocked") {
     if (decided?.action === "rejected") {
-      const reason = String((decided.detail_json as { reason?: string } | null)?.reason ?? "");
+      const reason = String(decided.detail?.reason ?? "");
       return { text: `Blocked: the controller rejected it.${reason ? ` "${reason}"` : ""}`, evidence: [decided.id] };
     }
     if (call?.outcome === "denied")

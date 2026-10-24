@@ -1,21 +1,23 @@
 // HTTP client for the FastAPI backend. Routes mirror the API table in CLAUDE.md.
 // With VITE_USE_MOCKS=true every call is answered by lib/mock instead of the network.
 
-import { ApiError } from "@/lib/api-error";
+import { ApiError, detailText, statusText } from "@/lib/api-error";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
   LeaderboardResponse,
+  ReviewResult,
   RedTeamResults,
   InboxMessage,
   InboxThreadDetail,
   InboxThreadSummary,
   LaunchAttackRequest,
   LaunchAttackResponse,
-  Invoice,
+  HealthResponse,
   PaymentDetail,
-  PaymentRun,
+  RunStatusResponse,
   StartRunResponse,
+  UploadResult,
   SystemComponentStatus,
   VendorSummary,
   VendorHistory,
@@ -32,23 +34,30 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   if (USE_MOCKS) return mockRequest<T>(method, path, body);
 
   const isForm = body instanceof FormData;
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
-    body: body == null ? undefined : isForm ? body : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
+      body: body == null ? undefined : isForm ? body : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, path, `${statusText(0)} at ${API_URL || window.location.origin}`);
+  }
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail: string | null = null;
     try {
-      const data = await res.json();
-      if (typeof data?.detail === "string") detail = data.detail;
+      detail = detailText(await res.json());
     } catch {
-      // Non-JSON error body; keep the status text.
+      // Not JSON (a proxy page, an HTML error): fall back to the status.
     }
-    throw new ApiError(res.status, path, `${method} ${path} failed (${res.status}): ${detail}`);
+    throw new ApiError(res.status, path, detail ? sentence(detail) : statusText(res.status));
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
+
+/** Server details are lowercase fragments ("payment not found"); show them as a sentence. */
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 const get = <T>(path: string) => request<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
@@ -69,25 +78,32 @@ export const api = {
   uploadInvoice: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return post<Invoice>("/api/invoices/upload", form);
+    return post<UploadResult>("/api/invoices/upload", form);
   },
 
+  /** 202; 409 while another full run is in progress. */
   startRun: () => post<StartRunResponse>("/api/payment-runs"),
-  run: (runId: string) => get<PaymentRun>(`/api/payment-runs/${runId}`),
+  run: (runId: string) => get<RunStatusResponse>(`/api/payment-runs/${runId}`),
 
   payment: (paymentId: string) => get<PaymentDetail>(`/api/payments/${paymentId}`),
-  approve: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/approve`, { reason }),
-  reject: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/reject`, { reason }),
+  /** Held payments only. Pays the vendor's last verified account, never the requested one. */
+  approve: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/approve`, { reason, approver }),
+  reject: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/reject`, { reason, approver }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
+  /** In CLAUDE.md's API table but not on the backend yet (calls start from the run). Nothing calls it. */
   startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
 
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
   leaderboard: () => get<LeaderboardResponse>("/api/attacks/leaderboard"),
 
+  /** Not on the backend yet: backend/app/redteam is empty. The mock answers results; /red-team shows the error live. */
   runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
   redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 
+  /** Not on the backend yet (404); /status falls back to the documented list plus health's mock flags. */
   systemStatus: () => get<SystemComponentStatus[]>("/api/system/status"),
+  /** Database and every MOCK_* flag as the server reads them. */
+  health: () => get<HealthResponse>("/api/health"),
 };
 
 /** Absolute URL for an SSE endpoint. */

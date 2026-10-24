@@ -228,7 +228,7 @@ function AttachmentRow({ invoiceId, invoice, history }: { invoiceId: string; inv
   const pid = "pay_" + invoiceId.slice("inv_".length);
   // The payment record exists once a run has read the invoice; it carries the injection findings.
   const { data: detail } = useQuery({ queryKey: ["payment", pid], queryFn: () => api.payment(pid), retry: false });
-  const findings = detail?.findings.filter((f) => f.invoice_id === invoiceId) ?? [];
+  const findings = detail?.injection_findings.filter((f) => f.invoice_id === invoiceId) ?? [];
   const name = `${invoice?.number ?? invoiceId}.pdf`;
 
   return (

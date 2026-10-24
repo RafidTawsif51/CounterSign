@@ -137,25 +137,29 @@ function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
 
 /** Invoice number and destination come from the payment record, not the event stream. */
 function DetailCells({ row }: { row: BoardRow }) {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     // Its own key: the drawer's ["payment", id] refetches on every event, and a row only needs the static fields.
     queryKey: ["payment-row", row.paymentId],
     queryFn: () => api.payment(row.paymentId),
+    // run.py creates the payment just before risk.scored; asking at invoice.parsed would race it into a 404.
+    enabled: row.stage !== "parsed",
     staleTime: Infinity,
     retry: 2,
   });
   const requested = data ? requestedAccount(data) : null;
-  const last4 = row.changedTo ?? requested?.account_last4 ?? data?.last_verified_account?.account_last4 ?? null;
+  const last4 = row.changedTo ?? requested?.account_last4 ?? data?.payment.last_verified_account?.account_last4 ?? null;
+  // A row's lookup failing is not worth a retry button in every cell; the drawer has one.
+  const missing = isError ? <span title="Could not load from the server">–</span> : <Placeholder w="w-16" />;
 
   return (
     <>
-      <TableCell className="figure text-sm text-ink-muted">{data?.invoice.number ?? <Placeholder w="w-16" />}</TableCell>
+      <TableCell className="figure text-sm text-ink-muted">{data?.invoice?.number ?? missing}</TableCell>
       <TableCell className="text-right">
         <Money amount={row.amount} />
       </TableCell>
       <TableCell>
         <span className="inline-flex items-center gap-2">
-          {last4 ? <span className="figure text-sm">{formatAccount(last4)}</span> : <Placeholder w="w-16" />}
+          {last4 ? <span className="figure text-sm">{formatAccount(last4)}</span> : missing}
           {row.changedTo && (
             <Badge variant="neutral" className="h-4 px-1" title="Not the vendor's last verified account">
               changed
