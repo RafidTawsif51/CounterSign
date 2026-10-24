@@ -128,6 +128,17 @@ class PaymentBlocked(EventBase):
     reason: str
 
 
+class PaymentReviewed(EventBase):
+    """A person decided a held payment. Followed by payment.paid (approved) or payment.blocked (rejected)."""
+
+    type: Literal["payment.reviewed"] = "payment.reviewed"
+    run_id: str
+    payment_id: str
+    decision: Literal["approved", "rejected"]
+    approver: str
+    reason: str
+
+
 class RunCompleted(EventBase):
     type: Literal["run.completed"] = "run.completed"
     run_id: str
@@ -176,6 +187,7 @@ EVENT_MODELS: dict[str, type[EventBase]] = {
         CallTranscript,
         CallOutcomeEvent,
         PaymentBlocked,
+        PaymentReviewed,
         RunCompleted,
         RunReport,
         AttackLogged,

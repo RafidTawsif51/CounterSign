@@ -161,6 +161,21 @@ One event per spoken line.
 {"type": "payment.blocked", "run_id": "run_042", "payment_id": "pay_mock_012", "reason": "Vendor denied the bank change on the verification call"}
 ```
 
+### payment.reviewed
+
+Not in the spec. A controller decided a held payment (`POST /api/payments/{id}/approve` or `/reject`). It is followed by `payment.paid` (approved) or `payment.blocked` (rejected).
+
+| Field | Type |
+|---|---|
+| payment_id | str |
+| decision | approved or rejected |
+| approver | str |
+| reason | str |
+
+```json
+{"type": "payment.reviewed", "run_id": "run_042", "payment_id": "pay_atk_ceo_pressure", "decision": "rejected", "approver": "Dev", "reason": "The CEO never asked for this."}
+```
+
 ### run.completed
 
 | Field | Type |

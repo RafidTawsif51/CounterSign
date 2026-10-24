@@ -72,7 +72,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
 def use_engine(monkeypatch, eng) -> None:
     """Point the app, the event log, the audit log, verify and the run at one database (a test copy)."""
     from app import audit, db, events
-    from app.services import run, verify
+    from app.services import review, run, verify
 
-    for module in (db, events, audit, verify, run):
+    for module in (db, events, audit, verify, run, review):
         monkeypatch.setattr(module, "engine", eng)

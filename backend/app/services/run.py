@@ -528,6 +528,11 @@ def _open_invoice_ids(s: Session) -> list[str]:
     return list(s.exec(select(Invoice.id).where(~Invoice.id.in_(select(Payment.invoice_id))).order_by(Invoice.id)).all())
 
 
+def is_active(run_id: str) -> bool:
+    """True while this process is still processing the run."""
+    return run_id in _active
+
+
 def mark_stale_runs() -> None:
     """A run left 'running' by a crashed process can never finish; mark it failed at startup."""
     with Session(engine) as s:
