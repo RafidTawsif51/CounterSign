@@ -89,7 +89,18 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
               <CommandItem key={v.id} value={`vendor ${v.name} ${v.trade} ${v.email_domain}`} onSelect={() => go(`/inbox?vendor=${v.id}`)}>
                 <Building2 {...iconProps} />
                 <span className="truncate">{v.name}</span>
-                <CommandShortcut className="font-sans">{v.trade}</CommandShortcut>
+                <CommandShortcut className="flex items-center gap-3 font-sans">
+                  {v.unverified_requested_accounts > 0 && (
+                    <span
+                      className="flex items-center gap-1 text-held-ink"
+                      title={`${v.unverified_requested_accounts} unverified bank change ${v.unverified_requested_accounts === 1 ? "request" : "requests"}`}
+                    >
+                      <span aria-hidden className="size-1.5 bg-held" />
+                      <span className="figure">{v.unverified_requested_accounts}</span> unverified
+                    </span>
+                  )}
+                  {v.trade}
+                </CommandShortcut>
               </CommandItem>
             ))}
           </CommandGroup>

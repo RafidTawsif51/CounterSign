@@ -310,6 +310,15 @@ export interface RemittanceDetails {
   account_last4: string;
 }
 
+/**
+ * GET /api/vendors row (backend services/vendors.py). Only the fields the frontend reads are typed; the route also returns
+ * current_account, identity and risk_summary.
+ */
+export interface VendorSummary extends Vendor {
+  /** Bank accounts a payment request asked for that no verification call has confirmed. Recorded when a run reads the invoice. */
+  unverified_requested_accounts: number;
+}
+
 /** The stored CRS identity result for a vendor (backend services/identity.py IdentityResult). */
 export interface IdentityResult {
   vendor_id: string;

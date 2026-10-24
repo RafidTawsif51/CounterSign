@@ -16,7 +16,7 @@ import type {
   PaymentRun,
   StartRunResponse,
   SystemComponentStatus,
-  Vendor,
+  VendorSummary,
   VendorHistory,
 } from "@/lib/types";
 
@@ -55,7 +55,7 @@ export { ApiError };
 export const api = {
   resetDemo: (keepLeaderboard = false) => post<void>(`/api/demo/reset?keep_leaderboard=${keepLeaderboard}`),
 
-  vendors: () => get<Vendor[]>("/api/vendors"),
+  vendors: () => get<VendorSummary[]>("/api/vendors"),
   vendorHistory: (vendorId: string) => get<VendorHistory>(`/api/vendors/${vendorId}/history`),
 
   threads: () => get<InboxThreadSummary[]>("/api/inbox/threads"),

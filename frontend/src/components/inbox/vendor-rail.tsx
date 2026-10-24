@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { iconProps } from "@/components/shared/icon";
 import { shortUrl } from "@/components/call/call-parts";
+import { api } from "@/lib/api";
 import { formatAccount, formatDate, formatMonthYear, formatPhoneMasked, formatUSD } from "@/lib/format";
 import type { HistoryInvoice, VendorHistory } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,8 +50,9 @@ export function VendorRail({ history, hasVendor }: { history: VendorHistory | un
             ) : (
               <dd className="text-ink-muted">None verified</dd>
             )}
+            <UnverifiedRequests vendorId={vendor.id} />
             {requested.map((a) => (
-              <dd key={a.id} className="mt-1 text-xs text-ink-muted">
+              <dd key={a.id} className="text-xs text-ink-muted">
                 <span className="figure">{formatAccount(a.account_last4)}</span> {a.bank_name}, never verified
               </dd>
             ))}
@@ -106,6 +109,19 @@ export function VendorRail({ history, hasVendor }: { history: VendorHistory | un
         )}
       </section>
     </div>
+  );
+}
+
+/** The vendors API's count of bank changes a payment request asked for and no call verified. Hidden at 0. */
+function UnverifiedRequests({ vendorId }: { vendorId: string }) {
+  const { data } = useQuery({ queryKey: ["vendors"], queryFn: api.vendors, staleTime: 10_000 });
+  const n = data?.find((v) => v.id === vendorId)?.unverified_requested_accounts ?? 0;
+  if (n === 0) return null;
+  return (
+    <dd className="mt-1.5 flex items-center gap-1.5 text-sm text-held-ink">
+      <span aria-hidden className="size-1.5 shrink-0 bg-held" />
+      <span className="figure">{n}</span> unverified bank change {n === 1 ? "request" : "requests"}
+    </dd>
   );
 }
 

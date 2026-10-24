@@ -11,8 +11,7 @@ import {
   subscribeMockRun,
 } from "@/lib/mock/run";
 import { mockAsk } from "@/lib/mock/ask";
-import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, resetMockInbox } from "@/lib/mock/inbox";
-import { vendors } from "@/lib/mock/seed";
+import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, mockVendors, resetMockInbox } from "@/lib/mock/inbox";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
 
@@ -38,7 +37,7 @@ type Handler = (params: Record<string, string>, body: unknown) => unknown;
 // "METHOD /path/:param" patterns, matched in order.
 const routes: [string, Handler][] = [
   ["GET /api/system/status", () => systemStatus],
-  ["GET /api/vendors", () => vendors],
+  ["GET /api/vendors", () => mockVendors()],
   ["GET /api/vendors/:vendorId/history", ({ vendorId }) => mockVendorHistory(vendorId)],
   ["GET /api/inbox/threads", () => mockThreads()],
   ["GET /api/inbox/threads/:threadId", ({ threadId }) => mockThread(threadId)],

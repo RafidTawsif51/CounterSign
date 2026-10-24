@@ -5,7 +5,7 @@
 import { ApiError } from "@/lib/api-error";
 import { createRng, hashSeed } from "@/lib/mock/prng";
 import { getMockPaymentDetail } from "@/lib/mock/run";
-import { ATTACKER_ACCOUNTS, PLANTED, bankAccounts, contacts, messages, openInvoices, vendorById, vendorProfile } from "@/lib/mock/seed";
+import { ATTACKER_ACCOUNTS, PLANTED, bankAccounts, contacts, messages, openInvoices, vendorById, vendorProfile, vendors } from "@/lib/mock/seed";
 import type {
   HistoryBankAccount,
   HistoryInvoice,
@@ -15,6 +15,7 @@ import type {
   InboxThreadSummary,
   Message,
   VendorHistory,
+  VendorSummary,
 } from "@/lib/types";
 
 const PREVIEW_CHARS = 140; // ingest.PREVIEW_CHARS
@@ -157,6 +158,11 @@ function requestedAccounts(vendorId: string): HistoryBankAccount[] {
       verified_by: "requested, not verified",
     },
   ];
+}
+
+/** GET /api/vendors, with the unverified request count. */
+export function mockVendors(): VendorSummary[] {
+  return vendors.map((v) => ({ ...v, unverified_requested_accounts: requestedAccounts(v.id).length }));
 }
 
 /** backend identity.MockIdentityChecker: verified, match 0.90 to 0.99, stable per vendor. */

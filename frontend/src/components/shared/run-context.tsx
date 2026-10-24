@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { USE_MOCKS, api } from "@/lib/api";
 import { useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
@@ -42,6 +43,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [runId, setRunId] = useState<string | null>(readStoredRun);
   const { events, status } = useRunEvents(runId);
   const summary = useMemo(() => summarizeRun(events), [events]);
+
+  // A run records requested accounts and changes vendor history, so vendor data is stale once it completes.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!summary.completed) return;
+    void queryClient.invalidateQueries({ queryKey: ["vendors"] });
+    void queryClient.invalidateQueries({ queryKey: ["vendor-history"] });
+  }, [summary.completed, runId, queryClient]);
 
   const startRun = useCallback(async () => {
     const { run_id } = await api.startRun();
