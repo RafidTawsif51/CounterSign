@@ -28,6 +28,7 @@ from app.audit import write_audit
 from app.config import get_settings
 from app.db import engine
 from app.models import (
+    AuditLog,
     Attack,
     AttackResult,
     CallOutcome,
@@ -206,6 +207,75 @@ def _store_contact(session: Session, vendor_id: str, c: contacts.IndependentCont
     )
     session.add(row)
     return row
+
+
+# ---------------------------------------------------------------- trusted account and candidates
+
+REQUESTED_ACTION = "requested_destination_recorded"
+
+
+def current_verified_account(session: Session, vendor_id: str) -> Optional[VendorBankAccount]:
+    """The vendor's trusted destination, or None (payment is then refused and the controller decides).
+
+    Trusted = an account with verified_by_call_id set, or the vendor's genuine onboarding account.
+    The seed marks onboarding accounts with verified_by_call_id None, so the earliest account counts
+    as onboarding, but never one created by record_requested_destination (found through its audit
+    row): a brand-new vendor's first requested account must not become trusted by default.
+    """
+    accounts = list(session.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id)))
+    if not accounts:
+        return None
+    requested = set(
+        session.exec(
+            select(AuditLog.entity_id).where(
+                AuditLog.entity == "vendor_bank_account",
+                AuditLog.action == REQUESTED_ACTION,
+                AuditLog.entity_id.in_([a.id for a in accounts]),
+            )
+        )
+    )
+    trusted = [a for a in accounts if a.verified_by_call_id]
+    earliest = min(accounts, key=lambda a: a.valid_from)
+    if earliest.id not in requested and not earliest.verified_by_call_id:
+        trusted.append(earliest)
+    return max(trusted, key=lambda a: a.valid_from, default=None)
+
+
+def record_requested_destination(
+    session: Session, vendor_id: str, routing_hash: str, account_last4: str, bank_name: str
+) -> str:
+    """The ONLY way the rest of the backend creates a new, unverified candidate account.
+
+    Idempotent: the same requested details return the existing candidate. The row has
+    verified_by_call_id None and an audit row marks it as requested, so it can never be treated as
+    the onboarding account. It does not change the vendor's trusted account.
+    """
+    for a in session.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id)):
+        if a.routing_hash == routing_hash and a.account_last4 == account_last4 and not a.verified_by_call_id:
+            return a.id
+    acct = VendorBankAccount(
+        vendor_id=vendor_id,
+        routing_hash=routing_hash,
+        account_last4=account_last4,
+        bank_name=bank_name,
+        valid_from=utcnow(),
+    )
+    session.add(acct)
+    write_audit(
+        "vendor_bank_account", acct.id, "agent", REQUESTED_ACTION,
+        {"vendor_id": vendor_id, "account_last4": account_last4, "verified": False}, session=session,
+    )
+    session.commit()
+    return acct.id
+
+
+def handle_outcome(call_id: str, outcome: CallOutcome, transcript: list[dict]) -> None:
+    """Apply a finished call's outcome (denied blocks, confirmed writes the verified account, and so on).
+
+    Stub. Today start_verification applies outcomes inline; this entry point is for the real
+    Twilio status callback and Gather flow, built in the next prompt.
+    """
+    raise NotImplementedError("handle_outcome is built with the real call flow")
 
 
 # ---------------------------------------------------------------- orchestration

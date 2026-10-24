@@ -24,6 +24,9 @@ frontend/dist/
 .cache/
 backend/.cache/
 
+# Cached Cartesia clips
+backend/.audio_cache/
+
 # Uploaded invoice PDFs
 uploads/
 backend/uploads/
@@ -36,3 +39,5 @@ demo/backup-run.mp4
 .DS_Store
 .idea/
 .vscode/
+*.db-shm
+*.db-wal
