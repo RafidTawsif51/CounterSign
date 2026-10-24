@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlmodel import Session
 
+from app import dev, events
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
 
@@ -39,5 +40,8 @@ def health(session: Session = Depends(get_session)) -> dict:
         "mocks": settings.mock_flags,
     }
 
+
+api.include_router(events.router)
+api.include_router(dev.router)
 
 app.include_router(api)

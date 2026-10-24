@@ -1,19 +1,11 @@
-import os
-import tempfile
+import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
-# Must be set before app modules import the engine.
-_tmp = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
-os.environ["FRONTEND_URL"] = "https://countersign.example"
-
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from sqlmodel import Session, select  # noqa: E402
-
-from app.audit import write_audit  # noqa: E402
-from app.db import create_all, engine  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models import AuditLog, Event, Signal, Vendor  # noqa: E402
+from app.audit import write_audit
+from app.db import create_all, engine
+from app.main import app
+from app.models import AuditLog, Event, Signal, Vendor
 
 
 def test_health():
