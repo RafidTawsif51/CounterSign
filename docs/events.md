@@ -7,9 +7,25 @@ Source: `backend/app/events.py`. Models are Pydantic classes; `EVENT_MODELS` map
 | Route | What it streams |
 |---|---|
 | `GET /api/payment-runs/{run_id}/events` | Every event of one run. Events already stored for the run are replayed first, then live ones. Safe to connect before, during or after the run. |
-| `GET /api/leaderboard/events` | Live `attack.logged` events only, from any source. No replay; load history from `GET /api/attacks/leaderboard`. |
+| `GET /api/leaderboard/events` | The global channel. Live `attack.logged` (and `attack.queued`, `demo.reset`) events, plus the call events and `run.updated` described under "Late call outcomes". No replay; load history from `GET /api/attacks/leaderboard`. |
 | `POST /api/dev/mock-run` | Dev only. Starts a fake run in the background (`?delay_ms=300`), returns `{"run_id", "events_url"}`. |
 | `GET /api/dev/subscribers` | Dev only. Live subscriber count per channel. |
+
+## Late call outcomes (global channel)
+
+In real mode (`MOCK_TWILIO` and `MOCK_CARTESIA` false) the run does not wait on a phone. When a payment needs a verification call, the call is placed, the payment stays **held** with the reason `verification call in progress` (`payment.held`), and the run completes with that payment counted as held. The vendor's answer arrives later through a Twilio webhook, usually after the client stopped listening to the run's stream. When it arrives the server updates the payment, the audit log, the linked attack row and the cached `/ask` answers, and emits:
+
+`call.outcome`, then `payment.blocked` (denied) or `payment.paid` (confirmed and released), then `run.updated` if the run's totals changed.
+
+So that a board that only watches the global channel always gets them, these events are sent to **both** the run channel and `GET /api/leaderboard/events`:
+
+| Event | On the global channel |
+|---|---|
+| `call.started`, `call.transcript`, `call.outcome` | always |
+| `payment.paid`, `payment.held`, `payment.blocked` | only for a payment that has had a call (so a clean payment does not flood the channel) |
+| `run.updated` | always |
+
+The global channel has no replay. A client that missed events reloads from `GET /api/payments/{id}` and `GET /api/payment-runs/{id}`; every event carries `run_id` and `payment_id` so the board can route it. Events of the three planted attacks are included (their `attack.logged` events still are not).
 
 ## Wire format
 
@@ -188,6 +204,22 @@ Not in the spec. A controller decided a held payment (`POST /api/payments/{id}/a
 
 ```json
 {"type": "run.completed", "run_id": "run_042", "paid": 37, "held": 1, "blocked": 2, "total_usd": 239559.28}
+```
+
+### run.updated
+
+Not in the spec; this shape is ours. A verification call finished after `run.completed` and changed a payment of that run (see "Late call outcomes"). It carries the run's new totals. It is sent only when a count or the paid total actually changed, to the run channel and to the global channel.
+
+| Field | Type |
+|---|---|
+| payment_id | str, the payment the call changed |
+| status | "paid" \| "held" \| "blocked" \| "pending", that payment's new status |
+| paid, held, blocked | int (counts, whole run) |
+| total_usd | float (sum of paid payments, whole run) |
+| blocked_usd | float |
+
+```json
+{"type": "run.updated", "run_id": "run_042", "payment_id": "pay_atk_bank_change", "status": "blocked", "paid": 37, "held": 1, "blocked": 2, "total_usd": 445491.88, "blocked_usd": 40374.31}
 ```
 
 ### run.report

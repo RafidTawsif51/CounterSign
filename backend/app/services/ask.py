@@ -389,6 +389,12 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def invalidate(payment_id: str) -> None:
+    """Drop every cached answer for one payment (its decision just changed)."""
+    for key in [k for k in _cache if k[0] == payment_id]:
+        del _cache[key]
+
+
 async def answer(session: Session, payment_id: str, question: str) -> dict:
     started = time.monotonic()
     data = gather(session, payment_id)

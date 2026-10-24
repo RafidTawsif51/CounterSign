@@ -348,7 +348,7 @@ def test_verify_denied_blocks_and_marks_fraud():
     res = run(verify.start_verification(w["payment"]))
     assert res.outcome == CallOutcome.denied and res.payment_status == PaymentStatus.blocked
     assert res.contact_source.value == "on_file" and not res.number_flagged
-    assert res.transcript[0]["speaker"] == "agent" and "automated" in res.transcript[0]["text"] and "recorded" in res.transcript[0]["text"]
+    assert res.transcript[0]["speaker"] == "agent" and "automated" in res.transcript[0]["text"] and "This call is being transcribed." in res.transcript[0]["text"] and "recorded" not in res.transcript[0]["text"]
     assert "7781" in res.transcript[0]["text"] and not re.search(r"\d{5,}", " ".join(t["text"] for t in res.transcript))
     with Session(engine) as s:
         assert s.get(Payment, w["payment"]).status == PaymentStatus.blocked

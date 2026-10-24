@@ -2,12 +2,17 @@
 # Prize track: Cartesia (voice of the call; Twilio carries it)
 # Twilio is a NEW-STYLE FREE TRIAL: calls come from a shared number, the Calls API accepts only
 #   to, from_, url and status_callback, and only Say, Play, Gather, Redirect, Pause and Hangup are
-#   allowed. No recording and no Media Streams, so the stored transcript is the call record.
+#   allowed. No recording and no Media Streams, so the stored transcript is the call record. The call therefore says it is
+#   "being transcribed". Only with CALL_RECORDING_ENABLED (an account that can record) does place_call request recording and
+#   the call say "recorded and transcribed"; see disclosure().
 #   Twilio waits 5 s for our TwiML, so audio clips are generated BEFORE dialing (tts_clip).
 # Flags: MOCK_TWILIO, MOCK_CARTESIA.
 
 import asyncio
 import hashlib
+import hmac
+import os
+import secrets
 import logging
 import re
 import uuid
@@ -89,6 +94,8 @@ async def place_call(
         log.info("mock call placed: %s", sid)
         return sid
     kwargs: dict = {"to": to, "from_": s.twilio_from_number, "url": twiml_url}
+    if s.call_recording_enabled:
+        kwargs["record"] = True  # the only place recording is requested, and the only case in which the call says "recorded"
     if status_callback_url:
         kwargs["status_callback"] = status_callback_url
     return await asyncio.to_thread(_create_call, s, kwargs)
@@ -168,3 +175,128 @@ async def tts_clip(text: str, settings: Optional[Settings] = None) -> str:
 async def tts_file(text: str, settings: Optional[Settings] = None) -> Path:
     """Same as tts_clip but returns the local path (for smoke tests; needs no PUBLIC_BASE_URL)."""
     return await asyncio.to_thread(_generate_clip, text, settings or get_settings())
+
+
+# ---------------------------------------------------------------- the verification call script and its TwiML
+
+# Rules of the call (CLAUDE.md): say it is automated, only the last 4 digits of an account, accept no new details,
+# never confirm on the vendor's behalf. California needs all-party consent, so the intro discloses what is true: transcribed, and
+# recorded only when recording is on.
+
+COMPANY_NAME = "Ridgeline Builders"
+
+
+def disclosure(settings: Optional[Settings] = None) -> str:
+    """What the call may truthfully say about itself. "Recorded" appears only when place_call requests recording."""
+    s = settings or get_settings()
+    return "This call is being recorded and transcribed." if s.call_recording_enabled else "This call is being transcribed."
+
+
+def call_intro(company: str = COMPANY_NAME, settings: Optional[Settings] = None) -> str:
+    return f"This is an automated assistant calling for {company} accounts payable. {disclosure(settings)}"
+
+
+
+class CallScript:
+    """Every sentence the verification call can speak. All of them are generated as clips before dialing."""
+
+    def __init__(self, vendor_name: str, last4: str) -> None:
+        self.intro = call_intro()
+        self.question = (
+            f"We received a request to change where we send {vendor_name}'s payments, to an account ending {last4}. "
+            "Did your company make this change? Please say yes or no."
+        )
+        self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account? Please say yes or no."
+        self.confirmed = "Thank you. I have noted your answer and will pass it to our accounts payable team. Goodbye."
+        self.denied = "Thank you. We will not process that change and our controller has been alerted. Goodbye."
+        self.unclear = "Thank you. I will pass this to a person on our accounts payable team, who will follow up. Goodbye."
+
+    def all_texts(self) -> list[str]:
+        return [self.intro, self.question, self.retry, self.confirmed, self.denied, self.unclear]
+
+    def closing(self, outcome: str) -> str:
+        return {"confirmed": self.confirmed, "denied": self.denied}.get(outcome, self.unclear)
+
+
+def call_script(vendor_name: str, last4: str) -> CallScript:
+    return CallScript(vendor_name, last4[-4:])
+
+
+def _esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _speak(text: str, settings: Optional[Settings] = None) -> str:
+    """<Play> of the pre-generated clip, or <Say> if the clip file is missing (so a call is never silent). Never generates audio."""
+    if audio_path(_clip_name(text)) is not None:
+        return f"<Play>{_esc(clip_url(text, settings))}</Play>"
+    return f"<Say>{_esc(text)}</Say>"
+
+
+def _twiml(body: str) -> str:
+    return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
+
+
+def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings: Optional[Settings] = None, first: bool = True) -> str:
+    """Intro (first pass only), then a speech Gather around the question (or the retry prompt). Silence redirects to retry_url."""
+    prompt = script.question if first else script.retry
+    gather = (
+        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
+        f"{_speak(prompt, settings)}</Gather>"
+    )
+    return _twiml((_speak(script.intro, settings) if first else "") + gather + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
+
+
+def twiml_close(text: str, settings: Optional[Settings] = None) -> str:
+    return _twiml(f"{_speak(text, settings)}<Hangup/>")
+
+
+# ---------------------------------------------------------------- per-call webhook secret
+# Trial calls fetch our TwiML through a Twilio proxy that sends no X-Twilio-Signature, so a signature cannot protect
+# those routes. Each call gets a random secret instead. It lives in a file (not the database, so no model change and it
+# survives a restart), is carried in the webhook URLs as ?t=..., and is compared in constant time. It is never logged.
+
+TOKEN_RE = re.compile(r"^cal_[0-9A-Za-z]{1,32}$")  # no slashes or dots: the id is part of a file name
+
+
+def _token_path(call_id: str) -> Optional[Path]:
+    return (AUDIO_DIR / "tokens" / f"{call_id}.token") if TOKEN_RE.match(call_id or "") else None
+
+
+def new_call_token(call_id: str) -> str:
+    path = _token_path(call_id)
+    if path is None:
+        raise ValueError("not a call id")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(24)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token)
+    return token
+
+
+def check_call_token(call_id: str, token: Optional[str]) -> bool:
+    path = _token_path(call_id)
+    if path is None or not token or not path.is_file():
+        return False
+    return hmac.compare_digest(path.read_text().strip().encode(), token.encode())
+
+
+def with_token(url: str, token: str) -> str:
+    return f"{url}{'&' if '?' in url else '?'}t={token}"
+
+
+_TOKEN_IN_URL = re.compile(r"([?&]t=)[A-Za-z0-9_\-]+")
+
+
+class RedactCallToken(logging.Filter):
+    """Keeps the per-call secret out of uvicorn's access log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _TOKEN_IN_URL.sub(r"\1***", str(record.msg))
+        if isinstance(record.args, tuple):
+            record.args = tuple(_TOKEN_IN_URL.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(RedactCallToken())

@@ -563,9 +563,10 @@ def test_seeded_attack_events_never_reach_the_leaderboard_channel(env, monkeypat
         seeded_ids = {a.id for a in s.exec(select(Attack))}
     assert len(seeded_ids) == 3
     board = [p for p in published if p[0] == ev.LEADERBOARD]
-    assert board == []  # three attack.logged events were sent on the run channel only
+    assert {p[1] for p in board} <= {"call.started", "call.transcript", "call.outcome", "payment.blocked", "payment.held", "payment.paid"}  # call events go everywhere; no attack.* event
+    assert all(p[2] is None for p in board)  # three attack.logged events were sent on the run channel only
     assert sum(1 for p in published if p[1] == "attack.logged") == 3
     a = client.post("/api/attacks", json=CLASSIC).json()
     wait(client, a["run_id"])
-    board = [p for p in published if p[0] == ev.LEADERBOARD]
+    board = [p for p in published if p[0] == ev.LEADERBOARD and p[2] is not None]
     assert board and {p[2] for p in board} == {a["attack_id"]}  # a real attack does reach it
