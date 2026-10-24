@@ -36,7 +36,7 @@ def test_audit_is_append_only():
     create_all()
     write_audit("payment", "pay_1", "agent", "scored", {"score": 85})
     with Session(engine) as s:
-        row = s.exec(select(AuditLog)).one()
+        row = s.exec(select(AuditLog).where(AuditLog.entity_id == "pay_1")).one()
         assert row.actor.value == "agent"
         row.action = "tampered"
         s.add(row)

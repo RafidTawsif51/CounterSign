@@ -20,6 +20,10 @@ venv/
 node_modules/
 frontend/dist/
 
+# Uploaded invoice PDFs
+uploads/
+backend/uploads/
+
 # Generated demo and seed output
 backend/seed/invoices/*.pdf
 demo/backup-run.mp4

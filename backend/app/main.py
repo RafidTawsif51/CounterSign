@@ -8,6 +8,7 @@ from sqlmodel import Session
 from app import dev, events
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
+from app.services import ingest
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ def health(session: Session = Depends(get_session)) -> dict:
 
 
 api.include_router(events.router)
+api.include_router(ingest.router)
 api.include_router(dev.router)
 
 app.include_router(api)

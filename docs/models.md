@@ -88,11 +88,11 @@ Only verify.py writes (seed excepted).
 | Field | Type | Notes |
 |---|---|---|
 | id | str PK | |
-| vendor_id | str FK | |
+| vendor_id | str FK, null | null for an uploaded PDF with no message, until extraction |
 | message_id | str FK, null | |
-| number | str | invoice number |
-| amount_usd | float | |
-| due_date | date | |
+| number | str, null | invoice number; null until extraction |
+| amount_usd | float, null | null until extraction. The payment run must skip invoices where this is null |
+| due_date | date, null | null until extraction |
 | remittance_json | JSON, null | bank details as extracted |
 | pdf_path | str, null | |
 | extracted_json | JSON, null | full extraction output |

@@ -179,11 +179,12 @@ class Invoice(SQLModel, table=True):
     __tablename__ = "invoices"
 
     id: str = id_field("inv")
-    vendor_id: str = Field(foreign_key="vendors.id", index=True)
+    # vendor_id, number, amount_usd and due_date are null for an uploaded PDF until extraction fills them.
+    vendor_id: Optional[str] = Field(default=None, foreign_key="vendors.id", index=True)
     message_id: Optional[str] = Field(default=None, foreign_key="messages.id", index=True)
-    number: str
-    amount_usd: float
-    due_date: date
+    number: Optional[str] = None
+    amount_usd: Optional[float] = None
+    due_date: Optional[date] = None
     remittance_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     pdf_path: Optional[str] = None
     extracted_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))

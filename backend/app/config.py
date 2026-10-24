@@ -42,6 +42,9 @@ class Settings(BaseSettings):
 
     bounty_webhook_secret: str = ""
 
+    # Where uploaded invoice PDFs are saved (generated filenames only).
+    upload_dir: str = "./uploads"
+
     frontend_url: str = ""
 
     @property
