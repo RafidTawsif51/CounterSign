@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     mock_apify: bool = True
     mock_twilio: bool = True
     mock_cartesia: bool = True
-    mock_claude: bool = True
+    mock_claude: bool = True  # extraction only
+    mock_injection: bool = True
+    mock_risk: bool = True
 
     anthropic_api_key: str = ""
     claude_model_main: str = "claude-sonnet-5-5"
@@ -71,6 +73,8 @@ class Settings(BaseSettings):
             "twilio": self.mock_twilio,
             "cartesia": self.mock_cartesia,
             "claude": self.mock_claude,
+            "injection": self.mock_injection,
+            "risk": self.mock_risk,
         }
 
 

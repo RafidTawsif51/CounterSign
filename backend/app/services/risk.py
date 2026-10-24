@@ -5,7 +5,8 @@
 #   queries it) and persists with Assessment.to_row(). Hard rules are checked first and always force
 #   a hold; no weight, model or context value can lower a decision below what a fired rule requires.
 #   Every signal carries an evidence_id so /ask can cite it.
-# Flag: MOCK_CLAUDE (the urgency/authority classifier is the Claude part).
+# Flag: MOCK_RISK (separate from MOCK_CLAUDE, which only covers extraction). The urgency/authority
+#   classifier is the Claude part.
 # The mock is complete for the hard rules and all eight spec weights; urgency uses the keyword list
 # only. Weights are hackathon starting points, not validated values.
 #
@@ -233,11 +234,11 @@ class RealRiskAssessor(MockRiskAssessor):
     """Same rules, with the Claude urgency/authority classifier in place of the keyword list."""
 
     def assess(self, payment: Payment, context: RiskContext) -> Assessment:
-        raise NotImplementedError("Real risk assessor is not built yet; set MOCK_CLAUDE=true")
+        raise NotImplementedError("Real risk assessor is not built yet; set MOCK_RISK=true")
 
 
 def get_assessor() -> RiskAssessor:
-    return MockRiskAssessor() if get_settings().mock_claude else RealRiskAssessor()
+    return MockRiskAssessor() if get_settings().mock_risk else RealRiskAssessor()
 
 
 def assess(payment: Payment, context: RiskContext) -> Assessment:

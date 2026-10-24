@@ -15,7 +15,7 @@ def test_health():
     body = r.json()
     assert body["status"] == "ok"
     assert body["database"] == "sqlite"
-    assert set(body["mocks"]) == {"nessie", "crs", "apify", "twilio", "cartesia", "claude"}
+    assert set(body["mocks"]) == {"nessie", "crs", "apify", "twilio", "cartesia", "claude", "injection", "risk"}
 
 
 def test_cors_allows_localhost_and_frontend_url():

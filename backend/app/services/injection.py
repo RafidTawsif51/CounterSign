@@ -5,7 +5,8 @@
 #   store results. Never raises on hostile input. An empty list means nothing was found.
 #   Finding.evidence_id is the id of the injection_findings row (save_findings stores it under that
 #   id), so /ask can cite it.
-# Flag: MOCK_CLAUDE (layer 2, the instruction classifier, is the Claude part; layer 1 is local).
+# Flag: MOCK_INJECTION (separate from MOCK_CLAUDE, which only covers extraction). Layer 2, the
+#   instruction classifier, is the Claude part; layer 1 is local.
 # The mock runs a simplified layer 1 (hidden content) and a keyword layer 2. The real version adds
 # the Claude Haiku classifier.
 
@@ -138,11 +139,11 @@ class RealScanner:
     """Layer 1 with full coverage plus the Claude Haiku yes/no instruction classifier. Aditya builds this."""
 
     def scan(self, item: ScanItem) -> list[Finding]:
-        raise NotImplementedError("Real injection scanner is not built yet; set MOCK_CLAUDE=true")
+        raise NotImplementedError("Real injection scanner is not built yet; set MOCK_INJECTION=true")
 
 
 def get_scanner() -> Scanner:
-    return MockScanner() if get_settings().mock_claude else RealScanner()
+    return MockScanner() if get_settings().mock_injection else RealScanner()
 
 
 def scan(item: ScanItem) -> list[Finding]:

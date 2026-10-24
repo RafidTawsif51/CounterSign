@@ -113,7 +113,7 @@ def test_save_findings_uses_evidence_id():
 
 
 def test_injection_real_flag_not_built(monkeypatch):
-    monkeypatch.setattr(injection, "get_settings", lambda: Settings(mock_claude=False))
+    monkeypatch.setattr(injection, "get_settings", lambda: Settings(mock_injection=False))
     with pytest.raises(NotImplementedError):
         injection.scan(ScanItem(kind="email", text="x"))
 
@@ -246,7 +246,7 @@ def test_assessment_to_row_roundtrip():
 
 
 def test_risk_real_flag_not_built(monkeypatch):
-    monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_claude=False))
+    monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_risk=False))
     with pytest.raises(NotImplementedError):
         risk.assess(pay(), ctx())
 
@@ -465,3 +465,18 @@ def test_payments_real_flag_not_built(monkeypatch):
     p = Payment(run_id="r", invoice_id="i", amount_usd=10, destination_account_id="bac_1", status=PaymentStatus.pending)
     with pytest.raises(NotImplementedError):
         run(payments.send_transfer(p))
+
+
+def test_injection_and_risk_flags_are_independent_of_claude_flag(monkeypatch):
+    # Turning real Claude extraction on must not swap in the real scanner or risk engine.
+    s = Settings(mock_claude=False, mock_injection=True, mock_risk=True)
+    monkeypatch.setattr(injection, "get_settings", lambda: s)
+    monkeypatch.setattr(risk, "get_settings", lambda: s)
+    assert isinstance(injection.get_scanner(), injection.MockScanner)
+    assert isinstance(risk.get_assessor(), risk.MockRiskAssessor)
+    # And the reverse: real scanner/risk with Claude extraction still mocked.
+    s2 = Settings(mock_claude=True, mock_injection=False, mock_risk=False)
+    monkeypatch.setattr(injection, "get_settings", lambda: s2)
+    monkeypatch.setattr(risk, "get_settings", lambda: s2)
+    assert isinstance(injection.get_scanner(), injection.RealScanner)
+    assert isinstance(risk.get_assessor(), risk.RealRiskAssessor)
