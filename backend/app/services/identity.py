@@ -78,3 +78,18 @@ def get_checker() -> IdentityChecker:
 
 async def check(vendor: Vendor) -> IdentityResult:
     return await get_checker().check(vendor)
+
+
+async def check_vendor(vendor_id: str) -> dict:
+    """{status, details} for a vendor id."""
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    with Session(engine) as s:
+        vendor = s.get(Vendor, vendor_id)
+        if vendor is None:
+            raise ValueError("vendor not found")
+        s.expunge(vendor)
+    r = await check(vendor)
+    return {"status": r.status, "details": r.model_dump(mode="json")}
