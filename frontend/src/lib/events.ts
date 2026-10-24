@@ -1,34 +1,66 @@
 // Live run events. Screens use useRunEvents(runId) and never learn whether events come from the mock run
-// (VITE_USE_MOCKS=true) or from the server's SSE stream. Wire format: docs/events.md.
+// (mock mode) or from the server's SSE stream. Wire format: docs/events.md.
 
 import { useEffect, useState } from "react";
-import { USE_MOCKS, streamUrl } from "@/lib/api";
+import { streamUrl } from "@/lib/api";
+import { reportFailure } from "@/lib/connection";
+import { isMock, useDataMode } from "@/lib/data-mode";
 import { mockSubscribe } from "@/lib/mock";
 import type { AttackLoggedEvent, RunEvent } from "@/lib/types";
 
 export type Unsubscribe = () => void;
 
-/** connecting: waiting for the stream. live: events flowing. complete: run.report received, stream closed. */
-export type StreamStatus = "idle" | "connecting" | "live" | "complete" | "error";
+/**
+ * connecting: first connection. live: events flowing. reconnecting: the stream dropped and is being reopened (backoff).
+ * complete: run.report received, stream closed.
+ */
+export type StreamStatus = "idle" | "connecting" | "live" | "reconnecting" | "complete";
 
 interface Transport {
   open(path: string, onEvent: (e: RunEvent) => void, onStatus: (s: StreamStatus) => void): Unsubscribe;
 }
 
+/** Backoff between reconnects: 1 s, 2 s, 4 s, 8 s, then every 10 s until the server is back. */
+export const RECONNECT_MAX_MS = 10_000;
+const backoff = (attempt: number) => Math.min(RECONNECT_MAX_MS, 1000 * 2 ** attempt);
+
 const sseTransport: Transport = {
   open(path, onEvent, onStatus) {
-    const source = new EventSource(streamUrl(path));
-    source.onopen = () => onStatus("live");
-    source.onmessage = (msg) => {
-      try {
-        onEvent(JSON.parse(msg.data) as RunEvent);
-      } catch {
-        // A malformed frame is dropped; the next one still arrives.
-      }
+    let source: EventSource | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let closed = false;
+
+    // EventSource retries on its own, but gives up for good on some failures (a 5xx, a proxy error page) and never backs
+    // off. So every error closes it and this reopens on our schedule. The server replays a run's stored events on each
+    // connection; useRunEvents drops the repeats by event id.
+    const connect = () => {
+      source = new EventSource(streamUrl(path));
+      source.onopen = () => {
+        attempt = 0;
+        onStatus("live");
+      };
+      source.onmessage = (msg) => {
+        try {
+          onEvent(JSON.parse(msg.data) as RunEvent);
+        } catch {
+          // A malformed frame is dropped; the next one still arrives.
+        }
+      };
+      source.onerror = () => {
+        source?.close();
+        if (closed) return;
+        reportFailure();
+        onStatus("reconnecting");
+        timer = setTimeout(connect, backoff(attempt++));
+      };
     };
-    // EventSource retries on its own (server sends retry: 3000); CLOSED means it gave up.
-    source.onerror = () => onStatus(source.readyState === EventSource.CLOSED ? "error" : "connecting");
-    return () => source.close();
+    connect();
+    return () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      source?.close();
+    };
   },
 };
 
@@ -39,7 +71,8 @@ const mockTransport: Transport = {
   },
 };
 
-const transport = USE_MOCKS ? mockTransport : sseTransport;
+// Chosen per subscription: the offline-demo switch closes live streams and reopens them on the mock.
+const transport = () => (isMock() ? mockTransport : sseTransport);
 
 const runPath = (runId: string) => `/api/payment-runs/${encodeURIComponent(runId)}/events`;
 
@@ -51,10 +84,13 @@ export interface RunEventsState {
 
 /**
  * Every event of one run. Stored events replay first, so connecting late is fine. A reconnect replays the run from the
- * start; events are de-duplicated by id. The stream closes itself after run.report. Pass null for no run.
+ * start; events are de-duplicated by id. Pass null for no run. The stream stays open after run.report (the server keeps
+ * it open too): a controller's approve or reject arrives later on the same run, as payment.reviewed then payment.paid
+ * or payment.blocked. Status stays "complete" from run.report on, except while reconnecting.
  */
 export function useRunEvents(runId: string | null): RunEventsState {
   const [state, setState] = useState<RunEventsState>({ events: [], status: runId ? "connecting" : "idle" });
+  const mode = useDataMode();
 
   useEffect(() => {
     if (!runId) {
@@ -65,26 +101,27 @@ export function useRunEvents(runId: string | null): RunEventsState {
 
     const seen = new Set<string>();
     let closed = false;
-    const close = transport.open(
+    let done = false;
+    const close = transport().open(
       runPath(runId),
       (event) => {
         if (closed || seen.has(event.id)) return;
         seen.add(event.id);
-        const done = event.type === "run.report";
+        if (event.type === "run.report") done = true;
         setState((s) => ({ events: [...s.events, event], status: done ? "complete" : "live" }));
-        if (done) {
-          closed = true;
-          queueMicrotask(close);
-        }
       },
-      (status) => !closed && setState((s) => (s.status === status ? s : { ...s, status })),
+      (status) => {
+        if (closed) return;
+        const next = done && status === "live" ? "complete" : status;
+        setState((s) => (s.status === next ? s : { ...s, status: next }));
+      },
     );
 
     return () => {
       closed = true;
       close();
     };
-  }, [runId]);
+  }, [runId, mode]);
 
   return state;
 }
@@ -109,15 +146,18 @@ export interface GlobalEventsState {
 }
 
 /**
- * The global channel (GET /api/leaderboard/events), kept open for the whole session. In real mode a verification call can
- * finish after the run stream closed; its events (and the payment's final status) arrive here. No replay.
+ * The global channel (GET /api/leaderboard/events), kept open for the whole session. A verification call can finish
+ * after the run stream closed (or while it was reconnecting); its events, and the payment's final status, arrive here.
+ * No replay. Reopened on the offline-demo switch like every other stream.
  */
 export function useGlobalEvents(): GlobalEventsState {
   const [state, setState] = useState<GlobalEventsState>({ events: [], connections: 0 });
+  const mode = useDataMode();
   useEffect(() => {
+    setState((s) => ({ ...s, events: [] }));
     const seen = new Set<string>();
     let wasLive = false;
-    const close = transport.open(
+    return transport().open(
       "/api/leaderboard/events",
       (event) => {
         if (!LATE_TYPES.has(event.type) || seen.has(event.id)) return;
@@ -131,8 +171,7 @@ export function useGlobalEvents(): GlobalEventsState {
         } else if (status !== "live") wasLive = false;
       },
     );
-    return close;
-  }, []);
+  }, [mode]);
   return state;
 }
 
@@ -145,7 +184,10 @@ export function mergeEvents(own: RunEvent[], late: RunEvent[]): RunEvent[] {
   return [...own, ...extra].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)); // stable
 }
 
-/** Live attack.logged events for the leaderboard. No replay: load history with api.leaderboard() first. */
-export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void): Unsubscribe {
-  return transport.open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), () => {});
+/**
+ * Live attack.logged events for the leaderboard. No replay: load history with api.leaderboard() first, and again after
+ * a reconnect (onStatus reports "live" once the stream is back).
+ */
+export function subscribeLeaderboard(onEvent: (e: AttackLoggedEvent) => void, onStatus: (s: StreamStatus) => void = () => {}): Unsubscribe {
+  return transport().open("/api/leaderboard/events", (e) => e.type === "attack.logged" && onEvent(e), onStatus);
 }

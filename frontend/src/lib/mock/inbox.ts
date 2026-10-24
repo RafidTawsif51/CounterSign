@@ -82,7 +82,7 @@ export function mockThreads(): InboxThreadSummary[] {
 
 export function mockThread(threadId: string): InboxThreadDetail {
   const msgs = grouped().get(threadId);
-  if (!msgs) throw new ApiError(404, `/api/inbox/threads/${threadId}`, `GET /api/inbox/threads/${threadId} failed (404): thread not found`);
+  if (!msgs) throw new ApiError(404, `/api/inbox/threads/${threadId}`, `Thread not found`);
   return { ...summary(threadId, msgs), messages: msgs.map((m) => ({ ...m, is_html: /<\s*(html|body|div|p|br|span|a|table)\b/i.test(m.body), invoice_ids: invoicesOf(m.id), invoices: refsOf(m.id) })) };
 }
 
@@ -90,7 +90,7 @@ export function mockThread(threadId: string): InboxThreadDetail {
 export function mockAddMessage(body: unknown): InboxMessage {
   const path = "/api/inbox/messages";
   const b = (body ?? {}) as Partial<Record<"thread_id" | "from_addr" | "reply_to" | "subject" | "body", string>>;
-  const bad = (why: string) => new ApiError(422, path, `POST ${path} failed (422): ${why}`);
+  const bad = (why: string) => new ApiError(422, path, `${why}`);
   if (!b.from_addr || !EMAIL.test(b.from_addr)) throw bad("from_addr is not a valid email address");
   if (b.reply_to && !EMAIL.test(b.reply_to)) throw bad("reply_to is not a valid email address");
   if (!b.subject?.trim()) throw bad("subject is required");
@@ -180,7 +180,7 @@ export function mockVendors(): VendorSummary[] {
 }
 
 /** backend identity.MockIdentityChecker: verified, match 0.90 to 0.99, stable per vendor. */
-function identityFor(vendorId: string): IdentityResult {
+export function identityFor(vendorId: string): IdentityResult {
   const score = 0.9 + (hashSeed(vendorId) % 10) / 100;
   return {
     vendor_id: vendorId,
@@ -198,7 +198,7 @@ const maskPhone = (phone: string) => (phone.length > 6 ? `${phone.slice(0, 2)}**
 
 export function mockVendorHistory(vendorId: string): VendorHistory {
   const vendor = vendorById.get(vendorId);
-  if (!vendor) throw new ApiError(404, `/api/vendors/${vendorId}/history`, `GET /api/vendors/${vendorId}/history failed (404): vendor not found`);
+  if (!vendor) throw new ApiError(404, `/api/vendors/${vendorId}/history`, `Vendor not found`);
 
   const current: HistoryInvoice[] = openInvoices
     .filter((i) => i.vendor_id === vendorId)

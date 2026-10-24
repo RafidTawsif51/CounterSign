@@ -61,7 +61,7 @@ export function InvoicePreview({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[720px] grid-rows-[auto_1fr_auto] overflow-hidden p-0">
+      <DialogContent className="max-h-[calc(100dvh/var(--present-zoom)-2rem)] max-w-[720px] grid-rows-[auto_1fr_auto] overflow-hidden p-0">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule px-5 py-3 pr-12">
           <div className="min-w-0 flex-1">
             <DialogTitle className="figure truncate text-md font-medium">{name}</DialogTitle>

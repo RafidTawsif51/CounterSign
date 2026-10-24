@@ -3,9 +3,9 @@ import { iconProps } from "@/components/shared/icon";
 import { EvidenceRef, useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
 import { hardRuleInfo } from "@/lib/risk-catalog";
-import type { RiskAssessment } from "@/lib/types";
+import type { PaymentDetail } from "@/lib/types";
 
-export function HardRules({ risk }: { risk: RiskAssessment | null }) {
+export function HardRules({ risk }: { risk: PaymentDetail["risk"] }) {
   const rules = risk?.hard_rules_fired ?? [];
   return (
     <Section title="Hard rules fired">

@@ -10,6 +10,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./styles/globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { subscribeDataMode } from "@/lib/data-mode";
 import { App } from "./App";
 
 const queryClient = new QueryClient({
@@ -17,6 +18,9 @@ const queryClient = new QueryClient({
     queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false },
   },
 });
+
+// Cached answers belong to the server or to the mock. On the offline-demo switch (either way), refetch everything.
+subscribeDataMode(() => void queryClient.resetQueries());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

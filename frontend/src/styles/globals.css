@@ -262,6 +262,16 @@
     color: var(--ink);
   }
 
+  /* Presentation mode (F): the venue screen reads from across the room. Zoom scales type and spacing together, so the
+     4px rhythm holds; layouts sized to the viewport divide by --present-zoom to still fit one screen. */
+  :root {
+    --present-zoom: 1;
+  }
+  :root[data-presenting] {
+    --present-zoom: 1.15;
+    zoom: 1.15;
+  }
+
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;

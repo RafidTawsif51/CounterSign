@@ -31,7 +31,7 @@ def _nessie_row(s, session: Session) -> dict:
         return {"name": name, "mode": "degraded", "last_success_at": last_iso,
                 "detail": f"The last transfer fell back to a mock id ({h.get('last_failure')})"}
     detail = "Real Capital One Nessie API, sandbox money" if last else "Real Capital One Nessie API, sandbox money. No transfer yet this session"
-    return {"name": name, "mode": "sandbox", "detail": detail, "last_success_at": last_iso}
+    return {"name": name, "mode": "sandboxed", "detail": detail, "last_success_at": last_iso}
 
 
 def _apify_row(s) -> dict:
@@ -61,7 +61,7 @@ def system_status(session: Session = Depends(get_session)) -> list[dict]:
         _row("Verification call (Twilio)", s.mock_twilio, "Real call to an allow-listed number", "Scripted call, no phone"),
         _row("Call voice (Cartesia)", s.mock_cartesia, "Cartesia text to speech", "No synthesized voice"),
         _apify_row(s),
-        _row("Vendor identity (CRS)", s.mock_crs, "CRS sandbox, provided test identities", "Mock identity check", real_mode="sandbox"),
+        _row("Vendor identity (CRS)", s.mock_crs, "CRS sandbox, provided test identities", "Mock identity check", real_mode="sandboxed"),
         _nessie_row(s, session),
         {"name": "Company and vendor history", "mode": "simulated", "detail": f"Ridgeline Builders: {vendors} vendors, {invoices} invoices, generated from realistic patterns"},
         {"name": "Attacks on the leaderboard", "mode": "real", "detail": f"{attacks} {'attempt' if attacks == 1 else 'attempts'} from judges and hackers"},

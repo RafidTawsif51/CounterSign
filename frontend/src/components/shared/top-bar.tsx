@@ -1,18 +1,28 @@
-import { Link } from "react-router-dom";
-import { FlaskRound, Search } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Keyboard, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { iconProps } from "@/components/shared/icon";
 import { Kbd, modKey } from "@/components/shared/kbd";
+import { DataModeIndicator } from "@/components/shared/offline-demo";
 import { ResetDemoDialog } from "@/components/shared/reset-demo-dialog";
 import { useCurrentRun } from "@/components/shared/run-context";
-import { USE_MOCKS } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
+export function TopBar({
+  onOpenPalette,
+  onOpenShortcuts,
+  resetOpen,
+  onResetOpenChange,
+}: {
+  onOpenPalette: () => void;
+  onOpenShortcuts: () => void;
+  resetOpen: boolean;
+  onResetOpenChange: (open: boolean) => void;
+}) {
   return (
     <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-4 border-b border-rule bg-paper px-4 sm:px-6">
-      <span className="shrink-0 font-medium">Ridgeline Builders</span>
-      <span aria-hidden className="h-4 w-px shrink-0 bg-rule-strong" />
+      {/* On a phone the live run line matters more than the company name, which the board already shows. */}
+      <span className="hidden shrink-0 font-medium sm:inline">Ridgeline Builders</span>
+      <span aria-hidden className="hidden h-4 w-px shrink-0 bg-rule-strong sm:block" />
       <RunStatus />
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -26,32 +36,26 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           <Kbd>{modKey}K</Kbd>
         </button>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Link
-              to="/status"
-              className="hidden h-7 items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 text-sm text-ink-muted transition-colors hover:text-ink md:inline-flex"
-            >
-              <FlaskRound {...iconProps} />
-              {USE_MOCKS ? "Sandbox, mock data" : "Sandbox"}
-            </Link>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">All money is sandbox money. See what is real and what is simulated.</TooltipContent>
-        </Tooltip>
+        <DataModeIndicator />
 
-        <ResetDemoDialog />
+        <Button size="icon-sm" variant="ghost" onClick={onOpenShortcuts} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" className="hidden sm:inline-flex">
+          <Keyboard {...iconProps} />
+        </Button>
+
+        <ResetDemoDialog open={resetOpen} onOpenChange={onResetOpenChange} />
       </div>
     </header>
   );
 }
 
 function RunStatus() {
-  const { runId, status, summary } = useCurrentRun();
+  const { runId, status, summary, runFailed } = useCurrentRun();
   const total = summary.invoiceCount;
 
   let detail: React.ReactNode;
   if (!runId) detail = <span className="text-ink-muted">Not started</span>;
-  else if (status === "error") detail = <span className="text-ink-muted">Lost the connection to this run</span>;
+  else if (status === "reconnecting") detail = <span className="text-ink-muted">Reconnecting…</span>;
+  else if (runFailed) detail = <span className="text-ink-muted">Stopped when the server restarted. Start a new run.</span>;
   else if (total == null) detail = <span className="text-ink-muted">Starting</span>;
   else
     detail = (
@@ -60,7 +64,7 @@ function RunStatus() {
       </span>
     );
 
-  const live = runId && !summary.completed && status !== "error";
+  const live = runId && !summary.completed && !runFailed && status === "live";
 
   return (
     <div className="flex min-w-0 items-center gap-2 text-sm" aria-live="polite">

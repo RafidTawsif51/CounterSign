@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EvidenceRef } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
+import { InlineError } from "@/components/shared/inline-error";
 import { api } from "@/lib/api";
 import { ASK_BUDGET_MS, drawerTarget, suggestedQuestions } from "@/lib/ask";
 import { signalInfo } from "@/lib/risk-catalog";
@@ -20,6 +21,8 @@ import { cn } from "@/lib/utils";
 export const ASK_PARAM = "ask";
 
 interface Exchange {
+  /** What was asked. The response's question can be the cache's normalized form ("why was this blocked"). */
+  question: string;
   answer: AskAnswer;
   ms: number;
 }
@@ -33,7 +36,7 @@ export function AskPanel({ detail }: { detail: PaymentDetail }) {
     mutationFn: async (q: string): Promise<Exchange> => {
       const started = performance.now();
       const answer = await api.ask(detail.payment.id, q);
-      return { answer, ms: performance.now() - started };
+      return { question: q, answer, ms: performance.now() - started };
     },
   });
 
@@ -87,10 +90,7 @@ export function AskPanel({ detail }: { detail: PaymentDetail }) {
         <div aria-live="polite">
           {ask.isPending && <Waiting key={ask.submittedAt} question={ask.variables ?? ""} />}
           {ask.isError && !ask.isPending && (
-            <p className="mt-4 text-sm">
-              No answer: {ask.error instanceof Error ? ask.error.message : "the server did not respond"}. Ask again, or read the
-              evidence below.
-            </p>
+            <InlineError what="The answer" error={ask.error} onRetry={() => ask.variables && ask.mutate(ask.variables)} className="mt-4" />
           )}
           {ask.data && !ask.isPending && <Answer exchange={ask.data} detail={detail} />}
         </div>
@@ -120,13 +120,13 @@ function Waiting({ question }: { question: string }) {
 }
 
 function Answer({ exchange, detail }: { exchange: Exchange; detail: PaymentDetail }) {
-  const { answer, ms } = exchange;
+  const { question, answer, ms } = exchange;
   const records = new Map(answer.evidence.map((e) => [e.id, e]));
   const over = ms > ASK_BUDGET_MS;
 
   return (
     <div className="mt-4">
-      <p className="text-sm text-ink-muted">{answer.question}</p>
+      <p className="text-sm text-ink-muted">{question}</p>
       {/* Model output built from untrusted evidence: plain text only. The claims are the answer, each followed by the id
           that backs it; the prose answer is shown only when no claim survived (the backend drops uncited claims). */}
       <p className="mt-1.5 max-w-[72ch] text-md">
@@ -146,7 +146,7 @@ function Answer({ exchange, detail }: { exchange: Exchange; detail: PaymentDetai
       </p>
       <p className="mt-2 flex flex-wrap gap-x-3 text-sm text-ink-muted">
         <span>
-          answered in <span className={cn("figure", over ? "text-ink" : "text-ink-muted")}>{(ms / 1000).toFixed(1)}s</span>
+          answered in <span className={cn("figure", over ? "text-ink" : "text-ink-muted")}>{seconds(ms)}</span>
           {over && " (over the 5s target)"}
         </span>
         <span>{sourceNote(answer)}</span>
@@ -154,6 +154,9 @@ function Answer({ exchange, detail }: { exchange: Exchange; detail: PaymentDetai
     </div>
   );
 }
+
+/** `1.8s`; a cached answer comes back in milliseconds, which reads as `0.04s` rather than a broken-looking `0.0s`. */
+const seconds = (ms: number) => (ms < 100 ? `${(ms / 1000).toFixed(2)}s` : `${(ms / 1000).toFixed(1)}s`);
 
 const head = (text: string) => text.slice(0, text.lastIndexOf(" ") + 1);
 const tail = (text: string) => text.slice(text.lastIndexOf(" ") + 1);

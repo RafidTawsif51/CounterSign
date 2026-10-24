@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils";
 import { destinationChanged, requestedAccount } from "@/lib/verdict";
 
 export function Destination({ detail }: { detail: PaymentDetail }) {
-  const last = detail.last_verified_account;
+  const last = detail.payment.last_verified_account;
   const req = requestedAccount(detail);
   const changed = destinationChanged(detail);
-  const signals = detail.risk?.signals_json ?? [];
+  const signals = detail.risk?.signals ?? [];
   const find = (name: string) => signals.find((s) => s.name === name);
   const bank = find("bank_details_changed");
   const confirmedCall = detail.calls.find((c) => c.outcome === "confirmed");
@@ -63,7 +63,7 @@ export function Destination({ detail }: { detail: PaymentDetail }) {
 
 /** The invoice pays the account already verified: one line instead of two identical cells. */
 function SameAccount({ detail }: { detail: PaymentDetail }) {
-  const last = detail.last_verified_account!;
+  const last = detail.payment.last_verified_account!;
   const source = useEvidenceSource([last.id, last.verified_by_call_id]);
   return (
     <div {...source} className={cn(source.className, "-mx-2 flex flex-wrap items-baseline gap-x-2 px-2 py-1 text-sm")}>
@@ -72,7 +72,7 @@ function SameAccount({ detail }: { detail: PaymentDetail }) {
       <span className="text-ink-muted">
         {last.bank_name}, {last.verified_by_call_id ? "verified by call" : "verified at onboarding"} {formatDate(last.valid_from)}
       </span>
-      <EvidenceRef id={last.id} className="ml-auto" />
+      <EvidenceRef id={last.id} />
     </div>
   );
 }
@@ -115,7 +115,7 @@ function SenderRows({
   firstSender?: Signal;
 }) {
   const msg = detail.message!;
-  const known = detail.vendor.email_domain.toLowerCase();
+  const known = (detail.vendor?.email_domain ?? "").toLowerCase();
   const sender = domainOf(msg.from_addr);
   const diff = lookalike ? diffDomains(known, sender) : null;
   const local = msg.from_addr.slice(0, msg.from_addr.length - sender.length);

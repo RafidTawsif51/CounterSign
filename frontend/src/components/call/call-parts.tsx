@@ -110,7 +110,8 @@ export function useNumberTrust(vendorId: string | null, dialed: ContactLike | nu
     staleTime: Infinity,
   });
   const contacts = data?.contacts ?? [];
-  const contact = dialed ?? contacts.find((c) => c.source === (source ?? "on_file")) ?? null;
+  // A call's contact carries no first_seen; the same contact in the vendor history does.
+  const contact = (dialed && contacts.find((c) => c.id === dialed.id)) ?? dialed ?? contacts.find((c) => c.source === (source ?? "on_file")) ?? null;
   return numberTrust(contact, contacts);
 }
 

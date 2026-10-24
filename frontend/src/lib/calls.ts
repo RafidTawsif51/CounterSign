@@ -4,7 +4,7 @@
 import type { CallOutcome, CallStartedEvent, ContactSource, PaymentDetail, RunEvent, TranscriptLine, VendorContact } from "@/lib/types";
 
 /** A stored contact or a history contact (phone masked to the last four). Both carry what the trust line needs. */
-export type ContactLike = Pick<VendorContact, "id" | "phone" | "source" | "source_url" | "first_seen">;
+export type ContactLike = Pick<VendorContact, "id" | "phone" | "source" | "source_url"> & { first_seen?: string };
 
 /** queued: held for a call that has not started. dialing: started, nobody has spoken. live: talking. ended: outcome in. */
 export type CallPhase = "queued" | "dialing" | "live" | "ended";
@@ -110,14 +110,14 @@ export function callFromDetail(d: PaymentDetail): CallView | null {
   const call = d.calls.at(-1);
   if (!call) {
     const waiting = d.payment.status === "held" && d.risk?.decision === "hold_and_verify";
-    return waiting ? blank(d.payment.id, d.vendor.name) : null;
+    return waiting ? blank(d.payment.id, d.vendor?.name ?? "the vendor") : null;
   }
   const lines = call.transcript ?? [];
   // The record has no end time; the audit entry verify.py writes with the outcome does.
-  const ended = [...d.audit].reverse().find((a) => a.action === "verification_call" && (a.detail_json as { call_id?: string } | null)?.call_id === call.id);
+  const ended = [...d.audit].reverse().find((a) => a.action === "verification_call" && a.detail?.call_id === call.id);
   return {
     paymentId: d.payment.id,
-    vendor: d.vendor.name,
+    vendor: d.vendor?.name ?? "the vendor",
     phase: call.outcome ? "ended" : lines.length ? "live" : "dialing",
     contactSource: call.contact?.source ?? null,
     startedAt: call.started_at,
@@ -145,7 +145,7 @@ export function numberTrust(dialed: ContactLike | null, others: ContactLike[]): 
   return {
     phone: dialed.phone,
     source: dialed.source,
-    since: dialed.first_seen,
+    since: dialed.first_seen ?? null,
     crossCheck: independent
       ? { source: independent.source, url: independent.source_url, matches: last4(independent.phone) === last4(dialed.phone) }
       : null,

@@ -1,69 +1,68 @@
 // HTTP client for the FastAPI backend. Routes mirror the API table in CLAUDE.md.
-// With VITE_USE_MOCKS=true every call is answered by lib/mock instead of the network.
+// In mock mode (VITE_USE_MOCKS=true, or the offline-demo switch) every call is answered by lib/mock instead.
 
-import { ApiError } from "@/lib/api-error";
+import { ApiError, detailText, statusText } from "@/lib/api-error";
+import { API_URL } from "@/lib/api-url";
+import { reportFailure } from "@/lib/connection";
+import { isMock } from "@/lib/data-mode";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
   LeaderboardResponse,
+  ReviewResult,
   RedTeamResults,
   InboxMessage,
   InboxThreadDetail,
   InboxThreadSummary,
   LaunchAttackRequest,
   LaunchAttackResponse,
-  UploadInvoiceResponse,
+  HealthResponse,
   PaymentDetail,
-  PaymentRun,
-  RunTotals,
-  Payment,
-  Invoice,
-  Vendor,
-  Message,
-  VendorBankAccount,
-  RiskAssessment,
-  InjectionFinding,
-  VerificationCall,
-  VendorContact,
-  AuditLogEntry,
-  PaymentActions,
-  IndependentContact,
+  RunStatusResponse,
   StartRunResponse,
+  UploadResult,
   SystemComponentStatus,
   VendorSummary,
   VendorHistory,
 } from "@/lib/types";
 
-export const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
+export { API_URL };
 /** The Rob Countersign bounty inbox, or "" until the organizers approve advertising it. */
 export const BOUNTY_EMAIL = (import.meta.env.VITE_BOUNTY_EMAIL ?? "").trim();
 
 type Method = "GET" | "POST";
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
-  if (USE_MOCKS) return mockRequest<T>(method, path, body);
+  if (isMock()) return mockRequest<T>(method, path, body);
 
   const isForm = body instanceof FormData;
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
-    body: body == null ? undefined : isForm ? body : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
+      body: body == null ? undefined : isForm ? body : JSON.stringify(body),
+    });
+  } catch {
+    reportFailure();
+    throw new ApiError(0, path, `${statusText(0)} at ${API_URL || window.location.origin}`);
+  }
+  // A proxy in front of a stopped server answers 502 to 504 instead of failing the request.
+  if (res.status >= 502 && res.status <= 504) reportFailure();
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail: string | null = null;
     try {
-      const data = await res.json();
-      // The backend sends either detail: "text" or detail: {error: "text", ...} (409 conflicts).
-      if (typeof data?.detail === "string") detail = data.detail;
-      else if (typeof data?.detail?.error === "string") detail = data.detail.error;
+      detail = detailText(await res.json());
     } catch {
-      // Non-JSON error body; keep the status text.
+      // Not JSON (a proxy page, an HTML error): fall back to the status.
     }
-    throw new ApiError(res.status, path, `${method} ${path} failed (${res.status}): ${detail}`, detail);
+    throw new ApiError(res.status, path, detail ? sentence(detail) : statusText(res.status));
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
+
+/** Server details are lowercase fragments ("payment not found"); show them as a sentence. */
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 const get = <T>(path: string) => request<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
@@ -84,127 +83,40 @@ export const api = {
   uploadInvoice: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return post<UploadInvoiceResponse>("/api/invoices/upload", form);
+    return post<UploadResult>("/api/invoices/upload", form);
   },
 
+  /** 202; 409 while another full run is in progress. */
   startRun: () => post<StartRunResponse>("/api/payment-runs"),
-  run: async (runId: string): Promise<PaymentRun> => {
-    const r = await get<BackendRun>(`/api/payment-runs/${runId}`);
-    return { id: r.id, started_at: r.started_at, completed_at: r.completed_at, status: r.status, totals_json: r.totals };
-  },
+  run: (runId: string) => get<RunStatusResponse>(`/api/payment-runs/${runId}`),
 
-  payment: async (paymentId: string): Promise<PaymentDetail> =>
-    USE_MOCKS ? get<PaymentDetail>(`/api/payments/${paymentId}`) : adaptPayment(await get<BackendPayment>(`/api/payments/${paymentId}`)),
-  approve: (paymentId: string, reason: string, approver: string) => post<void>(`/api/payments/${paymentId}/approve`, { reason, approver }),
-  reject: (paymentId: string, reason: string, approver: string) => post<void>(`/api/payments/${paymentId}/reject`, { reason, approver }),
+  payment: (paymentId: string) => get<PaymentDetail>(`/api/payments/${paymentId}`),
+  /** Held payments only. Pays the vendor's last verified account, never the requested one. */
+  approve: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/approve`, { reason, approver }),
+  reject: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/reject`, { reason, approver }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
+  /** 202; 409 unless the payment is held. Calls at an independent number, never one from the email. Live server only. */
   startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
 
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
   leaderboard: () => get<LeaderboardResponse>("/api/attacks/leaderboard"),
 
+  /** Not on the backend yet: backend/app/redteam is empty. The mock answers results; /red-team shows the error live. */
   runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
   redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 
+  /** What is real, simulated or on its mock right now. /status falls back to the documented list if it fails. */
   systemStatus: () => get<SystemComponentStatus[]>("/api/system/status"),
+  /** Database and every MOCK_* flag as the server reads them. */
+  health: () => get<HealthResponse>("/api/health"),
 };
-
-/** Absolute URL for an SSE endpoint. */
-export function streamUrl(path: string) {
-  return `${API_URL}${path}`;
-}
-
-// ---------- GET /api/payments/{id}: backend shape -> PaymentDetail ----------
-// The backend names several fields differently from the table columns the screens were written against
-// (requested_remittance, signals, injection_findings, detail). Mapping here keeps the screens and the mock unchanged.
-
-interface BackendAccount {
-  id: string;
-  bank_name: string;
-  account_last4: string;
-  valid_from: string;
-  valid_to: string | null;
-  verified_by_call_id: string | null;
-  trusted: boolean;
-}
-
-interface BackendRun {
-  id: string;
-  status: PaymentRun["status"];
-  started_at: string;
-  completed_at: string | null;
-  totals: RunTotals | null;
-}
-
-interface BackendPayment {
-  payment: Pick<Payment, "id" | "run_id" | "status" | "amount_usd" | "nessie_transfer_id"> & {
-    destination: BackendAccount | null;
-    last_verified_account: BackendAccount | null;
-    /** Approving always pays this account: the vendor's verified one, never the one a request asked for. */
-    approve_pays: BackendAccount | null;
-  };
-  actions: PaymentActions;
-  independent_contact: IndependentContact | null;
-  invoice: {
-    id: string;
-    number: string | null;
-    amount_usd: number | null;
-    due_date: string | null;
-    has_pdf: boolean;
-    requested_remittance: Record<string, unknown> | null;
-    requested_account_differs_from_verified: boolean;
-  } | null;
-  vendor: (Vendor & { identity?: unknown }) | null;
-  message: (Message & { is_attack: boolean }) | null;
-  risk: (Omit<RiskAssessment, "payment_id" | "signals_json"> & { signals: RiskAssessment["signals_json"] }) | null;
-  injection_findings: InjectionFinding[];
-  calls: (Omit<VerificationCall, "contact_id"> & { contact: (Pick<VendorContact, "id" | "source" | "source_url" | "phone">) | null })[];
-  audit: (Omit<AuditLogEntry, "detail_json"> & { detail: Record<string, unknown> | null })[];
-}
-
-function adaptPayment(b: BackendPayment): PaymentDetail {
-  const p = b.payment;
-  const vendorId = b.vendor?.id ?? "";
-  const account = (a: BackendAccount | null): VendorBankAccount | null =>
-    a && { ...a, vendor_id: vendorId, routing_hash: "" }; // the API never returns a routing hash
-  const payment: Payment = {
-    id: p.id,
-    run_id: p.run_id,
-    invoice_id: b.invoice?.id ?? "",
-    amount_usd: p.amount_usd,
-    destination_account_id: p.destination?.id ?? null,
-    status: p.status,
-    nessie_transfer_id: p.nessie_transfer_id,
-  };
-  const invoice: Invoice = {
-    id: b.invoice?.id ?? "",
-    vendor_id: b.vendor?.id ?? null,
-    message_id: b.message?.id ?? null,
-    number: b.invoice?.number ?? null,
-    amount_usd: b.invoice?.amount_usd ?? null,
-    due_date: b.invoice?.due_date ?? null,
-    remittance_json: b.invoice?.requested_remittance ?? null,
-    pdf_path: null,
-    extracted_json: null,
-    requested_account_differs: b.invoice?.requested_account_differs_from_verified,
-  };
-  return {
-    payment,
-    invoice,
-    vendor: b.vendor as Vendor,
-    message: b.message,
-    last_verified_account: account(p.last_verified_account),
-    risk: b.risk && { ...b.risk, payment_id: p.id, signals_json: b.risk.signals },
-    findings: b.injection_findings,
-    calls: b.calls.map((c) => ({ ...c, contact_id: c.contact?.id ?? null, contact: c.contact && ({ ...c.contact, vendor_id: vendorId, first_seen: "", last_verified: null } as VendorContact) })),
-    audit: b.audit.map(({ detail, ...a }) => ({ ...a, detail_json: detail })),
-    actions: b.actions,
-    independent_contact: b.independent_contact,
-    approve_pays: account(p.approve_pays),
-  };
-}
 
 /** The original stored PDF of an invoice (GET /api/invoices/{id}/pdf). */
 export function invoicePdfUrl(invoiceId: string) {
   return `${API_URL}/api/invoices/${encodeURIComponent(invoiceId)}/pdf`;
+}
+
+/** Absolute URL for an SSE endpoint. */
+export function streamUrl(path: string) {
+  return `${API_URL}${path}`;
 }
