@@ -1,6 +1,8 @@
 // Mock payment run. Reproduces what backend/app/services/run.py emits for this week's seed: same event order per
 // invoice, same signal names and weights (risk.py), same call script (verify.py MockCaller), 5 invoices in flight at
-// once, invoices taken in id order (so the three inv_atk_* rows come last). Result: 37 paid, 0 held, 3 blocked.
+// once, invoices taken in id order (so the three inv_atk_* rows come last). Result: 37 paid, 1 held, 2 blocked:
+// the Summit call is denied, the poisoned PDF is quarantined, and the Northside (CEO pressure) call comes back
+// unclear (verify.SEEDED_OUTCOMES), so that payment stays held for the controller.
 //
 // Timing is a deterministic jittered schedule per run id, scaled to about 25 seconds.
 
@@ -28,6 +30,7 @@ interface Step {
 const CONCURRENCY = 5; // run.py CONCURRENCY
 const DEFAULT_DURATION_MS = 25_000;
 const DENIED_REASON = "Vendor denied the bank change on the verification call";
+const UNCLEAR_NOTE = "verification unclear; waiting for the controller";
 const QUARANTINE_REASON = "Hidden instructions detected in the document; quarantined";
 
 // ---------- Per-invoice scripts ----------
@@ -43,8 +46,24 @@ function holdReasons(rule: string, signals: Signal[], identity: string) {
   return [`${rule}: Hold and place a verification call`, ...top.map((s) => `${s.name}: ${s.detail}`), identity];
 }
 
-/** The call verify.py's MockCaller places for an attack: agent question, vendor denies, agent closes. */
-function deniedCall(rng: Rng, paymentId: string, vendorName: string, last4: string): { gap: number; event: Draft }[] {
+/** The call verify.py's MockCaller places: agent question, then the vendor's answer and the agent's close. */
+function verificationCall(
+  rng: Rng,
+  paymentId: string,
+  vendorName: string,
+  last4: string,
+  outcome: "denied" | "unclear",
+): { gap: number; event: Draft }[] {
+  const reply =
+    outcome === "denied"
+      ? [
+          { speaker: "vendor" as const, text: "No. We never changed banks." },
+          { speaker: "agent" as const, text: "Thank you. I will not process that change and I am alerting the controller. Goodbye." },
+        ]
+      : [
+          { speaker: "vendor" as const, text: "Sorry, who is this? I am not sure what you are asking." },
+          { speaker: "agent" as const, text: "Thank you. I will pass this to a person. Goodbye." },
+        ];
   const lines = [
     {
       speaker: "agent" as const,
@@ -52,8 +71,7 @@ function deniedCall(rng: Rng, paymentId: string, vendorName: string, last4: stri
         "Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is recorded. " +
         `We received a request to change where we send ${vendorName}'s payments, to an account ending ${last4}. Did your company make this change?`,
     },
-    { speaker: "vendor" as const, text: "No. We never changed banks." },
-    { speaker: "agent" as const, text: "Thank you. I will not process that change and I am alerting the controller. Goodbye." },
+    ...reply,
   ];
   // Each line arrives after roughly the time it takes to say the previous one.
   let speaking = rng.between(1100, 1600); // dialing and pickup
@@ -91,7 +109,9 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: nu
     ];
   }
 
-  // bank_change (Summit) and ceo_pressure (Northside): destination changed, hold_and_verify, call, denied, blocked.
+  // bank_change (Summit) and ceo_pressure (Northside): destination changed, hold_and_verify, then a call.
+  // Summit's call is denied and blocked; Northside's is scripted unclear by the backend and stays held.
+  const outcome = inv.planted === "bank_change" ? "denied" : "unclear";
   const current = accountByVendor.get(inv.vendor_id)!.account_last4;
   const requested = inv.planted === "bank_change" ? ATTACKER_ACCOUNTS.summit.account_last4 : ATTACKER_ACCOUNTS.northside.account_last4;
   const bankChanged = signal(rng, "bank_details_changed", 30, `New account ending ${requested}; last verified ending ${current}`);
@@ -122,9 +142,12 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: nu
     { gap: 40, event: { type: "payment.held", payment_id: pid, reasons: holdReasons("destination_changed", signals, identity) } },
     { gap: 20, event: attackLogged(rng, inv.planted === "bank_change" ? "classic_bank_change" : "ceo_pressure") },
     { gap: rng.between(300, 600), event: { type: "call.started", payment_id: pid, contact_source: "on_file" } },
-    ...deniedCall(rng, pid, vendor.name, requested),
-    { gap: rng.between(900, 1300), event: { type: "call.outcome", payment_id: pid, outcome: "denied" } },
-    { gap: rng.between(120, 250), event: { type: "payment.blocked", payment_id: pid, reason: DENIED_REASON } },
+    ...verificationCall(rng, pid, vendor.name, requested, outcome),
+    { gap: rng.between(900, 1300), event: { type: "call.outcome", payment_id: pid, outcome } },
+    // Denied blocks the payment. Unclear emits nothing more: the payment stays held for the controller.
+    ...(outcome === "denied"
+      ? [{ gap: rng.between(120, 250), event: { type: "payment.blocked", payment_id: pid, reason: DENIED_REASON } as Draft }]
+      : []),
   ];
 }
 
@@ -169,6 +192,7 @@ function buildSchedule(runId: string, durationMs: number): Step[] {
   for (const s of steps) s.t = Math.round(s.t * scale);
 
   // Totals and report, worded as run.py writes them.
+  const noteFor = { bank_change: DENIED_REASON, ceo_pressure: UNCLEAR_NOTE, poisoned_pdf: QUARANTINE_REASON };
   const amountOf = (id: string) => openInvoices.find((i) => i.id === id)!.amount_usd;
   const ids = openInvoices.map((i) => i.id);
   const by = (st: PaymentStatus) => ids.filter((id) => outcome.get(id) === st);
@@ -177,7 +201,7 @@ function buildSchedule(runId: string, durationMs: number): Step[] {
   const notes = openInvoices
     .filter((i) => outcome.get(i.id) !== "paid")
     .sort((a, b) => (paymentId(a.id) < paymentId(b.id) ? -1 : 1))
-    .map((i) => `${vendorById.get(i.vendor_id)!.name}: ${i.planted === "poisoned_pdf" ? QUARANTINE_REASON : DENIED_REASON}`);
+    .map((i) => `${vendorById.get(i.vendor_id)!.name}: ${noteFor[i.planted ?? "bank_change"]}`);
   const totals = { paid: by("paid").length, held: by("held").length, blocked: by("blocked").length };
 
   steps.push(
@@ -207,6 +231,7 @@ interface MockRun {
   completedAt: string | null;
   events: RunEvent[];
   listeners: Set<(e: RunEvent) => void>;
+  timers: ReturnType<typeof setTimeout>[];
 }
 
 const runs = new Map<string, MockRun>();
@@ -216,13 +241,13 @@ let active: string | null = null;
 export function startMockRun(opts: { runId?: string; durationMs?: number } = {}): string {
   if (active) throw new ApiError(409, "/api/payment-runs", `A payment run is already in progress (${active})`);
   const id = opts.runId ?? `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const run: MockRun = { id, startedAt: new Date().toISOString(), completedAt: null, events: [], listeners: new Set() };
+  const run: MockRun = { id, startedAt: new Date().toISOString(), completedAt: null, events: [], listeners: new Set(), timers: [] };
   runs.set(id, run);
   active = id;
 
   const rng = createRng(hashSeed(`${id}:ids`));
   for (const step of buildSchedule(id, opts.durationMs ?? DEFAULT_DURATION_MS)) {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       const event = { ...step.event, id: `evt_${rng.hex(12)}`, run_id: id, at: new Date().toISOString() } as RunEvent;
       run.events.push(event);
       run.listeners.forEach((fn) => fn(event));
@@ -232,8 +257,19 @@ export function startMockRun(opts: { runId?: string; durationMs?: number } = {})
         active = null;
       }
     }, step.t);
+    run.timers.push(timer);
   }
   return id;
+}
+
+/** POST /api/demo/reset in mock mode: stop any run and forget every run, back to the seeded week. */
+export function resetMockRuns() {
+  for (const run of runs.values()) {
+    run.timers.forEach(clearTimeout);
+    run.listeners.clear();
+  }
+  runs.clear();
+  active = null;
 }
 
 /** Stored events replay first, then live ones. An unknown run id starts a run under that id (deep links keep working). */

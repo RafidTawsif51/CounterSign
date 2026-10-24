@@ -1,7 +1,7 @@
 // Mock backend for VITE_USE_MOCKS=true. Data is fictional and mirrors the backend seed (see seed.ts).
 // Routes that are not mocked yet fail loudly so a screen never silently renders made-up shapes.
 
-import { getMockRun, startMockRun, subscribeMockLeaderboard, subscribeMockRun } from "@/lib/mock/run";
+import { getMockRun, resetMockRuns, startMockRun, subscribeMockLeaderboard, subscribeMockRun } from "@/lib/mock/run";
 import { vendors } from "@/lib/mock/seed";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
@@ -29,6 +29,7 @@ type Handler = (params: Record<string, string>, body: unknown) => unknown;
 const routes: [string, Handler][] = [
   ["GET /api/system/status", () => systemStatus],
   ["GET /api/vendors", () => vendors],
+  ["POST /api/demo/reset", () => resetMockRuns()],
   [
     "POST /api/payment-runs",
     (): StartRunResponse => {
