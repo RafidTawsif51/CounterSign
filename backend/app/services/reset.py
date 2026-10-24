@@ -25,7 +25,7 @@ from app import events as ev
 from app.config import get_settings
 from app.db import engine
 from app.models import Attack, AttackSource
-from app.services import attacks, run
+from app.services import ask, attacks, run
 
 log = logging.getLogger("countersign.reset")
 router = APIRouter()
@@ -65,6 +65,7 @@ async def _stop_work() -> None:
     run._active.clear()
     run._mini.clear()
     run._claimed.clear()
+    ask.clear_cache()
     await attacks.start()
     await asyncio.sleep(0.05)  # let an event write that was already on its way finish before the tables are wiped
 
