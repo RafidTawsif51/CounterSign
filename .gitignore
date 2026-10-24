@@ -1,0 +1,30 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local databases
+*.db
+*.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+
+# Generated demo and seed output
+backend/seed/invoices/*.pdf
+demo/backup-run.mp4
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/

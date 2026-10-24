@@ -1,0 +1,36 @@
+# API
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+sse-starlette>=2.1
+websockets>=12
+pydantic-settings>=2.4
+httpx>=0.27
+
+# Database (SQLite is built in; psycopg is for Postgres when deployed)
+sqlmodel>=0.0.22
+psycopg[binary]>=3.2
+
+# LLM
+anthropic>=0.40
+
+# PDF parsing and generation (reportlab builds the seed and poisoned invoices)
+pdfplumber>=0.11
+pypdf>=5
+reportlab>=4
+
+# Data / ML
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+rapidfuzz>=3.9
+
+# Sponsor SDKs
+twilio>=9
+cartesia>=2
+deepgram-sdk>=3
+apify-client>=1.7
+
+# Tests
+pytest>=8
+pytest-asyncio>=0.23
