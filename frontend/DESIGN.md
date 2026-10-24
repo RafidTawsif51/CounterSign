@@ -109,7 +109,7 @@ Line lengths stay under 80 characters for prose. Headings use sentence case.
 
 ## Ledger conventions
 
-- Money is right-aligned, in `figure`, formatted `$48,250.00` (always two decimals). Use the `Money` component or `formatUsd`.
+- Money is right-aligned, in `figure`, formatted `$48,250.00` (always two decimals). Use the `Money` component or `formatUSD` from `lib/format.ts`.
 - Account numbers show as `•••• 4417`.
 - A total sits between a single rule above and a double rule below: wrap it in `.ledger-total`.
 - Exceptions are flagged on the row: add `.row-flag` and `data-status` to the `<tr>`. Held and blocked rows get a 2px status rule on the leading edge plus the tint. Paid and pending rows stay plain so a clean run reads quiet. Flagged rows do not change on hover.
@@ -117,18 +117,28 @@ Line lengths stay under 80 characters for prose. Headings use sentence case.
 
 ## Components
 
-Primitives live in `src/components/ui/`. Add shadcn/ui components through `components.json`; they inherit these tokens through the shadcn variable aliases in `globals.css`. Restyle anything that adds shadows, pills or gradients.
+shadcn/ui primitives live in `src/components/ui/` and have been restyled to these tokens: button, badge, table, sheet, dialog, tabs, tooltip, input, textarea, select, dropdown-menu, separator, scroll-area, skeleton, sonner, command. When adding another with the shadcn CLI, restyle it before use: replace `bg-accent` hovers with `bg-sunken` (our accent is ink blue, not a hover gray), drop `shadow-*` except `shadow-overlay` on overlays, drop `rounded-full`, and swap zoom or slide animations for the ones in Motion below. Import `cn` from `@/lib/utils`, not the `cn` package.
+
+Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`, `attack/`, and `shared/` for cross-screen pieces.
 
 | Component | File | Notes |
 |---|---|---|
-| `Button` | `button.tsx` | Variants: `primary` (one per view, the main action), `secondary` (default), `ghost` (tertiary, toolbar), `danger` (reject and block only). Sizes: `sm` 28px, `md` 32px, `icon` 32px square. Icon on the left, 16px. |
-| `StatusBadge` | `status-badge.tsx` | Tinted fill, status text color, square marker. Pending uses an outlined marker. |
-| `Money` / `formatUsd` | `money.tsx` | The only way to print a dollar amount. |
-| `iconProps` | `icon.ts` | Spread onto every lucide icon. |
+| `Button` | `ui/button.tsx` | Variants: `primary` (one per view, the main action), `secondary` (default), `ghost` (tertiary, toolbar), `danger` (reject and block only), `link`. Sizes: `sm` 28px, `md` 32px, `icon` 32px, `icon-sm` 28px. Icon on the left, 16px. |
+| `Badge` | `ui/badge.tsx` | Radius 4. `neutral`, `accent`, and one variant per payment status. |
+| `Table` | `ui/table.tsx` | 36px header, 40px rows, no wrapping, hover only on rows without `.row-flag`. |
+| `Sheet` | `ui/sheet.tsx` | Right-side drawer, 560px, used for payment detail at `/payments/:id`. |
+| `StatusBadge` | `shared/status-badge.tsx` | Tinted fill, `-ink` text, square marker. Pending uses an outlined marker. |
+| `Money` | `shared/money.tsx` | The only way to render a dollar amount. |
+| `PageHeader`, `EmptyState` | `shared/` | Every page starts with `PageHeader`; empty screens say what to do next. |
+| `iconProps` | `shared/icon.ts` | Spread onto every lucide icon. |
+
+Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
 
 ## Motion
 
 - 150 to 200ms, ease-out (`cubic-bezier(0.2, 0, 0, 1)`). Tailwind's default transition already uses it.
+- Overlays use the theme animations: `animate-fade-in` / `animate-fade-out` (scrims, tooltips), `animate-pop-in` / `animate-pop-out` (dialogs, menus: fade plus 2px rise), `animate-sheet-in` / `animate-sheet-out` (drawer). No zoom, no bounce.
+- framer-motion is only for the allowed state changes that CSS cannot do cleanly (a number ticking, a row reordering). `MotionConfig reducedMotion="user"` is set at the root.
 - Animate only state changes: a row turning held or blocked, a number ticking, a drawer opening, a toast arriving. Never animate on page load, on scroll, or on hover beyond a color change.
 - `prefers-reduced-motion` is respected globally in `globals.css`. Do not override it.
 

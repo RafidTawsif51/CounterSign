@@ -8,5 +8,7 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
   },
+  // One .env at the repo root for backend and frontend. Vite only exposes VITE_* keys to the browser.
+  envDir: path.resolve(__dirname, ".."),
   server: { port: 5173 },
 });

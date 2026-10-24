@@ -1,23 +1,34 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AppShell } from "@/components/shared/app-shell";
+import { AttackConsole } from "@/pages/AttackConsole";
+import { Board } from "@/pages/Board";
 import { DesignCheck } from "@/pages/DesignCheck";
+import { Inbox } from "@/pages/Inbox";
+import { Leaderboard } from "@/pages/Leaderboard";
+import { NotFound } from "@/pages/NotFound";
+import { PaymentDetail } from "@/pages/PaymentDetail";
+import { RedTeam } from "@/pages/RedTeam";
+import { SystemStatus } from "@/pages/SystemStatus";
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Board />}>
+            <Route path="payments/:paymentId" element={<PaymentDetail />} />
+          </Route>
+          <Route path="/inbox" element={<Inbox />} />
+          <Route path="/attack" element={<AttackConsole />} />
+          <Route path="/red-team" element={<RedTeam />} />
+          <Route path="/status" element={<SystemStatus />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
+        {/* Full screen, no shell: second display. */}
+        <Route path="/leaderboard" element={<Leaderboard />} />
         {/* Hidden: not linked from any navigation. */}
         <Route path="/design-check" element={<DesignCheck />} />
-        <Route path="*" element={<NotBuilt />} />
       </Routes>
     </BrowserRouter>
-  );
-}
-
-function NotBuilt() {
-  return (
-    <main className="px-6 py-8">
-      <h1 className="text-lg font-semibold">Countersign</h1>
-      <p className="mt-1 text-ink-muted">The payment board is not built yet.</p>
-    </main>
   );
 }

@@ -14,9 +14,11 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { iconProps } from "@/components/ui/icon";
-import { Money, formatUsd } from "@/components/ui/money";
-import { StatusBadge, type PaymentStatus } from "@/components/ui/status-badge";
+import { iconProps } from "@/components/shared/icon";
+import { Money } from "@/components/shared/money";
+import { formatUSD } from "@/lib/format";
+import { StatusBadge } from "@/components/shared/status-badge";
+import type { PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Theme = "light" | "dark";
@@ -271,7 +273,7 @@ function TypeScale() {
         </div>
       ))}
       <div className="grid gap-x-8 gap-y-2 border-t border-rule bg-sunken px-4 py-3 text-sm sm:grid-cols-2">
-        <MonoRow label="Amount" value={formatUsd(48_250)} />
+        <MonoRow label="Amount" value={formatUSD(48_250)} />
         <MonoRow label="Account" value="•••• 4417" />
         <MonoRow label="Invoice" value="INV-2026-4471" />
         <MonoRow label="Payment" value="pay_8c21f0" />
