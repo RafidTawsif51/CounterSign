@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vendor phone</title>
+<style>
+  :root { --bg:#0f1115; --fg:#f2f4f8; --muted:#9aa3b2; --green:#2fb36b; --red:#e5484d; --card:#1a1d24; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; padding:24px 16px; text-align:center; gap:16px; }
+  .screen.on { display:flex; }
+  h1 { font-size:28px; margin:0; } h2 { font-size:22px; margin:0; font-weight:600; }
+  p { margin:0; color:var(--muted); font-size:16px; line-height:1.4; max-width:420px; }
+  .status { position:fixed; left:0; right:0; bottom:calc(12px + env(safe-area-inset-bottom)); text-align:center; font-size:14px; color:var(--muted); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--muted); }
+  .status.ok .dot { background:var(--green); } .status.bad { color:var(--red); } .status.bad .dot { background:var(--red); }
+  button { font:inherit; font-size:20px; border:0; border-radius:16px; padding:18px 20px; color:#fff; width:100%; max-width:420px; min-height:64px; }
+  .go { background:var(--green); } .no { background:var(--red); } .neutral { background:#394150; }
+  .row { display:flex; gap:12px; width:100%; max-width:420px; } .row button { flex:1; }
+  .ringing { background:radial-gradient(circle at 50% 30%, #1d3b2a, var(--bg) 70%); }
+  .avatar { width:96px; height:96px; border-radius:50%; background:var(--card); display:flex; align-items:center; justify-content:center; font-size:40px; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(47,179,107,.6)} 100%{box-shadow:0 0 0 28px rgba(47,179,107,0)} }
+  .said { background:var(--card); border-radius:12px; padding:12px 14px; max-width:420px; width:100%; font-size:16px; }
+  .err { color:var(--red); font-size:14px; min-height:18px; }
+</style>
+</head>
+<body>
+
+<audio id="player" playsinline preload="auto"></audio>
+
+<div id="idle" class="screen on">
+  <h1>Vendor phone</h1>
+  <p>Keep this page open. When Ridgeline Builders AP calls, it rings here.</p>
+  <button id="enable" class="neutral">Tap to enable ringer</button>
+  <p id="idleNote"></p>
+</div>
+
+<div id="ring" class="screen ringing">
+  <div class="avatar">&#9742;</div>
+  <h2>Ridgeline Builders AP</h2>
+  <p>Incoming call</p>
+  <div class="row"><button id="decline" class="no">Decline</button><button id="answer" class="go">Answer</button></div>
+</div>
+
+<div id="live" class="screen">
+  <h2 id="liveTitle">On call</h2>
+  <p id="liveText"></p>
+  <div id="said" class="said" style="display:none"></div>
+  <button id="yes" class="go">Yes, we made this change</button>
+  <button id="nope" class="no">No, we did not</button>
+  <button id="tap" class="go" style="display:none;font-size:26px;min-height:96px">Tap to hear the question</button>
+  <p id="listening"></p>
+  <div id="err" class="err"></div>
+</div>
+
+<div id="done" class="screen">
+  <h2 id="doneTitle">Call ended</h2>
+  <p id="doneText"></p>
+</div>
+
+<div id="status" class="status"><span class="dot"></span><span id="statusText">Connecting...</span></div>
+
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var key = q.get('k') || '';
+  var vendorId = decodeURIComponent(location.pathname.split('/').pop());
+  var HDR = { 'ngrok-skip-browser-warning': '1' };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function show(name) {
+    ['idle', 'ring', 'live', 'done'].forEach(function (n) { $(n).classList.toggle('on', n === name); });
+  }
+
+  // ---------- status line: last good poll, and "Disconnected" after 5 s of failures
+  var lastOk = 0, firstFail = 0;
+  function two(n) { return n < 10 ? '0' + n : '' + n; }
+  function paintStatus() {
+    var el = $('status'), t = $('statusText');
+    if (!lastOk && !firstFail) { t.textContent = 'Connecting...'; return; }
+    if (firstFail && Date.now() - firstFail >= 5000) {
+      el.className = 'status bad';
+      t.textContent = 'Disconnected' + (lastOk ? ' (last ok ' + clock(lastOk) + ')' : '');
+    } else if (lastOk) {
+      el.className = 'status ok';
+      t.textContent = 'Connected, last poll ' + clock(lastOk);
+    }
+  }
+  function clock(ms) { var d = new Date(ms); return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds()); }
+  setInterval(paintStatus, 500);
+
+  // ---------- audio
+  var ctx = null, ringTimer = null, ringerOn = false;
+  function unlock() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!ctx && AC) ctx = new AC();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+      ringerOn = !!ctx;
+    } catch (e) { ringerOn = false; }
+  }
+  function beep(freq, start, dur) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = freq; o.connect(g); g.connect(ctx.destination);
+    var t = ctx.currentTime + start;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.25, t + 0.02); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function startRing() {
+    if (ringTimer) return;
+    function once() {
+      if (ringerOn && ctx) { beep(440, 0, 0.4); beep(480, 0, 0.4); beep(440, 0.5, 0.4); beep(480, 0.5, 0.4); }
+      if (navigator.vibrate) navigator.vibrate([400, 100, 400]);
+    }
+    once(); ringTimer = setInterval(once, 2500);
+  }
+  function stopRing() { if (ringTimer) { clearInterval(ringTimer); ringTimer = null; } if (navigator.vibrate) navigator.vibrate(0); }
+
+  // One persistent <audio> element. It is unlocked once, inside the Answer tap, by playing a silent clip; every later clip just
+  // swaps its src, so mobile autoplay rules keep allowing it.
+  var SILENT = 'data:audio/wav;base64,UklGRqQMAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+  var player = $('player');
+  function unlockPlayer() {
+    try { player.src = SILENT; var p = player.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+  }
+
+  // plays one clip; resolves 'ok' when it ends (or fails to load), 'blocked' if the browser refused to start it
+  function playOne(url) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function fin(v) { if (done) return; done = true; clearTimeout(guard); player.onended = player.onerror = null; resolve(v); }
+      var guard = setTimeout(function () { fin('ok'); }, 30000); // a stuck clip never hangs the call
+      player.onended = function () { fin('ok'); };
+      player.onerror = function () { fin('ok'); };
+      try {
+        player.src = url; player.load();
+        var p = player.play();
+        if (p && p.catch) p.catch(function () { fin('blocked'); });
+      } catch (e) { fin('blocked'); }
+    });
+  }
+
+  // plays clips in order; if the browser blocks one, shows a big tap button and plays it on that tap
+  var gen = 0; // a newer playClips call (e.g. a button tap during a clip) abandons the older chain
+  function playClips(urls) {
+    var g = ++gen;
+    return urls.filter(Boolean).reduce(function (chain, url) {
+      return chain.then(function () {
+        if (g !== gen) return new Promise(function () {});
+        return playOne(url).then(function (r) {
+          if (r === 'ok') return;
+          return new Promise(function (resolve) {
+            var b = $('tap'); b.style.display = '';
+            b.onclick = function () { b.style.display = 'none'; playOne(url).then(resolve); };
+          });
+        });
+      });
+    }, Promise.resolve());
+  }
+
+  // ---------- polling
+  var current = null; // the call being shown or handled
+  var busy = false;
+  function poll() {
+    fetch('/api/voice/pending/' + encodeURIComponent(vendorId) + '?k=' + encodeURIComponent(key), { headers: HDR, cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('status ' + r.status);
+        return r.json();
+      })
+      .then(function (body) {
+        lastOk = Date.now(); firstFail = 0; paintStatus();
+        if (busy) return;
+        if (body.call && !current) { current = body.call; show('ring'); startRing(); }
+        else if (!body.call && current && $('ring').classList.contains('on')) { current = null; stopRing(); show('idle'); }
+      })
+      .catch(function (e) {
+        if (!firstFail) firstFail = Date.now();
+        paintStatus();
+        if (String(e.message).indexOf('403') > -1) $('idleNote').textContent = 'Bad key in this link.';
+      });
+  }
+  setInterval(poll, 1000); poll();
+
+  $('enable').onclick = function () {
+    unlock();
+    $('idleNote').textContent = ringerOn ? 'Ringer is on.' : 'Sound is not available; the screen will still ring.';
+    $('enable').style.display = ringerOn ? 'none' : '';
+  };
+  document.addEventListener('click', unlock, { once: true });
+
+  // ---------- the call
+  function post(body) {
+    return fetch('/api/voice/web-answer/' + encodeURIComponent(current.call_id) + '?t=' + encodeURIComponent(current.token), {
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR), body: JSON.stringify(body)
+    }).then(function (r) { if (!r.ok) throw new Error('status ' + r.status); return r.json(); });
+  }
+
+  $('decline').onclick = function () {
+    if (!current) return;
+    stopRing(); busy = true;
+    post({ decline: true }).catch(function () {}).then(function () { end('Call declined', 'Marked as no answer.'); });
+  };
+
+  $('answer').onclick = function () {
+    if (!current) return;
+    unlock(); unlockPlayer(); stopRing(); busy = true; // audio is only allowed to start after this tap
+    var c = current.clips;
+    show('live'); $('err').textContent = ''; setButtons(false);
+    $('liveTitle').textContent = 'On call'; $('liveText').textContent = 'Ridgeline Builders AP is speaking...';
+    post({ event: 'answered' }).catch(function () {});
+    setButtons(true);
+    playClips([c.intro, c.question]).then(function () { listen(); });
+  };
+
+  function setButtons(on) { $('yes').disabled = $('nope').disabled = !on; $('yes').style.opacity = $('nope').style.opacity = on ? 1 : 0.5; }
+
+  var rec = null, answered = false;
+  // fully stops speech recognition (so it cannot swallow a clip's audio) and resolves once it has ended
+  function stopListening() {
+    return new Promise(function (resolve) {
+      if (!rec) return resolve();
+      var r = rec; rec = null; var done = false;
+      function fin() { if (!done) { done = true; resolve(); } }
+      r.onresult = r.onerror = null; r.onend = fin;
+      try { r.abort(); } catch (e) {}
+      setTimeout(fin, 400);
+    });
+  }
+  function listen() {
+    answered = false;
+    $('liveText').textContent = 'Say yes or no, or tap a button.';
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { $('listening').textContent = 'Voice not available here: use the buttons.'; return; }
+    try {
+      var r = new SR(); rec = r; r.lang = 'en-US'; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false;
+      var heard = '';
+      r.onresult = function (e) { heard = (e.results[0] && e.results[0][0]) ? e.results[0][0].transcript : ''; };
+      r.onerror = function (e) {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') $('listening').textContent = 'Microphone is blocked: use the buttons.';
+      };
+      r.onend = function () { if (rec === r) rec = null; $('listening').textContent = ''; if (!answered && heard) submit(heard); };
+      r.start(); $('listening').textContent = 'Listening...';
+      setTimeout(function () { if (rec === r) { try { r.stop(); } catch (e) {} } }, 8000);
+    } catch (e) { rec = null; $('listening').textContent = 'Voice not available here: use the buttons.'; }
+  }
+
+  function submit(text) {
+    if (answered || !current) return;
+    answered = true;
+    $('said').style.display = ''; $('said').textContent = 'You said: ' + text;
+    $('listening').textContent = '';
+    stopListening().then(function () { return post({ answer: text }); }).then(function (res) {
+      $('liveText').textContent = res.text || '';
+      return playClips([res.clip]).then(function () {   // speech recognition is off until the clip has ended
+        if (res.final) end(outcomeTitle(res.outcome), res.text);
+        else listen();
+      });
+    }).catch(function (e) {
+      if (String(e.message).indexOf('410') > -1) { end('Call ended', 'This call timed out or was already finished.'); return; }
+      answered = false;
+      $('err').textContent = 'Could not send the answer (' + e.message + '). Tap a button to retry.';
+    });
+  }
+  $('yes').onclick = function () { submit('Yes, we made this change'); };
+  $('nope').onclick = function () { submit('No, we did not'); };
+
+  function outcomeTitle(o) {
+    return o === 'confirmed' ? 'You confirmed the change' : o === 'denied' ? 'You denied the change' : 'Passed to a person';
+  }
+  function end(title, text) {
+    stopListening();
+    $('tap').style.display = 'none';
+    $('doneTitle').textContent = title; $('doneText').textContent = text || '';
+    $('said').style.display = 'none'; show('done');
+    setTimeout(function () { current = null; busy = false; show('idle'); }, 6000);
+  }
+})();
+</script>
+</body>
+</html>

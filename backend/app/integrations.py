@@ -5,13 +5,14 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, Response
-from sqlmodel import Session
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pathlib import Path
+from sqlmodel import Session, select
 
 from app import db, events as ev
 from app.config import get_settings
-from app.models import CallOutcome, Invoice, Payment, PaymentStatus, Vendor, VerificationCall
-from app.services import payments, verify, voice
+from app.models import AuditLog, CallOutcome, Invoice, Payment, PaymentStatus, Vendor, VerificationCall
+from app.services import identity, payments, verify, voice
 
 log = logging.getLogger("countersign.integrations")
 
@@ -20,6 +21,7 @@ webhook_router = APIRouter(prefix="/webhooks/twilio")
 verification_router = APIRouter(prefix="/verifications")
 router = APIRouter()  # main.py includes this one; it carries all three
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 SMOKE_SENTENCE = "This is Countersign. Custom TwiML from our own server is working."
 SMOKE_CLIP_TEXT = "This is a Countersign voice clip."
 
@@ -33,7 +35,7 @@ def integration_status() -> dict:
         "cartesia": bool(s.cartesia_api_key and s.cartesia_voice_id),
         "nessie": bool(s.nessie_api_key),
         "apify": bool(s.apify_token),
-        "crs": bool(s.crs_api_key),
+        "crs": bool(identity._env("CRS_USERNAME") and identity._env("CRS_PASSWORD")),  # CRS login lives in the environment, not config.py
         "claude": bool(s.anthropic_api_key),
     }
     return {name: {"mode": "mock" if flags[name] else "real", "key_set": keys[name]} for name in keys}
@@ -145,7 +147,7 @@ async def _record_lines(session: Session, call: VerificationCall, payment: Payme
 
 
 @voice_router.post("/twiml/{call_id}")
-async def call_twiml(call_id: str, request: Request, background: BackgroundTasks, retry: int = 0, end: int = 0, _form: dict = Depends(twilio_form)) -> Response:
+async def call_twiml(call_id: str, request: Request, background: BackgroundTasks, retry: int = 0, end: int = 0, r: int = 0, _form: dict = Depends(twilio_form)) -> Response:
     """Served when the vendor picks up. Intro and question in a speech Gather; silence redirects once to a retry version,
     and silence again ends the call as unclear. Never generates audio: clips were made before dialing."""
     with Session(db.engine) as s:
@@ -153,33 +155,36 @@ async def call_twiml(call_id: str, request: Request, background: BackgroundTasks
         if call.outcome is not None:
             return _xml(voice.twiml_close(script.closing(call.outcome.value)))
         if end:
-            transcript = await _record_lines(s, call, payment, [
-                {"speaker": "agent", "text": script.question}, {"speaker": "vendor", "text": "(no response)"}, {"speaker": "agent", "text": script.unclear}])
+            transcript = await _record_lines(s, call, payment, ([] if r else [{"speaker": "agent", "text": script.question}]) + [
+                {"speaker": "vendor", "text": "(no response)"}, {"speaker": "agent", "text": script.unclear}])
             background.add_task(verify.handle_outcome, call_id, CallOutcome.unclear, transcript, None, True,
                                 {"classifier": "silence", "reason": "nothing was heard after two prompts"})
             return _xml(voice.twiml_close(script.unclear))
     verify.arm_answer_watchdog(call_id)  # the 60 s rule starts when the vendor picks up
+    voice.log_state(call_id, "answered", channel="twilio")
     gather = _url(f"/api/voice/gather/{call_id}", request)
     nxt = _url(f"/api/voice/twiml/{call_id}?end=1", request) if retry else _url(f"/api/voice/twiml/{call_id}?retry=1", request)
     return _xml(voice.twiml_question(script, gather, nxt, first=not retry))
 
 
 @voice_router.post("/gather/{call_id}")
-async def call_gather(call_id: str, background: BackgroundTasks, form: dict = Depends(twilio_form)) -> Response:
-    """The vendor's spoken answer. Classified within the 3 s Claude cap, answered with a closing line and a hangup inside
-    Twilio's 5 s, then applied in the background by verify.handle_outcome."""
+async def call_gather(call_id: str, request: Request, background: BackgroundTasks, r: int = 0, form: dict = Depends(twilio_form)) -> Response:
+    """The vendor's spoken answer. Classified within the 3 s Claude cap and answered inside Twilio's 5 s: a closing line and a
+    hangup, or (once, r=1 afterwards) a clarifying or "take your time" clip and another Gather. Applied in the background."""
     answer = (form.get("SpeechResult") or "").strip()
     with Session(db.engine) as s:
         call, payment, script = _context(s, call_id)
         if call.outcome is not None:  # Twilio retried, or the 60 s rule already ended the call
             return _xml(voice.twiml_close(script.closing(call.outcome.value)))
-        outcome, evidence = await verify.classify_answer(answer)
-        evidence = {**evidence, "confidence": form.get("Confidence")}
-        transcript = await _record_lines(s, call, payment, [
-            {"speaker": "agent", "text": script.question}, {"speaker": "vendor", "text": answer or "(no response)"},
-            {"speaker": "agent", "text": script.closing(outcome.value)}])
-    background.add_task(verify.handle_outcome, call_id, outcome, transcript, None, True, evidence)
-    return _xml(voice.twiml_close(script.closing(outcome.value)))
+    res = await verify.finish_answer(call_id, answer, bool(r))
+    if res is None:
+        return _xml(voice.twiml_close(script.unclear))
+    if res["action"] == "close":
+        background.add_task(verify.handle_outcome, call_id, res["outcome"], res["transcript"], None, True,
+                            {**res["evidence"], "confidence": form.get("Confidence")})
+        return _xml(voice.twiml_close(res["text"]))
+    return _xml(voice.twiml_regather(script, res["text"], _url(f"/api/voice/gather/{call_id}?r=1", request),
+                                     _url(f"/api/voice/twiml/{call_id}?end=1&r=1", request)))
 
 
 @webhook_router.post("/status")
@@ -187,6 +192,7 @@ async def call_status(call_id: str, background: BackgroundTasks, form: dict = De
     """Twilio's call status callback. A call nobody answered (no-answer, busy, failed, canceled) is a no_answer; other
     statuses are ignored (an answered call finishes through the gather route or the 60 s rule)."""
     status = (form.get("CallStatus") or "").lower()
+    voice.log_state(call_id, "twilio-status", status=status)
     if status in ("no-answer", "busy", "failed", "canceled"):
         background.add_task(verify.handle_outcome, call_id, CallOutcome.no_answer, None, None, True,
                             {"classifier": "twilio_status", "reason": f"Twilio call status {status}"})
@@ -237,9 +243,120 @@ async def start_call(payment_id: str, background: BackgroundTasks, answer: Optio
         raise HTTPException(403, "number is not in ALLOWED_CALL_NUMBERS")
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc))
-    return {"payment_id": payment_id, "run_id": run_id, "mode": "real", "status": "calling", "call_id": result.call_id}
+    mode = "web" if result.call_id in voice.web_calls else "real"  # web also when twilio failed over to the softphone
+    return {"payment_id": payment_id, "run_id": run_id, "mode": mode, "status": "calling", "call_id": result.call_id}
+
+
+# ---------------------------------------------------------------- browser softphone (VOICE_MODE=web, or failover)
+
+
+def _vendor_phone_guard(vendor_id: str, k: Optional[str]) -> None:
+    if not voice.vendor_phone_key_ok(k):
+        raise HTTPException(403, "bad key")
+    with Session(db.engine) as s:
+        if s.get(Vendor, vendor_id) is None:
+            raise HTTPException(404, "no such vendor")
+
+
+@voice_router.get("/vendor-phone/{vendor_id}")
+def vendor_phone_page(vendor_id: str, k: Optional[str] = None) -> FileResponse:
+    _vendor_phone_guard(vendor_id, k)
+    return FileResponse(STATIC_DIR / "vendor_phone.html", media_type="text/html", headers=NO_STORE)
+
+
+@voice_router.get("/pending/{vendor_id}")
+def vendor_phone_pending(vendor_id: str, k: Optional[str] = None) -> JSONResponse:
+    """What the softphone page polls once a second. Also what marks the page as open for failover."""
+    _vendor_phone_guard(vendor_id, k)
+    voice.note_poll(vendor_id)
+    waiting = voice.pending_for(vendor_id)
+    body: dict = {"call": None}
+    if waiting is not None:
+        call_id, c = waiting
+        body["call"] = {"call_id": call_id, "token": c["token"], "vendor_name": c["vendor_name"], "clips": c["clips"], "texts": c["texts"]}
+    return JSONResponse(body, headers=NO_STORE)
+
+
+@voice_router.post("/web-answer/{call_id}")
+async def web_answer(call_id: str, request: Request, background: BackgroundTasks, t: Optional[str] = None) -> JSONResponse:
+    """The softphone's side of the call. Body: {"event": "answered"} on the Answer tap, {"decline": true}, or {"answer": "..."}.
+    The per-call token is required in every mode."""
+    if not voice.check_call_token(call_id, t):
+        log.warning("softphone rejected: missing or wrong call token")
+        raise HTTPException(403, "bad call token")
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    entry = voice.web_calls.get(call_id)
+    if entry is None:
+        raise HTTPException(410, "this call is over (it timed out or was already finished)")
+    if body.get("decline"):
+        await verify.decline_web_call(call_id)
+        return JSONResponse({"action": "close", "final": True, "outcome": "no_answer", "text": "", "clip": None}, headers=NO_STORE)
+    if body.get("event") == "answered":
+        verify.web_answered(call_id)
+        return JSONResponse({"ok": True}, headers=NO_STORE)
+    verify.web_answered(call_id)  # an answer implies the Answer tap (idempotent)
+    res = await verify.finish_answer(call_id, str(body.get("answer") or "")[:500], entry["reasked"])
+    if res is None:
+        raise HTTPException(410, "this call is over")
+    final = res["action"] == "close"
+    if final:
+        background.add_task(verify.handle_outcome, call_id, res["outcome"], res["transcript"], None, True, res["evidence"])
+    else:
+        entry["reasked"] = True
+        verify.rearm_answer_watchdog(call_id)  # the call stays open and takes exactly one more answer
+    return JSONResponse({"action": res["action"], "final": final, "outcome": res["outcome"].value if final else None,
+                         "text": res["text"], "clip": voice.clip_url(res["text"])}, headers=NO_STORE)
+
+
+
+# ---------------------------------------------------------------- vendor identity (CRS)
+
+vendor_identity_router = APIRouter(prefix="/vendors")
+
+
+_STATUS_WORD = {"verified": "pass", "unverified": "review", "flagged": "fail"}
+
+
+def _section(sec: dict, at, extra: Optional[dict] = None) -> dict:
+    """One section of the card: no PII, no raw response."""
+    return {"status": sec.get("status"), "summary": sec.get("summary"), "checks": sec.get("checks", []), "persona": sec.get("persona"),
+            "checked_at": sec.get("checked_at") or at.isoformat(), **(extra or {})}
+
+
+@vendor_identity_router.get("/{vendor_id}/identity")
+def vendor_identity(vendor_id: str) -> dict:
+    """The vendor card's CRS result, kept apart: `vendor` is the vendor's own standing (reverse phone and the owner's identity check),
+    `latest_request` is the newest check of a bank-change request (email risk and the requester's identity), or null. The top-level
+    `status` is the vendor's own, for older clients. {"status": null, "vendor": null, "latest_request": null} if no check has run."""
+    with Session(db.engine) as s:
+        if s.get(Vendor, vendor_id) is None:
+            raise HTTPException(404, "no such vendor")
+        pay_ids = list(s.exec(select(Payment.id).join(Invoice, Invoice.id == Payment.invoice_id).where(Invoice.vendor_id == vendor_id)))
+        wanted = (AuditLog.entity == "vendor") & (AuditLog.entity_id == vendor_id) & (AuditLog.action == "identity_check")
+        if pay_ids:
+            wanted = wanted | ((AuditLog.entity == "payment") & AuditLog.entity_id.in_(pay_ids) & (AuditLog.action == verify.CRS_ACTION))
+        rows = list(s.exec(select(AuditLog).where(wanted).order_by(AuditLog.at.desc(), AuditLog.id.desc())))
+    vendor = request = None
+    for row in rows:  # newest first
+        d = row.detail_json or {}
+        if vendor is None:
+            if d.get("vendor"):
+                vendor = _section(d["vendor"], row.at)
+            elif row.action == "identity_check":  # the vendor-level IdentityResult row
+                vendor = _section({"status": _STATUS_WORD.get(d.get("status"), d.get("status")), "summary": d.get("summary"),
+                                   "persona": d.get("test_identity_id"), "checked_at": d.get("checked_at")}, row.at)
+        if request is None and d.get("request"):
+            request = _section(d["request"], row.at, {"requested_by_domain": d["request"].get("requested_by_domain"), "payment_id": row.entity_id})
+        if vendor is not None and request is not None:
+            break
+    return {"status": vendor["status"] if vendor else None, "vendor": vendor, "latest_request": request}
 
 
 router.include_router(voice_router)
 router.include_router(webhook_router)
 router.include_router(verification_router)
+router.include_router(vendor_identity_router)

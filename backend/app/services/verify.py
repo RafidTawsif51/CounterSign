@@ -18,12 +18,16 @@
 #   digits of an account, accept no new contact details, never confirm on the vendor's behalf, hang
 #   up after CALL_TIMEOUT_SECONDS.
 # Flags: MOCK_TWILIO and MOCK_CARTESIA. The mock caller is used if either is true.
+# CRS gate (MOCK_CRS=false only): before dialing, identity.check_vendor runs three CRS sandbox checks and the summary goes to the
+#   audit log (crs_identity_check). A reverse-phone fail means that number is not dialed (the next independent number is tried, else the
+#   payment stays held for the controller). A confirmed call releases money only if the CRS status is pass; review, fail or unavailable
+#   keep the payment held with the CRS reasons. A denied call blocks as always. With MOCK_CRS=true none of this runs.
 
 import asyncio
 import contextvars
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Optional, Protocol
 
@@ -52,7 +56,7 @@ from app.models import (
     VerificationCall,
     utcnow,
 )
-from app.services import contacts, payments, voice
+from app.services import contacts, identity, payments, voice
 
 log = logging.getLogger("countersign.verify")
 
@@ -81,6 +85,37 @@ class VerificationResult(BaseModel):
     # Real mode: the call was placed and is still going. outcome is then a placeholder (unclear) and the payment is still held;
     # the real result arrives later through handle_outcome, the events and the database.
     in_progress: bool = False
+
+
+class NoDialableNumber(Exception):
+    """Every candidate number failed the CRS reverse lookup, so nothing was dialed. Carries the result to hand back."""
+
+    def __init__(self, result: "VerificationResult"):
+        self.result = result
+
+
+CRS_ACTION = "crs_identity_check"
+
+
+def crs_summary(session: Session, payment_id: str) -> Optional[dict]:
+    """The CRS summary stored for a payment's verification (latest), or None."""
+    row = session.exec(select(AuditLog).where(AuditLog.entity == "payment", AuditLog.entity_id == payment_id, AuditLog.action == CRS_ACTION)
+                       .order_by(AuditLog.at.desc(), AuditLog.id.desc())).first()
+    return row.detail_json if row else None
+
+
+def crs_release_blocker(session: Session, payment_id: str) -> Optional[str]:
+    """None if a confirmed call may release the payment. Otherwise the reason it must stay held: CRS said review or fail, was
+    unavailable, or (with real CRS on) left no result at all. Never a silent pass. MOCK_CRS=true never blocks."""
+    if get_settings().mock_crs:
+        return None
+    crs = crs_summary(session, payment_id)
+    if crs is None:
+        return "call confirmed the account, but no CRS identity result is on file; the controller decides"
+    if crs.get("status") == "pass":
+        return None
+    why = "; ".join(identity.hold_reasons(crs)[:3]) or str(crs.get("status"))
+    return f"call confirmed the account, but the CRS identity check is {crs.get('status')} ({why}); the controller decides"
 
 
 # ---------------------------------------------------------------- allow list
@@ -500,6 +535,7 @@ def record_requested_destination(
 # Background tasks (retry, answer watchdog) are kept here so they are not garbage collected. Nothing cancels a retry.
 _tasks: set[asyncio.Task] = set()
 _watchdogs: dict[str, asyncio.Task] = {}
+_ring_timers: dict[str, asyncio.Task] = {}  # softphone calls nobody has answered yet
 
 
 def _spawn(coro) -> asyncio.Task:
@@ -541,9 +577,11 @@ async def handle_outcome(
     if not claimed:
         session.rollback()
         return None
-    watchdog = _watchdogs.pop(call_id, None)
-    if watchdog is not None and watchdog is not asyncio.current_task():
-        watchdog.cancel()
+    for table in (_watchdogs, _ring_timers):
+        task = table.pop(call_id, None)
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+    voice.web_calls.pop(call_id, None)
 
     call = session.get(VerificationCall, call_id)
     session.refresh(call)
@@ -590,7 +628,12 @@ async def handle_outcome(
         payment.destination_account_id = acct.id
         payment.status = PaymentStatus.pending  # released
         write_audit("vendor", vendor.id, "agent", "bank_account_verified", {**proof, "account_last4": acct.account_last4}, session=session)
-        if pay:
+        crs_block = crs_release_blocker(session, payment.id)
+        if crs_block:  # the CRS gate holds in both paths (inline mock and webhooks): money never moves on a call alone
+            payment.status = PaymentStatus.held
+            held_reason = crs_block
+            write_audit("payment", payment.id, "agent", "held_after_verification", {**proof, "rules": ["crs_identity_check"]}, session=session)
+        elif pay:
             others = _unresolved_rules(session, payment.id)
             if others:
                 payment.status = PaymentStatus.held
@@ -612,6 +655,7 @@ async def handle_outcome(
                 {**proof, "contact_source": contact_source.value, "number_flagged": number_flagged}, session=session)
     session.commit()
 
+    voice.log_state(call.id, "finished", outcome=outcome.value, attempts=attempts)
     await ev.emit(ev.CallOutcomeEvent(run_id=run_id, payment_id=payment.id, outcome=outcome))
     if outcome == CallOutcome.denied:
         await ev.emit(ev.PaymentBlocked(run_id=run_id, payment_id=payment.id, reason="Vendor denied the bank change on the verification call"))
@@ -671,7 +715,70 @@ def arm_answer_watchdog(call_id: str) -> None:
     _watchdogs[call_id] = _spawn(run())
 
 
+def rearm_answer_watchdog(call_id: str) -> None:
+    """A hold or re-ask gives the vendor a fresh 60 s: the extra clip and the pause to think would otherwise eat the first
+    minute and finalize the call as unclear while the vendor is still answering."""
+    old = _watchdogs.pop(call_id, None)
+    if old is not None:
+        old.cancel()
+    arm_answer_watchdog(call_id)
+
+
 # ---------------------------------------------------------------- orchestration
+
+
+def _alternate_number(on_file: list[VendorContact], independent: Optional[contacts.IndependentContact], chosen: str):
+    """The other independent number, if there is one: (phone, source, existing_row_or_None), and it must be allowed to be called."""
+    best = max(on_file, key=lambda c: _when(c.last_verified, c.first_seen), default=None)
+    options = []
+    if best is not None:
+        options.append((best.phone, ContactSource.on_file, best))
+    if independent is not None:
+        options.append((independent.phone, ContactSource(independent.source), None))
+    for phone, src, row in options:
+        if _digits(phone) != _digits(chosen):
+            try:
+                assert_callable(phone)
+            except CallNotAllowed:
+                continue
+            return phone, src, row
+    return None
+
+
+async def _crs_gate(session: Session, payment: Payment, vendor: Vendor, message: Optional[Message], on_file, independent, picked):
+    """Run the CRS checks before anything is dialed. Returns the (phone, source, flagged, existing) to dial, or raises
+    NoDialableNumber after recording why nothing was dialed. A failed reverse lookup removes that number; the CRS summary goes
+    to the audit log whatever the outcome (the hold reasons carry the short CRS reasons, never PII)."""
+    phone, source, flagged, existing = picked
+    cands = [(phone, source, existing)]
+    alt = _alternate_number(on_file, independent, phone)
+    if alt is not None:
+        cands.append(alt)
+    ctx = {"request_email": message.from_addr if message else None, "reply_to": message.reply_to if message else None,
+           "phones": [c[0] for c in cands]}
+    crs = await identity.check_for(vendor, ctx)
+    write_audit("payment", payment.id, "agent", CRS_ACTION, crs, session=session)
+    session.commit()
+    reasons = identity.hold_reasons(crs)
+    if crs["status"] != "pass":
+        await ev.emit(ev.PaymentHeld(run_id=payment.run_id, payment_id=payment.id, reasons=reasons))  # the call still happens
+    idx = crs.get("dial_index")
+    if idx is None:
+        first = cands[0]
+        row = first[2] or _store_contact(session, vendor.id, independent)  # type: ignore[arg-type]
+        note = "CRS: the phone number does not belong to the vendor's known contact; not dialed"
+        call = VerificationCall(payment_id=payment.id, contact_id=row.id, outcome=CallOutcome.unclear)
+        session.add(call)
+        payment.status = PaymentStatus.held
+        session.add(payment)
+        write_audit("payment", payment.id, "agent", "verification_not_dialed", {"call_id": call.id, "reason": note, "crs_status": crs["status"]}, session=session)
+        session.commit()
+        await ev.emit(ev.PaymentHeld(run_id=payment.run_id, payment_id=payment.id, reasons=[note] + reasons))
+        raise NoDialableNumber(VerificationResult(
+            payment_id=payment.id, call_id=call.id, outcome=CallOutcome.unclear, payment_status=PaymentStatus.held, attempts=1, needs_controller=True,
+            contact_source=first[1], number_flagged=True, transcript=[]))
+    phone, source, row = cands[idx]
+    return phone, source, flagged or idx > 0, row
 
 
 async def _prepare(session: Session, payment_id: str):
@@ -697,6 +804,10 @@ async def _prepare(session: Session, payment_id: str):
         contacts.health.failed(type(exc).__name__)
         lookup = contacts.LookupResult(status="unavailable", error=type(exc).__name__, checked_at=utcnow())
     choice = choose_number(on_file, lookup)
+    if not get_settings().mock_crs:  # CRS checks run before anything is dialed; they can swap in the other independent number or stop the call
+        phone, source, flagged, existing = await _crs_gate(session, payment, vendor, message, on_file, choice.record,
+                                                           (choice.phone, choice.source, choice.flagged, choice.contact))
+        choice = replace(choice, phone=phone, source=source, flagged=flagged, contact=existing if source == ContactSource.on_file else None)
     dial, routed = route_number(choice.phone)
     assert_callable(dial)  # raises before anything is stored or dialed; the allow list applies to the routed number too
     contact = choice.contact
@@ -734,9 +845,14 @@ def _audit_routing(session: Session, payment_id: str, call_id: str, dial: str, p
 
 
 async def begin_real_call(session: Session, payment_id: str) -> VerificationResult:
-    """Place the real call and return at once. Clips are generated first (Twilio waits 5 s for TwiML); the answer comes back
-    through the webhooks in app/integrations.py and is applied by handle_outcome."""
-    payment, vendor, rem, _msg, phone, source, flagged, call, prior, choice, dial, routed, _info = await _prepare(session, payment_id)
+    """Place the call and return at once. Clips are generated first (Twilio waits 5 s for TwiML); the answer comes back
+    through the webhooks (twilio) or the softphone page (web) and is applied by handle_outcome.
+    VOICE_MODE=web rings the browser softphone instead of the phone network. In twilio mode, if the call cannot be placed and a
+    softphone page for this vendor polled in the last 60 s, the softphone rings instead."""
+    try:
+        payment, vendor, rem, _msg, phone, source, flagged, call, prior, choice, dial, routed, _info = await _prepare(session, payment_id)
+    except NoDialableNumber as nd:
+        return nd.result
     s = get_settings()
     voice.public_url("/")  # PUBLIC_BASE_URL must be https: refuse now, before any clip is made or call placed
     script = voice.call_script(vendor.name, rem["account_last4"])
@@ -744,17 +860,32 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
         for text in script.all_texts():
             await voice.tts_clip(text, s)
         token = voice.new_call_token(call.id)  # per-call webhook secret, kept in a file; never logged or stored in an event
-        sid = await voice.place_call(
-            dial, voice.with_token(voice.public_url(f"/api/voice/twiml/{call.id}", s), token),
-            voice.with_token(voice.public_url(f"/api/webhooks/twilio/status?call_id={call.id}", s), token), s)
+        channel, sid, failover = voice.voice_mode(), None, None
+        if channel == "twilio":
+            try:
+                sid = await voice.place_call(
+                    dial, voice.with_token(voice.public_url(f"/api/voice/twiml/{call.id}", s), token),
+                    voice.with_token(voice.public_url(f"/api/webhooks/twilio/status?call_id={call.id}", s), token), s)
+            except Exception as exc:  # noqa: BLE001
+                if not voice.vendor_phone_recent(vendor.id):
+                    raise
+                channel, failover = "web", type(exc).__name__
     except Exception:
         session.delete(call)  # nothing was dialed: leave no half-open call behind and let the caller see the error
         session.commit()
         raise
-    write_audit("payment", payment.id, "agent", "verification_call_placed", {"call_id": call.id, "call_sid": sid, "contact_source": source.value, "number_flagged": flagged}, session=session)
-    if routed:
+    detail = {"call_id": call.id, "call_sid": sid, "contact_source": source.value, "number_flagged": flagged, "channel": channel}
+    if channel == "web":
+        voice.register_web_call(call.id, vendor.id, vendor.name, token, script, s)
+        _ring_timers[call.id] = _spawn(_ring_timeout(call.id))
+        if failover:
+            write_audit("payment", payment.id, "system", "voice_failover_to_web", {"call_id": call.id, "reason": failover}, session=session)
+            voice.log_state(call.id, "failover", to="web", reason=failover)
+    write_audit("payment", payment.id, "agent", "verification_call_placed", detail, session=session)
+    if routed and channel == "twilio":
         _audit_routing(session, payment.id, call.id, dial, phone, delivered=True)
     session.commit()
+    voice.log_state(call.id, "placed", channel=channel)
     await ev.emit(_call_started(payment, source, choice))
     return VerificationResult(
         payment_id=payment.id, call_id=call.id, outcome=CallOutcome.unclear, payment_status=payment.status, attempts=prior + 1,
@@ -762,16 +893,98 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
     )
 
 
+async def _ring_timeout(call_id: str) -> None:
+    """A softphone call nobody picks up (or declines) within WEB_RING_SECONDS is a no_answer, with the same retry rules."""
+    await asyncio.sleep(voice.WEB_RING_SECONDS)
+    entry = voice.web_calls.get(call_id)
+    if entry is not None and not entry["answered"]:
+        await handle_outcome(call_id, CallOutcome.no_answer, None, evidence={"classifier": "softphone", "reason": "not answered"})
+
+
+def web_answered(call_id: str) -> None:
+    """The softphone page's Answer tap: stop ringing and start the 60 s rule."""
+    entry = voice.web_calls.get(call_id)
+    if entry is None or entry["answered"]:
+        return
+    entry["answered"] = True
+    ring = _ring_timers.pop(call_id, None)
+    if ring is not None:
+        ring.cancel()
+    arm_answer_watchdog(call_id)
+    voice.log_state(call_id, "answered", channel="web")
+
+
+async def decline_web_call(call_id: str) -> Optional[VerificationResult]:
+    voice.log_state(call_id, "declined", channel="web")
+    return await handle_outcome(call_id, CallOutcome.no_answer, None, evidence={"classifier": "softphone", "reason": "declined"})
+
+
+def _record(session: Session, call: VerificationCall, lines: list[dict]) -> list[dict]:
+    call.transcript = [*(call.transcript or []), *lines]
+    session.add(call)
+    session.commit()
+    return call.transcript
+
+
+async def finish_answer(call_id: str, answer: str, reasked: bool) -> Optional[dict]:
+    """What the vendor said, in either mode. Classifies it (3 s Claude cap), decides hold / re-ask / close, records and emits the
+    transcript lines. Returns None if the call is already settled. For "close" the caller applies the outcome with handle_outcome
+    (so it can run after the reply); `outcome`, `evidence` and `transcript` are in the result."""
+    with Session(engine) as s:
+        call = s.get(VerificationCall, call_id)
+        if call is None or call.outcome is not None:
+            return None
+        payment = s.get(Payment, call.payment_id)
+        invoice = s.get(Invoice, payment.invoice_id)
+        vendor = s.get(Vendor, invoice.vendor_id)
+        script = voice.call_script(vendor.name, (invoice.remittance_json or {})["account_last4"])
+        answer = (answer or "").strip()
+        outcome, evidence = await classify_answer(answer)
+        action = voice.decide(answer, outcome.value, reasked)
+        lines = ([] if reasked else [{"speaker": "agent", "text": script.question}]) + [{"speaker": "vendor", "text": answer or "(no response)"}]
+        if action == "hold":
+            reply, key = script.hold, "hold"
+        elif action == "reask":
+            reply, key = script.clarify, "clarify"
+        else:
+            reply, key = script.closing(outcome.value), outcome.value
+        lines.append({"speaker": "agent", "text": reply})
+        transcript = _record(s, call, lines)
+        run_id = payment.run_id
+        pid = payment.id
+    for line in lines:
+        await ev.emit(ev.CallTranscript(run_id=run_id, payment_id=pid, speaker=line["speaker"], text=line["text"]))
+    if action != "close":
+        voice.log_state(call_id, "re-asked", why=action)
+    else:
+        voice.log_state(call_id, "answered-with-outcome", outcome=outcome.value)
+    return {"action": action, "key": key, "text": reply, "outcome": outcome, "evidence": evidence, "transcript": transcript,
+            "script": script}
+
+
 async def start_verification(payment_id: str, session: Optional[Session] = None) -> VerificationResult:
     if session is None:
         with Session(engine) as own:
             return await start_verification(payment_id, own)
 
+    open_call = session.exec(select(VerificationCall).where(VerificationCall.payment_id == payment_id, VerificationCall.outcome.is_(None))).first()
+    if open_call is not None:  # one call per payment at a time: a second start returns the call already going
+        payment = session.get(Payment, payment_id)
+        contact = session.get(VendorContact, open_call.contact_id) if open_call.contact_id else None
+        voice.log_state(open_call.id, "start-ignored", why="call already in progress")
+        return VerificationResult(
+            payment_id=payment_id, call_id=open_call.id, outcome=CallOutcome.unclear, payment_status=payment.status if payment else PaymentStatus.held,
+            attempts=1, needs_controller=False, contact_source=contact.source if contact else ContactSource.on_file, number_flagged=False,
+            transcript=open_call.transcript or [], in_progress=True)
+
     s = get_settings()
     if not (s.mock_twilio or s.mock_cartesia):
         return await begin_real_call(session, payment_id)  # real mode never blocks the payment run
 
-    payment, vendor, rem, message, phone, source, flagged, call, _prior, choice, dial, routed, _info = await _prepare(session, payment_id)
+    try:
+        payment, vendor, rem, message, phone, source, flagged, call, _prior, choice, dial, routed, _info = await _prepare(session, payment_id)
+    except NoDialableNumber as nd:
+        return nd.result
     run_id = payment.run_id
     if routed:
         _audit_routing(session, payment.id, call.id, dial, phone, delivered=False)

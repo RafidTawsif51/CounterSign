@@ -15,6 +15,7 @@ import os
 import secrets
 import logging
 import re
+import time
 import uuid
 import wave
 from pathlib import Path
@@ -34,8 +35,53 @@ CARTESIA_VERSION = "2026-08-14"
 CARTESIA_MODEL = "sonic-3.6"
 
 
+PLACE_CALL_TIMEOUT_SECONDS = 15  # hard cap around the Twilio call create
+HTTP_TIMEOUT_SECONDS = 10  # Twilio REST and Cartesia requests
+WEB_RING_SECONDS = 60  # a softphone call nobody answers in this long is a no_answer
+VENDOR_PHONE_FRESH_SECONDS = 60  # a softphone page that polled this recently counts as open
+
+
 class CallNotAllowedError(Exception):
     pass
+
+
+def log_state(call_id: str, state: str, **info: Any) -> None:
+    """One line per call state change (placed, answered, re-asked, outcome, failover, finished). Ids and words only:
+    never a token, a phone number or a URL."""
+    extra = " ".join(f"{k}={v}" for k, v in info.items())
+    log.info("call %s %s%s", call_id, state, f" {extra}" if extra else "")
+
+
+# ---------------------------------------------------------------- voice mode and softphone key
+
+
+def _env(name: str) -> str:
+    """os.getenv first; otherwise the same key from .env (pydantic reads .env without filling os.environ). Only that key is read."""
+    val = os.getenv(name)
+    if val is not None:
+        return val.strip()
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return ""  # tests set these through the environment; a developer's .env must not change their results
+    try:
+        from dotenv import dotenv_values
+
+        for path in (".env", "../.env"):
+            got = dotenv_values(path).get(name)
+            if got:
+                return got.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def voice_mode() -> str:
+    """"twilio" (default) or "web" (browser softphone, no phone network)."""
+    return "web" if _env("VOICE_MODE").lower() == "web" else "twilio"
+
+
+def vendor_phone_key_ok(k: Optional[str]) -> bool:
+    key = _env("VENDOR_PHONE_KEY")
+    return bool(key and k and hmac.compare_digest(key.encode(), k.encode()))
 
 
 # ---------------------------------------------------------------- allow list
@@ -67,9 +113,10 @@ def assert_call_allowed(number: str, settings: Optional[Settings] = None) -> str
 
 
 def _twilio_client(settings: Settings) -> Any:
+    from twilio.http.http_client import TwilioHttpClient
     from twilio.rest import Client
 
-    return Client(settings.twilio_account_sid, settings.twilio_auth_token)
+    return Client(settings.twilio_account_sid, settings.twilio_auth_token, http_client=TwilioHttpClient(timeout=HTTP_TIMEOUT_SECONDS))
 
 
 def _create_call(settings: Settings, kwargs: dict) -> str:
@@ -98,7 +145,7 @@ async def place_call(
         kwargs["record"] = True  # the only place recording is requested, and the only case in which the call says "recorded"
     if status_callback_url:
         kwargs["status_callback"] = status_callback_url
-    return await asyncio.to_thread(_create_call, s, kwargs)
+    return await asyncio.wait_for(asyncio.to_thread(_create_call, s, kwargs), PLACE_CALL_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------- Cartesia text to speech
@@ -151,7 +198,7 @@ def _cartesia_wav(text: str, s: Settings) -> bytes:
             "language": "en",
             "output_format": {"container": "wav", "encoding": "pcm_s16le", "sample_rate": SAMPLE_RATE},
         },
-        timeout=30,
+        timeout=HTTP_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
     return resp.content
@@ -218,15 +265,36 @@ class CallScript:
             "Did your company make this change? Please say yes or no."
         )
         self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account? Please say yes or no."
+        self.clarify = f"Sorry, I need a yes or no. Did your company ask us to send payments to a new account ending {last4}?"
+        self.hold = "Sure, take your time."
         self.confirmed = "Thank you. I have noted your answer and will pass it to our accounts payable team. Goodbye."
         self.denied = "Thank you. We will not process that change and our controller has been alerted. Goodbye."
         self.unclear = "Thank you. I will pass this to a person on our accounts payable team, who will follow up. Goodbye."
 
     def all_texts(self) -> list[str]:
-        return [self.intro, self.question, self.retry, self.confirmed, self.denied, self.unclear]
+        return [self.intro, self.question, self.retry, self.clarify, self.hold, self.confirmed, self.denied, self.unclear]
 
     def closing(self, outcome: str) -> str:
         return {"confirmed": self.confirmed, "denied": self.denied}.get(outcome, self.unclear)
+
+
+_HOLD_RE = re.compile(r"\b(hold on|hold up|one moment|one sec|just a (moment|minute|sec|second)|hang on|wait|give me a (moment|minute|second))\b")
+
+
+def is_hold(text: str) -> bool:
+    return bool(_HOLD_RE.search((text or "").lower().replace("\u2019", "'")))
+
+
+def decide(answer: str, outcome: str, reasked: bool) -> str:
+    """What the call does with an answer, the same in both modes. "close" ends it with `outcome`; "hold" plays the wait clip
+    and listens again; "reask" plays the clarifying clip once. A hold or a re-ask uses up the single extra try, and an empty
+    answer never re-asks (silence already had its own retry)."""
+    text = (answer or "").strip()
+    if reasked or not text:
+        return "close"
+    if is_hold(text):
+        return "hold"
+    return "reask" if outcome == "unclear" else "close"
 
 
 def call_script(vendor_name: str, last4: str) -> CallScript:
@@ -265,6 +333,15 @@ def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings
         f"{_speak(prompt, settings)}</Gather>"
     )
     return _twiml((_speak(script.intro, settings) if first else "") + gather + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
+
+
+def twiml_regather(script: CallScript, text: str, gather_url: str, end_url: str, settings: Optional[Settings] = None) -> str:
+    """Play `text` (clarifying or hold clip) inside a speech Gather; silence goes to end_url, which finishes the call as unclear."""
+    gather = (
+        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
+        f"{_speak(text, settings)}</Gather>"
+    )
+    return _twiml(gather + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
 
 
 def twiml_close(text: str, settings: Optional[Settings] = None) -> str:
@@ -320,3 +397,33 @@ class RedactCallToken(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(RedactCallToken())
+
+
+# ---------------------------------------------------------------- browser softphone registry
+# In-memory on purpose: a softphone call lives for under two minutes and a restart ends it as no_answer anyway.
+
+web_calls: dict[str, dict] = {}  # call_id -> {vendor_id, vendor_name, token, clips, texts, reasked, answered, created}
+_last_poll: dict[str, float] = {}  # vendor_id -> time.monotonic() of the page's last poll
+
+
+def register_web_call(call_id: str, vendor_id: str, vendor_name: str, token: str, script: CallScript, settings: Optional[Settings] = None) -> None:
+    texts = {"intro": script.intro, "question": script.question, "clarify": script.clarify, "hold": script.hold,
+             "confirmed": script.confirmed, "denied": script.denied, "unclear": script.unclear}
+    web_calls[call_id] = {"vendor_id": vendor_id, "vendor_name": vendor_name, "token": token, "texts": texts,
+                          "clips": {k: clip_url(v, settings) for k, v in texts.items()}, "reasked": False, "answered": False,
+                          "created": time.monotonic()}
+
+
+def note_poll(vendor_id: str) -> None:
+    _last_poll[vendor_id] = time.monotonic()
+
+
+def vendor_phone_recent(vendor_id: str) -> bool:
+    t = _last_poll.get(vendor_id)
+    return t is not None and time.monotonic() - t <= VENDOR_PHONE_FRESH_SECONDS
+
+
+def pending_for(vendor_id: str) -> Optional[tuple[str, dict]]:
+    """The oldest web call for this vendor that has not been answered yet."""
+    waiting = [(cid, c) for cid, c in web_calls.items() if c["vendor_id"] == vendor_id and not c["answered"]]
+    return min(waiting, key=lambda kv: kv[1]["created"], default=None)
