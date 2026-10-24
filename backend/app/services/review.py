@@ -141,6 +141,7 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
 
     return {
         "payment": {"id": pay.id, "run_id": pay.run_id, "status": pay.status.value, "amount_usd": pay.amount_usd, "nessie_transfer_id": pay.nessie_transfer_id,
+                    "transfer_mode": pay.transfer_mode,
                     "destination": _account_view(destination, current.id if current else None), "last_verified_account": _account_view(current, current.id if current else None),
                     "approve_pays": _account_view(current, current.id if current else None)},  # approving always pays this account
         "invoice": None if inv is None else {
@@ -220,7 +221,8 @@ async def approve(payment_id: str, body: ReviewIn) -> dict:
 
     with Session(engine) as s:
         pay = s.get(Payment, payment_id)
-        pay.status, pay.nessie_transfer_id, pay.destination_account_id = PaymentStatus.paid, transfer_id, current_id
+        pay.status, pay.nessie_transfer_id, pay.destination_account_id = PaymentStatus.paid, str(transfer_id), current_id
+        mode = payments.record_transfer_mode(s, pay, transfer_id)  # stores the mode; audits a Nessie failure
         s.add(pay)
         write_audit("payment", payment_id, AuditActor.human, "approved",
                     {"approver": body.approver, "reason": body.reason, "paid_account_id": current_id, "paid_account_last4": current_last4,
@@ -230,8 +232,8 @@ async def approve(payment_id: str, body: ReviewIn) -> dict:
                                                                       "to_last_verified_account": True}, session=s)
         s.commit()
     await ev.emit(ev.PaymentReviewed(run_id=run_id, payment_id=payment_id, decision="approved", approver=body.approver, reason=body.reason))
-    await ev.emit(ev.PaymentPaid(run_id=run_id, payment_id=payment_id, nessie_transfer_id=transfer_id))
-    return {"payment_id": payment_id, "status": "paid", "nessie_transfer_id": transfer_id, "paid_account_last4": current_last4,
+    await ev.emit(ev.PaymentPaid(run_id=run_id, payment_id=payment_id, nessie_transfer_id=str(transfer_id), transfer_mode=mode))
+    return {"payment_id": payment_id, "status": "paid", "nessie_transfer_id": str(transfer_id), "transfer_mode": mode, "paid_account_last4": current_last4,
             "invoice_asked_for_a_different_account": asks_other}
 
 

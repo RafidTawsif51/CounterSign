@@ -98,9 +98,10 @@ At least one of invoice_id and message_id is set.
 |---|---|
 | payment_id | str |
 | nessie_transfer_id | str |
+| transfer_mode | "nessie" \| "mock_fallback" \| "mock", null | how the transfer was made. "mock_fallback" means Nessie failed and the id is a mock_tr_ id (the failure is audited). "mock" means MOCK_NESSIE is on |
 
 ```json
-{"type": "payment.paid", "run_id": "run_042", "payment_id": "pay_mock_001", "nessie_transfer_id": "nes_mock_0001"}
+{"type": "payment.paid", "run_id": "run_042", "payment_id": "pay_mock_001", "nessie_transfer_id": "nes_mock_0001", "transfer_mode": "mock"}
 ```
 
 ### payment.held

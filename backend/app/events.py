@@ -90,6 +90,7 @@ class PaymentPaid(EventBase):
     run_id: str
     payment_id: str
     nessie_transfer_id: str
+    transfer_mode: Optional[Literal["nessie", "mock_fallback", "mock"]] = None  # "mock_fallback": Nessie failed, the id is a mock
 
 
 class PaymentHeld(EventBase):

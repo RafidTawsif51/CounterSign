@@ -215,6 +215,9 @@ class Payment(SQLModel, table=True):
         default=PaymentStatus.pending, sa_column=enum_col(PaymentStatus)
     )
     nessie_transfer_id: Optional[str] = None
+    # How the transfer was made: "nessie" (a real sandbox transfer), "mock_fallback" (Nessie failed, a mock id was used and the
+    # failure audited), "mock" (MOCK_NESSIE on, or seeded history). Not part of the spec's table.
+    transfer_mode: Optional[str] = None
 
 
 class RiskAssessment(SQLModel, table=True):

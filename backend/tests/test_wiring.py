@@ -2,6 +2,8 @@
 payments.pay_payment, and two independent money checks stand between a payment and the transfer."""
 
 import pytest
+
+from app.config import Settings
 from sqlmodel import Session, func, select
 
 from app.models import (
@@ -291,3 +293,23 @@ def test_vendor_views_show_requested_accounts_as_not_trusted(env):
     assert vs["ven_northside"]["current_account"]["account_last4"] != "3046" and vs["ven_summit"]["current_account"]["account_last4"] == "2204"
     h = client.get("/api/vendors/ven_northside/history").json()["bank_accounts"]
     assert [a["verified_by"] for a in h] == ["onboarding", "requested, not verified"] and [a["trusted"] for a in h] == [True, False]
+
+
+# ================================================================ transfer_mode is visible through the API
+
+
+def test_payment_detail_and_approve_report_the_transfer_mode(env, monkeypatch):
+    client, eng = env
+    go(client)
+    assert client.get(f"/api/payments/{CEO}").json()["payment"]["transfer_mode"] is None  # held, nothing sent yet
+    monkeypatch.setattr(payments, "get_settings", lambda: Settings(mock_nessie=False, nessie_api_key=""))
+
+    def boom(*a):
+        raise RuntimeError("Nessie POST /transfers failed: HTTPStatusError (503: down)")
+
+    monkeypatch.setattr(payments, "_real_transfer", boom)
+    r = client.post(f"/api/payments/{CEO}/approve", json=ASK)
+    assert r.status_code == 200 and r.json()["transfer_mode"] == "mock_fallback"
+    assert client.get(f"/api/payments/{CEO}").json()["payment"]["transfer_mode"] == "mock_fallback"
+    assert "nessie_failed" in audit_actions(eng, "payment", CEO)
+    assert "transfer_failed" in audit_actions(eng, "integration", "nessie")

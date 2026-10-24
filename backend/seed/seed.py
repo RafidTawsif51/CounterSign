@@ -400,7 +400,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         run_totals[rd][0] += 1
         run_totals[rd][1] += d.amount
         pay = Payment(id=f"pay_{n:04d}", run_id=runs[rd].id, invoice_id=inv.id, amount_usd=d.amount, destination_account_id=a.row.id,
-                      status=PaymentStatus.paid, nessie_transfer_id=f"nes_seed_{n:04d}")
+                      status=PaymentStatus.paid, nessie_transfer_id=f"nes_seed_{n:04d}", transfer_mode="mock")  # simulated history
         rows += [msg, inv, pay]
         history_amounts.setdefault(key, []).append(d.amount)
         hist_rec.setdefault(key, []).append((inv, d, due, a))

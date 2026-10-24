@@ -118,6 +118,7 @@ Only verify.py writes (seed excepted).
 | destination_account_id | str FK vendor_bank_accounts.id, null | |
 | status | PaymentStatus | default pending. Drives the board |
 | nessie_transfer_id | str, null | |
+| transfer_mode | str, null | "nessie" (real sandbox transfer), "mock_fallback" (Nessie failed, mock id used, audited as payment `nessie_failed` and integration `transfer_failed`), "mock" (MOCK_NESSIE on, or seeded history). Not in the spec table |
 
 ### risk_assessments (`ras_`)
 
