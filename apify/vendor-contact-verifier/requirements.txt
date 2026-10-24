@@ -1,0 +1,4 @@
+apify==4.1.0
+httpx==0.28.1
+beautifulsoup4==4.15.0
+phonenumbers==9.0.41

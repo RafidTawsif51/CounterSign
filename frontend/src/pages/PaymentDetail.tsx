@@ -16,7 +16,6 @@ import { RiskBreakdown } from "@/components/payment/risk-breakdown";
 import { InlineError } from "@/components/shared/inline-error";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { ApiError, api } from "@/lib/api";
-import { invoiceIdFor } from "@/lib/run-summary";
 
 export function PaymentDetail() {
   const { paymentId = "" } = useParams<{ paymentId: string }>();
@@ -52,7 +51,7 @@ export function PaymentDetail() {
               <CallSlot detail={detail} />
               <AuditTrail entries={detail.audit} />
             </div>
-            {detail.payment.status === "held" && <DecisionFooter detail={detail} />}
+            <DecisionFooter detail={detail} />
           </EvidenceProvider>
         ) : query.isError ? (
           <div className="px-5 pt-4">
@@ -84,9 +83,7 @@ function useLiveRefresh(paymentId: string) {
   const { allEvents: events } = useCurrentRun();
   const queryClient = useQueryClient();
   const last = events.at(-1);
-  const invoiceId = invoiceIdFor(paymentId);
-  const relevant =
-    last && (("payment_id" in last && last.payment_id === paymentId) || ("invoice_id" in last && last.invoice_id === invoiceId));
+  const relevant = last && "payment_id" in last && last.payment_id === paymentId;
 
   useEffect(() => {
     if (relevant) void queryClient.invalidateQueries({ queryKey: ["payment", paymentId] });

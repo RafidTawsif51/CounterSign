@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api-error";
 import { getDataMode, isMock, useDataMode, type DataMode } from "@/lib/data-mode";
-import { useRunEvents, type StreamStatus } from "@/lib/events";
+import { mergeEvents, useGlobalEvents, useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
 import type { RunEvent } from "@/lib/types";
 
@@ -97,12 +97,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [run, setRun] = useState<Owned<string> | null>(() => owned(readStoredRun()));
   const runId = run && run.mode === mode ? run.value : null;
   const setRunId = useCallback((id: string | null) => setRun(owned(id)), []);
-  const { events, status } = useRunEvents(runId);
+  const { events: runEvents, status } = useRunEvents(runId);
+  const global = useGlobalEvents();
+  const events = useMemo(() => mergeEvents(runEvents, global.events.filter((e) => e.run_id === runId)), [runEvents, global.events, runId]);
   const summary = useMemo(() => summarizeRun(events), [events]);
   const [pin, setPin] = useState<Owned<PinnedAttack> | null>(() => owned(readPinned()));
   const pinned = pin && pin.mode === mode ? pin.value : null;
   const setPinned = useCallback((p: PinnedAttack | null) => setPin(owned(p)), []);
-  const { events: pinnedEvents } = useRunEvents(pinned?.runId ?? null);
+  const { events: ownPinnedEvents } = useRunEvents(pinned?.runId ?? null);
+  const pinnedEvents = useMemo(
+    () => mergeEvents(ownPinnedEvents, global.events.filter((e) => e.run_id === (pinned?.runId ?? null))),
+    [ownPinnedEvents, global.events, pinned?.runId],
+  );
   const allEvents = useMemo(() => (pinnedEvents.length ? [...events, ...pinnedEvents] : events), [events, pinnedEvents]);
   const attackDone = pinnedEvents.some((e) => e.type === "run.completed");
 
@@ -130,6 +136,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
     void queryClient.invalidateQueries({ queryKey: ["vendors"] });
     void queryClient.invalidateQueries({ queryKey: ["vendor-history"] });
   }, [summary.completed, attackDone, runId, queryClient]);
+
+  // A late call outcome changes a payment's record, and the global channel has no replay: refetch every payment record
+  // when one arrives and when the channel reconnects.
+  const lateSettled = global.events.filter((e) => e.type !== "call.transcript" && e.type !== "call.started").length;
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["payment"] });
+  }, [lateSettled, global.connections, queryClient]);
 
   const startRun = useCallback(async () => {
     const { run_id } = await api.startRun();
@@ -175,6 +188,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setRunId(null);
     unpin();
   }, [unpin, setRunId]);
+
+  // The demo was reset (here or in another browser): the run and every cached record are gone.
+  const resets = global.events.filter((e) => e.type === "demo.reset").length;
+  useEffect(() => {
+    if (resets === 0) return;
+    clearRun();
+    void queryClient.invalidateQueries();
+  }, [resets, clearRun, queryClient]);
 
   const value = useMemo(
     () => ({ runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents }),

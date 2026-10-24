@@ -1,0 +1,71 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "title": "Business", "description": "The business name from the input." },
+      "website_url": { "type": "string", "title": "Website URL", "description": "The website_url from the input: the only site that was crawled." },
+      "primary_phone": {
+        "type": ["string", "null"],
+        "title": "Primary phone",
+        "description": "The phone number with the most independent sources, in E.164 format (+14155550100). Ties go to a number in JSON-LD, then to one on the contact page. null when agreement is none_found. When agreement is conflicting it is only the best-supported guess."
+      },
+      "phones": {
+        "type": "array",
+        "title": "Phones",
+        "description": "Every number found, best supported first. Each has the sources that prove it.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "phone": { "type": "string", "description": "The number in E.164 format." },
+            "sources": {
+              "type": "array",
+              "description": "Where the number was found, one entry per page and place.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_url": { "type": "string", "description": "The page the number was found on." },
+                  "found_in": { "type": "string", "enum": ["tel_link", "json_ld", "contact_page_text", "footer_text", "other_text"], "description": "Where on the page: a tel: link, schema.org JSON-LD, text on a contact page, text in a footer, or other visible text." }
+                },
+                "required": ["source_url", "found_in"]
+              }
+            }
+          },
+          "required": ["phone", "sources"]
+        }
+      },
+      "agreement": { "type": "string", "enum": ["consistent", "conflicting", "none_found"], "title": "Agreement", "description": "consistent: one number found. conflicting: more than one number found. none_found: no number found." },
+      "confidence": { "type": "string", "enum": ["high", "medium", "low"], "title": "Confidence", "description": "high: consistent and found in 2 or more source types. medium: consistent, one source type. low: conflicting, none_found, or the site could not be read." },
+      "confidence_reason": { "type": "string", "title": "Confidence reason", "description": "A short sentence explaining the confidence." },
+      "site_reachable": { "type": "boolean", "title": "Site reachable", "description": "true when at least one page of the website was read (or robots.txt answered but disallows crawling)." },
+      "final_url": { "type": ["string", "null"], "title": "Final URL", "description": "The homepage URL after same-host redirects. null when the site was not reached." },
+      "pages_crawled": { "type": "integer", "title": "Pages crawled", "description": "How many pages were read successfully." },
+      "checked_at": { "type": "string", "title": "Checked at", "description": "When the check finished, ISO 8601 in UTC." }
+    },
+    "required": ["name", "website_url", "primary_phone", "phones", "agreement", "confidence", "confidence_reason", "site_reachable", "final_url", "pages_crawled", "checked_at"]
+  },
+  "views": {
+    "overview": {
+      "title": "Phone check per business",
+      "description": "One row per business: the phone number, how sure we are, and whether the pages agree.",
+      "transformation": {
+        "fields": ["name", "website_url", "primary_phone", "agreement", "confidence", "confidence_reason", "site_reachable", "final_url", "pages_crawled", "checked_at"]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "name": { "label": "Business", "format": "text" },
+          "primary_phone": { "label": "Primary phone", "format": "text" },
+          "agreement": { "label": "Agreement", "format": "text" },
+          "confidence": { "label": "Confidence", "format": "text" },
+          "confidence_reason": { "label": "Confidence reason", "format": "text" },
+          "site_reachable": { "label": "Site reachable", "format": "boolean" },
+          "pages_crawled": { "label": "Pages crawled", "format": "number" },
+          "website_url": { "label": "Website URL", "format": "link" },
+          "final_url": { "label": "Final URL", "format": "link" },
+          "checked_at": { "label": "Checked at", "format": "date" }
+        }
+      }
+    }
+  }
+}

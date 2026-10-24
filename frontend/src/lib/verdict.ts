@@ -15,9 +15,12 @@ export function requestedAccount(d: PaymentDetail): RemittanceDetails | null {
   return r?.account_last4 ? { bank_name: r.bank_name ?? "", routing_hash: r.routing_hash ?? "", account_last4: r.account_last4 } : null;
 }
 
-/** The backend compares routing hash and last four against the verified account (review.py). */
+/**
+ * The backend compares routing hash and last four against the verified account (review.py). Only an account the drawer
+ * can name counts: a request with a routing hash but no last four has nothing to show as the new destination.
+ */
 export function destinationChanged(d: PaymentDetail) {
-  return Boolean(d.invoice?.requested_account_differs_from_verified);
+  return requestedAccount(d) !== null && Boolean(d.invoice?.requested_account_differs_from_verified);
 }
 
 export function verdictFor(d: PaymentDetail): Verdict | null {

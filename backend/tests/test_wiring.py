@@ -132,7 +132,7 @@ def test_auto_pay_uses_payments_pay_payment_after_the_assessment_is_saved(env, m
     assert a.index("risk_assessed") < a.index("cleared_for_payment") < a.index("paid") and a.count("paid") == 1
     with Session(eng) as s:
         types = [e.type for e in s.exec(select(Event).where(Event.run_id == body["run_id"]).order_by(Event.at)) if (e.payload or {}).get("payment_id") == pid]
-    assert types == ["risk.scored", "payment.paid"]  # pay_payment emitted payment.paid exactly once
+    assert types == ["invoice.parsed", "risk.scored", "payment.paid"]  # pay_payment emitted payment.paid exactly once
 
 
 # ================================================================ two independent money checks

@@ -44,7 +44,9 @@ class MockContactFinder:
             # The demo "vendor" is a teammate's phone; otherwise a fictional number.
             phone = get_settings().demo_vendor_phone or MOCK_PHONE
         source = "website" if int(hashlib.sha256(vendor.id.encode()).hexdigest()[:2], 16) % 2 == 0 else "listing"
-        url = f"https://www.{vendor.email_domain}/contact" if source == "website" else f"https://listings.example/biz/{vendor.id}"
+        if source == "website" and not vendor.website_url:
+            source = "listing"  # never build a URL from email_domain: it may belong to a real business
+        url = f"{vendor.website_url.rstrip('/')}/contact.html" if source == "website" else f"https://listings.example/biz/{vendor.id}"
         return IndependentContact(phone=phone, source=source, source_url=url, found_at=utcnow())  # type: ignore[arg-type]
 
 

@@ -123,6 +123,12 @@ export interface InjectionFinding {
   technique: InjectionTechnique;
   snippet: string; // untrusted
   confidence: number;
+  /** PDF findings only: 1-based page, box [x0, top, x1, bottom] in PDF points from the top left, and the page size.
+   *  Off-page text keeps its real coordinates, so the box can lie outside the page. Null for email findings. */
+  page?: number | null;
+  bbox?: [number, number, number, number] | null;
+  page_width?: number | null;
+  page_height?: number | null;
 }
 
 export interface TranscriptLine {
@@ -176,12 +182,16 @@ export interface RunStartedEvent extends EventBase {
 export interface InvoiceParsedEvent extends EventBase {
   type: "invoice.parsed";
   invoice_id: string;
+  /** The id its payment has (or will have). Never derive it from invoice_id. */
+  payment_id: string;
   vendor: string;
   amount_usd: number;
 }
 export interface InjectionDetectedEvent extends EventBase {
   type: "injection.detected";
   invoice_id: string | null;
+  /** Set when the finding is in an invoice. */
+  payment_id: string | null;
   message_id: string | null;
   technique: InjectionTechnique;
   snippet: string; // untrusted
@@ -207,6 +217,17 @@ export interface PaymentReviewedEvent extends EventBase {
   decision: "approved" | "rejected";
   approver: string;
   reason: string; // untrusted
+}
+/** A verification call finished after run.completed and moved a payment. Carries the run's new totals. */
+export interface RunUpdatedEvent extends EventBase {
+  type: "run.updated";
+  payment_id: string;
+  status: PaymentStatus;
+  paid: number;
+  held: number;
+  blocked: number;
+  total_usd: number;
+  blocked_usd: number;
 }
 /** POST /api/demo/reset finished. Sent on the leaderboard channel. */
 export interface DemoResetEvent extends EventBase {
@@ -289,14 +310,14 @@ export type RunEvent =
   | AttackLoggedEvent
   | AttackQueuedEvent
   | PaymentReviewedEvent
+  | RunUpdatedEvent
   | DemoResetEvent;
 
 export type RunEventType = RunEvent["type"];
 
 // ---------- API responses ----------
 // Shapes below are taken from the backend's route code (docs/ does not cover them yet) and checked against a live run.
-// Two are still proposals with no backend behind them: InboxThreadSummary.attachment_count and RedTeamResults, plus the
-// GET /api/system/status row shape.
+// One is still a proposal with no backend behind it: RedTeamResults.
 
 /** How a transfer went out (payments.py): "nessie" sandbox, "mock" adapter, or "mock_fallback" when Nessie failed. */
 export type TransferMode = "nessie" | "mock" | "mock_fallback";
@@ -483,13 +504,15 @@ export interface InboxThreadSummary {
   /** The seed's ground truth, not a detection. The inbox never shows it; attack markers come from what the run caught. */
   has_attack: boolean;
   last_received_at: ISODateTime;
-  /** Invoice PDFs in the thread. Proposed: not returned by the backend yet, so the marker hides when it is missing. */
-  attachment_count?: number;
+  /** Invoice PDFs in the thread. */
+  attachment_count: number;
 }
 
 export interface InboxMessage extends Message {
   is_html: boolean;
   invoice_ids: string[];
+  /** The invoices attached to this message, with the payment id each has (or will have). */
+  invoices: { id: string; payment_id: string; has_pdf: boolean }[];
 }
 
 /** GET /api/inbox/threads/{thread_id}: the summary plus every message, oldest first. */
@@ -551,6 +574,7 @@ export interface RunStatusResponse {
 /** 201 from POST /api/invoices/upload (ingest.py). */
 export interface UploadResult {
   invoice_id: string;
+  payment_id: string;
   message_id: string | null;
   vendor_id: string | null;
   size_bytes: number;
@@ -583,12 +607,14 @@ export interface LaunchAttackRequest {
 
 /**
  * 201 from POST /api/attacks. Every attack runs as its own mini-run (run_id); while a full run is on it waits its turn
- * (queued, position 1 = next). Its payment id follows run.py: inv_x pays as pay_x.
+ * (queued, position 1 = next).
  */
 export interface LaunchAttackResponse {
   attack_id: string;
   message_id: string;
   invoice_id: string;
+  /** The id the attack's payment has once the mini-run reads the invoice. */
+  payment_id: string;
   run_id: string;
   queued: boolean;
   position: number;
@@ -610,6 +636,8 @@ export interface LeaderboardRow {
   amount_usd: number | null;
   /** Sandbox dollars the attack got paid out. */
   paid_usd: number;
+  /** Null for a bounty email that is not approved yet. */
+  payment_id: string | null;
   created_at: ISODateTime;
   moderation_status: ModerationStatus;
   /** The attack text, only once moderation approved it. Untrusted. */
@@ -660,18 +688,22 @@ export interface RedTeamResults {
   median_run_seconds: { baseline: number; countersign: number };
 }
 
-/** Real: runs live. Sandboxed: a provider's sandbox (sandbox money, test identities). Simulated: generated demo data. */
-export type ComponentMode = "real" | "sandboxed" | "simulated";
+/**
+ * Real: runs live. Sandboxed: a provider's sandbox (sandbox money, test identities). Simulated: generated demo data, or a
+ * provider sandbox as the server labels it. Mock: the server runs this component on its mock right now (its MOCK_* flag).
+ * The server sends real, simulated and mock; sandboxed comes only from the documented list.
+ */
+export type ComponentMode = "real" | "sandboxed" | "simulated" | "mock";
 
 /**
- * One row of GET /api/system/status. Proposed shape: the route is not on the backend yet (404), so /status shows the
- * documented list (lib/system-status.ts) with GET /api/health's mock flags on top.
+ * One row of GET /api/system/status (backend/app/services/status.py). If the route fails, /status shows the documented
+ * list (lib/system-status.ts) with GET /api/health's mock flags on top.
  */
 export interface SystemComponentStatus {
   name: string;
   mode: ComponentMode;
   /** One line: what it does and how we know. */
   detail: string;
-  /** The MOCK_* flags (health's keys) that put this component on its mock when true. */
+  /** The MOCK_* flags (health's keys) that put this component on its mock when true. Documented list only. */
   mock_flags?: string[];
 }

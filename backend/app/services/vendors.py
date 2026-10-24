@@ -110,7 +110,7 @@ def list_vendors(session: Session = Depends(get_session)) -> list[dict]:
         lp = latest.get(v.id)
         acct = current.get(v.id)
         out.append({
-            "id": v.id, "name": v.name, "trade": v.trade, "email_domain": v.email_domain, "status": v.status.value, "created_at": v.created_at,
+            "id": v.id, "name": v.name, "trade": v.trade, "email_domain": v.email_domain, "website_url": v.website_url, "status": v.status.value, "created_at": v.created_at,
             "current_account": {"bank_name": acct.bank_name, "account_last4": acct.account_last4, "since": acct.valid_from} if acct else None,
             "unverified_requested_accounts": requested_n.get(v.id, 0),
             "identity": ident.get(v.id),  # the CRS result, or null if no check has run yet (the history call runs one)
@@ -153,7 +153,7 @@ async def vendor_history(vendor_id: str, limit: int = Query(300, ge=1, le=2000),
         })
     paid_amounts = [i["amount_usd"] for i in rows if i["status"] == "paid" and i["amount_usd"]]
     return {
-        "vendor": {"id": vendor.id, "name": vendor.name, "trade": vendor.trade, "email_domain": vendor.email_domain, "status": vendor.status.value, "created_at": vendor.created_at},
+        "vendor": {"id": vendor.id, "name": vendor.name, "trade": vendor.trade, "email_domain": vendor.email_domain, "website_url": vendor.website_url, "status": vendor.status.value, "created_at": vendor.created_at},
         "identity": ident,
         "summary": {"invoices": len(rows), "paid": len(paid_amounts), "average_paid_usd": round(sum(paid_amounts) / len(paid_amounts), 2) if paid_amounts else None,
                     "max_paid_usd": max(paid_amounts) if paid_amounts else None},

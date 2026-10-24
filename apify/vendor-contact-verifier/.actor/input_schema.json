@@ -1,0 +1,56 @@
+{
+  "title": "Vendor Contact Verifier input",
+  "description": "The businesses to check. For each one the Actor reads the business's own website and returns the phone number it finds there, with the pages that prove it. Give it the website_url from your own vendor records, never a link from an email.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "businesses": {
+      "title": "Businesses",
+      "type": "array",
+      "description": "The businesses to check, each an object with name (how you know the business) and website_url (its own website, a full https:// URL taken from your vendor records). Only the host of each website_url is crawled.",
+      "editor": "json",
+      "items": {
+        "type": "object"
+      },
+      "prefill": [
+        { "name": "Example Concrete Co", "website_url": "https://example.com/" }
+      ],
+      "example": [
+        { "name": "Summit Concrete", "website_url": "https://vendors.example.org/summit-concrete/" },
+        { "name": "Northside Rentals", "website_url": "https://vendors.example.org/northside-rentals/" }
+      ]
+    },
+    "maxPagesPerSite": {
+      "title": "Max pages per site",
+      "type": "integer",
+      "description": "The most pages requested on one website: the homepage, the extra paths and the same-host links found on the pages. A request that fails (a 404) counts too. Lower it for a quick check.",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 30,
+      "example": 10
+    },
+    "extraPaths": {
+      "title": "Extra paths",
+      "type": "array",
+      "description": "Pages to try besides the homepage, written as paths. They are read inside the website_url: for https://host/shop/ the path /contact means https://host/shop/contact. A path that does not exist is skipped.",
+      "editor": "stringList",
+      "default": ["/contact", "/contact-us", "/about"],
+      "prefill": ["/contact", "/contact-us", "/about"],
+      "items": {
+        "type": "string"
+      },
+      "example": ["/contact", "/contact-us", "/about"]
+    },
+    "requestTimeoutSecs": {
+      "title": "Request timeout (seconds)",
+      "type": "integer",
+      "description": "How long to wait for one page before giving up on it. A site that never answers is reported with site_reachable false.",
+      "default": 15,
+      "minimum": 1,
+      "maximum": 120,
+      "unit": "seconds",
+      "example": 15
+    }
+  },
+  "required": ["businesses"]
+}

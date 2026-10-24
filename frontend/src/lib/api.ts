@@ -95,7 +95,7 @@ export const api = {
   approve: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/approve`, { reason, approver }),
   reject: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/reject`, { reason, approver }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
-  /** In CLAUDE.md's API table but not on the backend yet (calls start from the run). Nothing calls it. */
+  /** 202; 409 unless the payment is held. Calls at an independent number, never one from the email. Live server only. */
   startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
 
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
@@ -105,11 +105,16 @@ export const api = {
   runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
   redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 
-  /** Not on the backend yet (404); /status falls back to the documented list plus health's mock flags. */
+  /** What is real, simulated or on its mock right now. /status falls back to the documented list if it fails. */
   systemStatus: () => get<SystemComponentStatus[]>("/api/system/status"),
   /** Database and every MOCK_* flag as the server reads them. */
   health: () => get<HealthResponse>("/api/health"),
 };
+
+/** The original stored PDF of an invoice (GET /api/invoices/{id}/pdf). */
+export function invoicePdfUrl(invoiceId: string) {
+  return `${API_URL}/api/invoices/${encodeURIComponent(invoiceId)}/pdf`;
+}
 
 /** Absolute URL for an SSE endpoint. */
 export function streamUrl(path: string) {

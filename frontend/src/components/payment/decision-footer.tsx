@@ -1,108 +1,192 @@
-import { useState } from "react";
-import { Check, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, Phone, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { iconProps } from "@/components/shared/icon";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api-error";
-import { formatAccount } from "@/lib/format";
+import { useDataMode } from "@/lib/data-mode";
+import { formatAccount, formatUSD } from "@/lib/format";
 import type { PaymentDetail } from "@/lib/types";
+import { destinationChanged, requestedAccount } from "@/lib/verdict";
 
 type Mode = "approve" | "reject";
 
 /** The controller persona who decides exceptions in the demo; the backend records it as the approver. */
-const CONTROLLER = "Dev";
+const DEFAULT_APPROVER = "Dev (Controller)";
 
-// The controller's decision on a held payment. A reason is required either way; it goes into the audit trail.
-// The backend says what is allowed (actions) and which account approving pays: always the verified one.
-export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
-  const paymentId = detail.payment.id;
-  const vendor = detail.vendor?.name ?? "this payment";
-  const { can_approve, approve_blocked_reason, can_reject } = detail.actions;
+/** What Approve pays, in one sentence. The backend says which account (approve_pays); approving never pays the requested one. */
+export function approveSentence(detail: PaymentDetail): string | null {
   const pays = detail.payment.approve_pays;
+  if (!pays) return null;
+  const verified = `verified account ending ${formatAccount(pays.account_last4).slice(-4)}`;
+  const req = requestedAccount(detail);
+  return destinationChanged(detail) && req
+    ? `Pays ${verified}, not the requested account ending ${formatAccount(req.account_last4).slice(-4)}.`
+    : `Pays ${verified}.`;
+}
+
+// The controller's decision on a held payment. The backend says what is allowed (actions); a reason is required either
+// way and goes into the audit trail with the approver's name.
+export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
   const [mode, setMode] = useState<Mode | null>(null);
+  const [calling, setCalling] = useState(false);
+  const queryClient = useQueryClient();
+  const dataMode = useDataMode();
+  const { payment } = detail;
+  const vendor = detail.vendor?.name ?? "this vendor";
+  const { can_approve, approve_blocked_reason, can_reject } = detail.actions;
+  if (payment.status !== "held") return null;
+  // The mock plays one call per run and has no manual call route, so the offline demo does not offer another.
+  const canCall = dataMode === "live" && destinationChanged(detail);
+  const sentence = can_approve ? approveSentence(detail) : null;
+
+  async function callAgain() {
+    setCalling(true);
+    try {
+      await api.startCall(payment.id);
+      toast.success("Calling the vendor", { description: `${vendor}, at an independent number, not the one in the email.` });
+      void queryClient.invalidateQueries({ queryKey: ["payment", payment.id] });
+    } catch (err) {
+      toast.error("Call not started", { description: errorMessage(err) });
+    } finally {
+      setCalling(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-rule bg-surface px-5 py-3">
+      <p className="mr-auto min-w-[16ch] text-sm text-ink-muted">
+        {can_approve || !approve_blocked_reason
+          ? "Held for the controller. Your reason is recorded in the audit trail."
+          : `Approve is unavailable: ${approve_blocked_reason}.`}
+        {sentence && <span className="mt-0.5 block font-medium text-ink">Approve: {sentence}</span>}
+      </p>
+      {canCall && (
+        <Button onClick={() => void callAgain()} disabled={calling}>
+          <Phone {...iconProps} />
+          Call vendor again
+        </Button>
+      )}
+      <Button variant="danger" onClick={() => setMode("reject")} disabled={!can_reject}>
+        <X {...iconProps} />
+        Reject
+      </Button>
+      <Button variant="primary" onClick={() => setMode("approve")} disabled={!can_approve}>
+        <Check {...iconProps} />
+        Approve
+      </Button>
+      {mode && <DecisionDialog key={mode} mode={mode} detail={detail} onClose={() => setMode(null)} />}
+    </div>
+  );
+}
+
+function DecisionDialog({ mode, detail, onClose }: { mode: Mode; detail: PaymentDetail; onClose: () => void }) {
+  const [approver, setApprover] = useState(DEFAULT_APPROVER);
   const [reason, setReason] = useState("");
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
+  const approving = mode === "approve";
+  const { payment } = detail;
+  const vendor = detail.vendor?.name ?? "Unknown vendor";
+  const sentence = approveSentence(detail);
+  const ready = reason.trim().length >= 3 && approver.trim().length > 0;
 
   async function submit() {
-    if (!mode || !reason.trim()) return;
+    if (!ready || pending) return;
     setPending(true);
+    setError(null);
     try {
-      await (mode === "approve" ? api.approve : api.reject)(paymentId, reason.trim(), CONTROLLER);
-      toast.success(mode === "approve" ? "Payment approved" : "Payment rejected", { description: vendor });
-      setMode(null);
-      setReason("");
-      await queryClient.invalidateQueries({ queryKey: ["payment", paymentId] });
-    } catch (err) {
-      toast.error(mode === "approve" ? "Payment not approved" : "Payment not rejected", {
-        description: errorMessage(err),
+      await (approving ? api.approve : api.reject)(payment.id, reason.trim(), approver.trim());
+      toast.success(approving ? "Payment approved" : "Payment rejected", {
+        description: approving && sentence ? `${vendor}. ${sentence}` : vendor,
       });
+      onClose();
+      await queryClient.invalidateQueries({ queryKey: ["payment", payment.id] });
+    } catch (err) {
+      // 409: the backend's own reason (for example the verified account changed after the hold). The dialog stays open.
+      setError(errorMessage(err));
     } finally {
       setPending(false);
     }
   }
 
-  if (!mode) {
-    return (
-      <div className="flex items-center gap-3 border-t border-rule bg-surface px-5 py-3">
-        <p className="mr-auto text-sm text-ink-muted">
-          {can_approve || !approve_blocked_reason
-            ? "Held for the controller. Your reason is recorded in the audit trail."
-            : `Approve is unavailable: ${approve_blocked_reason}.`}
-        </p>
-        <Button variant="danger" onClick={() => setMode("reject")} disabled={!can_reject}>
-          <X {...iconProps} />
-          Reject
-        </Button>
-        <Button variant="primary" onClick={() => setMode("approve")} disabled={!can_approve}>
-          <Check {...iconProps} />
-          Approve
-        </Button>
-      </div>
-    );
-  }
-
-  const approving = mode === "approve";
   return (
-    <form
-      className="space-y-2 border-t border-rule bg-surface px-5 py-3"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      <label htmlFor="decision-reason" className="text-sm font-medium">
-        {approving ? "Why is it safe to pay?" : "Why reject this payment?"}
-      </label>
-      {approving && pays && (
-        <p className="text-sm text-ink-muted">
-          Approving pays the verified account <span className="figure text-ink">{formatAccount(pays.account_last4)}</span> at {pays.bank_name}, never
-          an account the invoice asked for.
-        </p>
-      )}
-      <Textarea
-        id="decision-reason"
-        autoFocus
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        className="min-h-16 text-sm"
-        placeholder={
-          approving
-            ? "The amount matches the rental agreement; paying the account we already verified."
-            : "Vendor did not confirm the new account; paying the verified account next week."
-        }
-      />
-      <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={() => setMode(null)} disabled={pending}>
-          Cancel
-        </Button>
-        <Button size="sm" type="submit" variant={approving ? "primary" : "danger"} disabled={pending || reason.trim().length < 3}>
-          {approving ? "Approve payment" : "Reject payment"}
-        </Button>
-      </div>
-    </form>
+    <Dialog open onOpenChange={(open) => !open && !pending && onClose()}>
+      <DialogContent
+        className="max-w-[480px]"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault(); // the reason is what the controller writes; the approver name has a default
+          reasonRef.current?.focus();
+        }}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+          className="space-y-4"
+        >
+          <DialogHeader>
+            <DialogTitle>{approving ? "Approve payment" : "Reject payment"}</DialogTitle>
+            <DialogDescription>
+              {vendor}, {formatUSD(payment.amount_usd)}
+            </DialogDescription>
+          </DialogHeader>
+
+          {approving ? (
+            sentence && <p className="rounded-md border border-rule bg-sunken px-3 py-2 text-sm font-medium">{sentence}</p>
+          ) : (
+            <p className="text-sm text-ink-muted">Rejecting blocks this payment. Nothing is sent.</p>
+          )}
+
+          <div className="space-y-1">
+            <label htmlFor="decision-approver" className="text-sm font-medium">
+              Approver
+            </label>
+            <Input id="decision-approver" value={approver} onChange={(e) => setApprover(e.target.value)} maxLength={100} />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="decision-reason" className="text-sm font-medium">
+              {approving ? "Why is it safe to pay?" : "Why reject this payment?"}
+            </label>
+            <Textarea
+              id="decision-reason"
+              ref={reasonRef}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={1000}
+              className="min-h-20 text-sm"
+              placeholder={
+                approving
+                  ? "The amount matches the rental agreement; paying the account we already verified."
+                  : "Vendor did not confirm the new account; paying the verified account next week."
+              }
+            />
+          </div>
+
+          {error && (
+            <p role="alert" className="rounded-md border border-blocked bg-blocked-tint px-3 py-2 text-sm text-blocked-ink">
+              {error}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button type="button" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" variant={approving ? "primary" : "danger"} disabled={pending || !ready}>
+              {approving ? "Approve payment" : "Reject payment"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

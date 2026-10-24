@@ -1,0 +1,13 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Vendor Contact Verifier output",
+  "description": "One row per business: the phone number found on its own website, where it was found, and how sure the Actor is.",
+  "properties": {
+    "results": {
+      "type": "string",
+      "title": "Phone check per business",
+      "description": "The dataset with one row per business, shown in the overview table.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+    }
+  }
+}

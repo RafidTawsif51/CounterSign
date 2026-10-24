@@ -40,6 +40,11 @@ function allMessages(): Message[] {
   return [...messages].sort((a, b) => (a.received_at < b.received_at ? -1 : a.received_at > b.received_at ? 1 : a.id < b.id ? -1 : 1));
 }
 
+/** The mock has no PDFs to serve, so no attachment claims one. */
+function refsOf(messageId: string) {
+  return invoicesOf(messageId).map((id) => ({ id, payment_id: "pay_" + id.split("_").slice(1).join("_"), has_pdf: false }));
+}
+
 function invoicesOf(messageId: string) {
   // Only real PDFs are attachments; an email attack's invoice is synthetic and has none.
   return openInvoices.filter((i) => i.message_id === messageId && i.pdf_path).map((i) => i.id);
@@ -78,7 +83,7 @@ export function mockThreads(): InboxThreadSummary[] {
 export function mockThread(threadId: string): InboxThreadDetail {
   const msgs = grouped().get(threadId);
   if (!msgs) throw new ApiError(404, `/api/inbox/threads/${threadId}`, `Thread not found`);
-  return { ...summary(threadId, msgs), messages: msgs.map((m) => ({ ...m, is_html: /<\s*(html|body|div|p|br|span|a|table)\b/i.test(m.body), invoice_ids: invoicesOf(m.id) })) };
+  return { ...summary(threadId, msgs), messages: msgs.map((m) => ({ ...m, is_html: /<\s*(html|body|div|p|br|span|a|table)\b/i.test(m.body), invoice_ids: invoicesOf(m.id), invoices: refsOf(m.id) })) };
 }
 
 /** POST /api/inbox/messages. The vendor comes from the thread, never from from_addr (a lookalike must not pick it). */
@@ -103,7 +108,7 @@ export function mockAddMessage(body: unknown): InboxMessage {
     is_attack: false,
   };
   postMessage(msg);
-  return { ...msg, is_html: false, invoice_ids: [] };
+  return { ...msg, is_html: false, invoice_ids: [], invoices: [] };
 }
 
 // ---------- Vendor history ----------

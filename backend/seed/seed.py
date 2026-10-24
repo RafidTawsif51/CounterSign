@@ -47,6 +47,7 @@ from app.services.extract import hash_routing  # noqa: E402
 from invoice_pdf import hidden_instruction, layout_for, render_invoice  # noqa: E402
 from history import H, add_history_extras, onboard_late_vendors  # noqa: E402
 from poison_emails import html_email  # noqa: E402
+from sites import contact_url, website_url  # noqa: E402
 
 SEED = 20261023
 UTC = timezone.utc
@@ -255,7 +256,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     contact1: dict[str, VendorContact] = {}
     for i, v in enumerate(VENDORS):
         created = ANCHOR - timedelta(days=420 + 37 * i)
-        vrow[v.key] = Vendor(id=f"ven_{v.key}", name=v.name, trade=v.trade, email_domain=v.domain, created_at=created)
+        vrow[v.key] = Vendor(id=f"ven_{v.key}", name=v.name, trade=v.trade, email_domain=v.domain, website_url=website_url(v.name), created_at=created)
         rows.append(vrow[v.key])
         known_addrs[v.key] = [f"ar@{v.domain}", f"billing@{v.domain}"]
         start = rng.randint(13, 18)
@@ -277,7 +278,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
                                         first_seen=created, last_verified=ANCHOR - timedelta(days=rng.randint(20, 240)))
         rows.append(contact1[v.key])
         if i % 2 == 0:
-            src, url = ContactSource.website, f"https://www.{v.domain}/contact"
+            src, url = ContactSource.website, contact_url(v.name)  # a page we host, never the real-looking domain
         else:
             src, url = ContactSource.listing, f"https://listings.example/biz/ven_{v.key}"
         rows.append(VendorContact(id=f"con_{v.key}_2", vendor_id=f"ven_{v.key}", phone=phone, source=src, source_url=url,

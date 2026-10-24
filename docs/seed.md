@@ -13,7 +13,8 @@ Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) 
 | History | about 1,160 paid invoices, 50 weekly Thursday runs (`run_2025w44` ... `run_2026w42`), one payment per invoice, `nes_seed_NNNN` transfer ids |
 | Seasonality | busier in spring and summer: more invoices per week and larger amounts (factor 0.55 in December, 1.4 in May and June) |
 | Bank history | every vendor has one current account (`valid_to` null). 4 had a legitimate change, each with a confirmed `verification_calls` row and `verified_by_call_id` set: `lakeshore`, `redwood`, `stonecraft`, `skyline`. Onboarding accounts have no call (verified at onboarding) |
-| Contacts | each vendor: one `on_file` phone plus one `website` or `listing` contact with `source_url` |
+| Contacts | each vendor: one `on_file` phone plus one `website` or `listing` contact with `source_url`. A `website` contact points at the vendor's hosted site (`vendors.website_url` + `contact.html`) |
+| Websites | each vendor has a `website_url` on our own host; `python -m seed.sites` writes the sites to `sites/` (docs/sites.md) |
 | Send times | each vendor emails inside one daily UTC window (4 to 6 hours), so `outside_usual_hours` works |
 
 ## This week (Thursday 2026-10-22 run)

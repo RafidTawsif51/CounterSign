@@ -23,8 +23,6 @@ export interface CallView {
 /** verify.py hangs up at 60 seconds. */
 export const CALL_LIMIT_S = 60;
 
-const paymentIdFor = (invoiceId: string) => "pay_" + invoiceId.slice("inv_".length);
-
 /** Every call in a run, in the order the agent queued them. */
 export function foldCalls(events: RunEvent[]): CallView[] {
   const vendorOf = new Map<string, string>();
@@ -32,9 +30,9 @@ export function foldCalls(events: RunEvent[]): CallView[] {
   const calls = new Map<string, CallView>();
 
   for (const e of events) {
-    if (e.type === "invoice.parsed") vendorOf.set(paymentIdFor(e.invoice_id), e.vendor);
+    if (e.type === "invoice.parsed") vendorOf.set(e.payment_id, e.vendor);
     if (e.type === "risk.scored" && e.decision === "hold_and_verify") verify.add(e.payment_id);
-    if (!("payment_id" in e)) continue;
+    if (e.type === "injection.detected" || !("payment_id" in e)) continue;
     const pid = e.payment_id;
     let call = calls.get(pid);
 

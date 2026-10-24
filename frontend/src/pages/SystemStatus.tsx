@@ -13,13 +13,13 @@ import type { ComponentMode, HealthResponse, SystemComponentStatus } from "@/lib
 // The labels say what each component is in the product; health's mock flags say what this server is running right now,
 // so a component labeled Real can never quietly be a mock in front of a judge.
 
-const BADGE: Record<ComponentMode, "accent" | "neutral"> = { real: "accent", sandboxed: "neutral", simulated: "neutral" };
+const BADGE: Record<ComponentMode, "accent" | "neutral"> = { real: "accent", sandboxed: "neutral", simulated: "neutral", mock: "neutral" };
 
 export function SystemStatus() {
   const status = useQuery({ queryKey: ["system-status"], queryFn: api.systemStatus, retry: false });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
 
-  // The route is not on the backend yet (404): any failure here falls back to the documented list, never an empty page.
+  // Any failure here (an older server without the route, a 500) falls back to the documented list, never an empty page.
   const rows: SystemComponentStatus[] | null = status.data ?? (status.isError ? DOCUMENTED_STATUS : null);
 
   return (
@@ -41,7 +41,7 @@ export function SystemStatus() {
         <p className="mt-4 max-w-[80ch] text-sm text-ink-muted">
           {status.data
             ? "From the server's own status report."
-            : "The server does not publish a status report yet, so this is the documented list, with the server's mock switches checked live."}{" "}
+            : "The server's status report did not load, so this is the documented list, with the server's mock switches checked live."}{" "}
           All money is sandbox money. Every vendor, person and company in the demo is fictional.
         </p>
       </div>

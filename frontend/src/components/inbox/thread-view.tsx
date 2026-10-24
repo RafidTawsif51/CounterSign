@@ -7,7 +7,8 @@ import { InvoicePreview } from "@/components/inbox/invoice-preview";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { useArrivals } from "@/hooks/use-arrivals";
-import { api } from "@/lib/api";
+import { api, invoicePdfUrl } from "@/lib/api";
+import { isMock } from "@/lib/data-mode";
 import type { DiffPart } from "@/lib/domain-diff";
 import { formatClock, formatDate, formatRelativeTime } from "@/lib/format";
 import { bodyText, headerFlags, type Detection, type HeaderFlag } from "@/lib/inbox";
@@ -157,10 +158,10 @@ function MessageItem({
       {/* Untrusted text: shown as received, never rendered as HTML, never acted on. */}
       <div className="border-t border-rule px-4 py-3 text-base whitespace-pre-wrap">{bodyText(msg)}</div>
 
-      {msg.invoice_ids.length > 0 && (
+      {msg.invoices.length > 0 && (
         <ul className="border-t border-rule px-2 py-1.5">
-          {msg.invoice_ids.map((id) => (
-            <AttachmentRow key={id} invoiceId={id} invoice={invoices.find((i) => i.id === id)} history={history} />
+          {msg.invoices.map((ref) => (
+            <AttachmentRow key={ref.id} invoiceId={ref.id} paymentId={ref.payment_id} hasPdf={ref.has_pdf} invoice={invoices.find((i) => i.id === ref.id)} history={history} />
           ))}
         </ul>
       )}
@@ -230,9 +231,20 @@ function LookalikeRow({ flag }: { flag: HeaderFlag }) {
   );
 }
 
-function AttachmentRow({ invoiceId, invoice, history }: { invoiceId: string; invoice?: HistoryInvoice; history?: VendorHistory }) {
+function AttachmentRow({
+  invoiceId,
+  paymentId: pid,
+  hasPdf,
+  invoice,
+  history,
+}: {
+  invoiceId: string;
+  paymentId: string;
+  hasPdf: boolean;
+  invoice?: HistoryInvoice;
+  history?: VendorHistory;
+}) {
   const [open, setOpen] = useState(false);
-  const pid = "pay_" + invoiceId.slice("inv_".length);
   // The payment record exists once a run has read the invoice; it carries the injection findings.
   const { data: detail } = useQuery({ queryKey: ["payment", pid], queryFn: () => api.payment(pid), retry: false });
   const findings = detail?.injection_findings.filter((f) => f.invoice_id === invoiceId) ?? [];
@@ -257,7 +269,7 @@ function AttachmentRow({ invoiceId, invoice, history }: { invoiceId: string; inv
         <span className="ml-auto text-sm text-accent">Preview</span>
       </button>
       {invoice && history && (
-        <InvoicePreview open={open} onOpenChange={setOpen} name={name} invoice={invoice} vendor={history.vendor} findings={findings} />
+        <InvoicePreview open={open} onOpenChange={setOpen} pdfUrl={hasPdf && !isMock() ? invoicePdfUrl(invoiceId) : null} name={name} invoice={invoice} vendor={history.vendor} findings={findings} />
       )}
     </li>
   );

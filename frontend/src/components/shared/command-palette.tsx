@@ -19,7 +19,6 @@ import { useCurrentRun } from "@/components/shared/run-context";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { api } from "@/lib/api";
 import { formatUSD } from "@/lib/format";
-import { invoiceIdFor } from "@/lib/run-summary";
 import type { PaymentStatus } from "@/lib/types";
 
 interface PaletteProps {
@@ -111,7 +110,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
             {payments.map((p) => (
               <CommandItem
                 key={p.id}
-                value={`payment ${p.vendor} ${p.id} ${p.invoiceId} ${p.status}`}
+                value={`payment ${p.vendor} ${p.id} ${p.status}`}
                 onSelect={() => go(`/payments/${p.id}`)}
               >
                 <FileText {...iconProps} />
@@ -156,16 +155,15 @@ function useRunPayments() {
     const parsed = new Map<string, { vendor: string; amount: number }>();
     const status = new Map<string, PaymentStatus>();
     for (const e of events) {
-      if (e.type === "invoice.parsed") parsed.set(e.invoice_id, { vendor: e.vendor, amount: e.amount_usd });
+      if (e.type === "invoice.parsed") parsed.set(e.payment_id, { vendor: e.vendor, amount: e.amount_usd });
       else if (e.type === "risk.scored") status.set(e.payment_id, status.get(e.payment_id) ?? "pending");
       else if (e.type === "payment.paid") status.set(e.payment_id, "paid");
       else if (e.type === "payment.held") status.set(e.payment_id, "held");
       else if (e.type === "payment.blocked") status.set(e.payment_id, "blocked");
     }
     return [...status].map(([id, st]) => {
-      const invoiceId = invoiceIdFor(id);
-      const inv = parsed.get(invoiceId);
-      return { id, invoiceId, status: st, vendor: inv?.vendor ?? invoiceId, amount: inv?.amount ?? null };
+      const inv = parsed.get(id);
+      return { id, status: st, vendor: inv?.vendor ?? id, amount: inv?.amount ?? null };
     });
   }, [events]);
 }

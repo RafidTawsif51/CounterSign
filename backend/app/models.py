@@ -125,6 +125,9 @@ class Vendor(SQLModel, table=True):
     name: str
     trade: str
     email_domain: str
+    # The vendor's website, a page WE host (see seed/sites.py). The phone lookup crawls this and never email_domain, which may
+    # belong to a real business.
+    website_url: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow)
     status: VendorStatus = Field(
         default=VendorStatus.active, sa_column=enum_col(VendorStatus)
@@ -242,6 +245,17 @@ class InjectionFinding(SQLModel, table=True):
     technique: str
     snippet: str
     confidence: float
+    # Where a PDF finding sits: 1-based page, box (x0, top, x1, bottom) in PDF points from the top left, and the page size.
+    # Null for email findings. Off-page text keeps its real coordinates, so the box can lie outside the page.
+    page: Optional[int] = Field(default=None)
+    bbox_json: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    page_width: Optional[float] = Field(default=None)
+    page_height: Optional[float] = Field(default=None)
+
+
+def payment_id_for_invoice(invoice_id: str) -> str:
+    """The id the payment for an invoice has (or will have): inv_1160 -> pay_1160, inv_atk_x -> pay_atk_x."""
+    return "pay_" + invoice_id.split("_", 1)[-1]
 
 
 class VerificationCall(SQLModel, table=True):

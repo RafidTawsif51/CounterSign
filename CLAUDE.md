@@ -77,6 +77,7 @@ All under `/api`, JSON. One SSE stream drives the live board.
 | GET | /api/inbox/threads | AP inbox threads |
 | POST | /api/inbox/messages | Add an email to a thread (attack console) |
 | POST | /api/invoices/upload | Upload an invoice PDF (multipart) |
+| GET | /api/invoices/{id}/pdf | The original stored PDF, inline (looked up by invoice id only) |
 | POST | /api/payment-runs | Start a payment run over all open invoices |
 | GET | /api/payment-runs/{id} | Run status and totals |
 | GET | /api/payment-runs/{id}/events | Live event stream (SSE) |

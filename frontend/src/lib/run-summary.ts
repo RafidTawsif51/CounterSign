@@ -17,7 +17,7 @@ export function summarizeRun(events: RunEvent[]): RunSummary {
   let invoiceCount: number | null = null;
   let completed = false;
   const status = new Map<string, PaymentStatus>();
-  const amount = new Map<string, number>(); // by invoice id, from invoice.parsed
+  const amount = new Map<string, number>(); // by payment id, from invoice.parsed
 
   for (const e of events) {
     switch (e.type) {
@@ -25,7 +25,7 @@ export function summarizeRun(events: RunEvent[]): RunSummary {
         invoiceCount = e.invoice_count;
         break;
       case "invoice.parsed":
-        amount.set(e.invoice_id, e.amount_usd);
+        amount.set(e.payment_id, e.amount_usd);
         break;
       case "payment.paid":
         status.set(e.payment_id, "paid");
@@ -44,7 +44,7 @@ export function summarizeRun(events: RunEvent[]): RunSummary {
 
   const count = (s: PaymentStatus) => [...status.values()].filter((v) => v === s).length;
   let paidUsd = 0;
-  for (const [pid, s] of status) if (s === "paid") paidUsd += amount.get(invoiceIdFor(pid)) ?? 0;
+  for (const [pid, s] of status) if (s === "paid") paidUsd += amount.get(pid) ?? 0;
 
   return {
     invoiceCount,
@@ -55,9 +55,4 @@ export function summarizeRun(events: RunEvent[]): RunSummary {
     paidUsd: Math.round(paidUsd * 100) / 100,
     completed,
   };
-}
-
-/** Backend convention (run.py _payment_id): inv_1160 pays as pay_1160, inv_atk_x as pay_atk_x. */
-export function invoiceIdFor(paymentId: string) {
-  return "inv_" + paymentId.slice("pay_".length);
 }

@@ -1,5 +1,5 @@
 // What is real, sandboxed and simulated: the documented list (CLAUDE.md "Real vs simulated"), shown on /status when
-// GET /api/system/status is not available. GET /api/health's mock flags say which of these run on a mock right now.
+// GET /api/system/status fails (and by the offline demo). GET /api/health's mock flags say which of these run on a mock right now.
 
 import type { SystemComponentStatus } from "@/lib/types";
 
@@ -56,4 +56,5 @@ export const MODE_LABEL: Record<SystemComponentStatus["mode"], string> = {
   real: "Real",
   sandboxed: "Sandboxed",
   simulated: "Simulated",
+  mock: "Mock",
 };
