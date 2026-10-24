@@ -19,6 +19,7 @@ from app.models import (
     Invoice,
     Message,
     Payment,
+    PaymentRun,
     PaymentStatus,
     RiskAssessment,
     VendorBankAccount,
@@ -123,16 +124,18 @@ def test_every_decision_is_assessed_and_audited(env):
     client, eng = env
     body, g = go(client)
     with Session(eng) as s:
-        assert s.exec(select(func.count()).select_from(RiskAssessment)).one() == 40
+        mine = select(Payment.id).where(Payment.run_id == body["run_id"])
+        started = s.get(PaymentRun, body["run_id"]).started_at
+        assert s.exec(select(func.count()).select_from(RiskAssessment).where(RiskAssessment.payment_id.in_(mine))).one() == 40
         for p in s.exec(select(Payment).where(Payment.run_id == body["run_id"])).all():
             actions = [a.action for a in s.exec(select(AuditLog).where(AuditLog.entity == "payment", AuditLog.entity_id == p.id))]
             assert "risk_assessed" in actions and {p.status.value, "blocked_by_verification"} & set(actions), p.id
         runs = [a.action for a in s.exec(select(AuditLog).where(AuditLog.entity == "run", AuditLog.entity_id == body["run_id"]))]
         assert runs == ["started", "completed"] or set(runs) == {"started", "completed"}
         # CRS only for a changed destination or a first payment: here Summit's and Northside's forged requests
-        ident = {a.entity_id for a in s.exec(select(AuditLog).where(AuditLog.action == "identity_check"))}
+        ident = {a.entity_id for a in s.exec(select(AuditLog).where(AuditLog.action == "identity_check", AuditLog.at >= started))}
         assert ident == {"ven_summit", "ven_northside"}
-        assert s.exec(select(func.count()).select_from(AuditLog).where(AuditLog.action == "paid")).one() == 37
+        assert s.exec(select(func.count()).select_from(AuditLog).where(AuditLog.action == "paid", AuditLog.entity_id.in_(mine))).one() == 37
 
 
 def test_event_stream_order_for_the_bank_change(env):
@@ -399,3 +402,21 @@ def test_a_judges_ceo_attack_still_gets_a_denied_call(env):
 def test_scripted_outcomes_apply_only_to_the_seeded_payment_id():
     assert set(verify.SEEDED_OUTCOMES) == {"pay_atk_ceo_pressure"}
     assert verify.SEEDED_OUTCOMES[CEO] == CallOutcome.unclear
+
+
+def test_edge_cases_through_the_run_are_all_held(env):
+    """The four hard-rule edge cases join the seeded week: none is paid, and the original 40 still end 37/1/2."""
+    from seed import edge_cases
+
+    client, eng = env
+    with Session(eng) as s:
+        cases = edge_cases.add_edge_cases(s)
+    body, g = go(client)
+    assert body["invoice_count"] == 44
+    assert g["totals"]["paid"] == 37 and g["totals"]["blocked"] == 2 and g["totals"]["held"] == 5
+    with Session(eng) as s:
+        for c in cases.values():
+            p = s.exec(select(Payment).where(Payment.invoice_id == c.invoice_id)).one()
+            ras = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == p.id)).one()
+            assert p.status == PaymentStatus.held and p.nessie_transfer_id is None, c.name
+            assert ras.hard_rules_fired == [c.rule], c.name

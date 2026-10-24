@@ -4,8 +4,9 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from app.models import Invoice, Message, Payment, PaymentStatus, Vendor, VendorBankAccount
+from app.models import Invoice, Message, Payment, PaymentStatus, Vendor, VendorBankAccount, VendorContact
 from app.services import injection, layout
+from app.services.run import contacts_differ
 from app.services.injection import ScanItem
 from app.services.risk import Destination, RiskContext
 
@@ -37,6 +38,8 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
     past_fps = {layout.fingerprint((BACKEND / pth).read_bytes()) for pth in past}
     layout_changed = bool(invoice.pdf_path) and layout.layout_changed((BACKEND / invoice.pdf_path).read_bytes(), past_fps)
 
+    phones = [c.phone for c in session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id))]
+
     findings = []
     if invoice.pdf_path:
         findings += injection.scan(ScanItem(kind="pdf", pdf_bytes=(BACKEND / invoice.pdf_path).read_bytes(), invoice_id=invoice.id))
@@ -53,6 +56,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         known_sender_addresses={p[1] for p in paid},
         usual_send_hours={p[2].hour for p in paid},
         layout_changed=layout_changed,
+        requested_contacts_differ=contacts_differ(msg.body if msg else "", phones),
         injection_findings=findings,
         now=msg.received_at if msg else None or vendor.created_at,
     )

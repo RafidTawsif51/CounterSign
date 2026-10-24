@@ -45,6 +45,7 @@ from app.models import (  # noqa: E402
 from app.services.contacts import MOCK_PHONE  # noqa: E402
 from app.services.extract import hash_routing  # noqa: E402
 from invoice_pdf import hidden_instruction, layout_for, render_invoice  # noqa: E402
+from history import H, add_history_extras, onboard_late_vendors  # noqa: E402
 from poison_emails import html_email  # noqa: E402
 
 SEED = 20261023
@@ -224,6 +225,7 @@ class SeedSummary:
     poisoned_emails: dict[str, str] = field(default_factory=dict)  # technique -> filename in EMAIL_DIR
     last_threads: dict[str, str] = field(default_factory=dict)  # vendor key -> latest thread id
     summit_sept_number: str = ""
+    history: dict = field(default_factory=dict)  # thread, late, corrected, holds_cleared, bank_changes, assessments
 
 
 def _wipe(session: Session, keep_attacks: bool) -> None:
@@ -250,6 +252,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     accts: dict[str, list[Acct]] = {}
     known_addrs: dict[str, list[str]] = {}
     windows: dict[str, tuple[int, int]] = {}
+    contact1: dict[str, VendorContact] = {}
     for i, v in enumerate(VENDORS):
         created = ANCHOR - timedelta(days=420 + 37 * i)
         vrow[v.key] = Vendor(id=f"ven_{v.key}", name=v.name, trade=v.trade, email_domain=v.domain, created_at=created)
@@ -270,8 +273,9 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         accts[v.key] = [new_acct(1, created, "2204" if v.key == "summit" else None)]
 
         phone = (settings.demo_vendor_phone or MOCK_PHONE) if v.key == "summit" else f"+1415555{101 + i:04d}"
-        rows.append(VendorContact(id=f"con_{v.key}_1", vendor_id=f"ven_{v.key}", phone=phone, source=ContactSource.on_file,
-                                  first_seen=created, last_verified=ANCHOR - timedelta(days=rng.randint(20, 240))))
+        contact1[v.key] = VendorContact(id=f"con_{v.key}_1", vendor_id=f"ven_{v.key}", phone=phone, source=ContactSource.on_file,
+                                        first_seen=created, last_verified=ANCHOR - timedelta(days=rng.randint(20, 240)))
+        rows.append(contact1[v.key])
         if i % 2 == 0:
             src, url = ContactSource.website, f"https://www.{v.domain}/contact"
         else:
@@ -349,6 +353,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     history_amounts: dict[str, list[float]] = {}
     last_thread: dict[str, str] = {}
     hist_rec: dict[str, list] = {}
+    hist_all: list[H] = []
     used_addrs: dict[str, set[str]] = {}
     obs_hours: dict[str, set[int]] = {}
     sept_summit: Optional[Draft] = None
@@ -399,6 +404,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         rows += [msg, inv, pay]
         history_amounts.setdefault(key, []).append(d.amount)
         hist_rec.setdefault(key, []).append((inv, d, due, a))
+        hist_all.append(H(n, key, d.v.name, d, inv, pay, msg, due, rd, a))
 
         if d.trigger:
             contact = f"con_{key}_1"
@@ -415,6 +421,13 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     for rd, run in runs.items():
         run.totals_json = {"paid": run_totals[rd][0], "held": 0, "blocked": 0, "total_usd": round(run_totals[rd][1], 2)}
         rows.append(run)
+
+    # ---- email threads and past decisions (their own random streams: this week's data does not move)
+    first_day: dict[str, date] = {}
+    for d in drafts:
+        first_day.setdefault(d.v.key, d.day)
+    onboard_late_vendors(first_day, vrow, contact1, accts)
+    history_stats = add_history_extras(rows, hist_all, seed=SEED, windows=windows, accts=accts)
 
     # ---- this week: 40 open invoices
     def typical(key: str) -> float:
@@ -563,7 +576,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
 
         # historical samples: the most recent paid invoice of every vendor, two more for the attacked vendors
         for v in VENDORS:
-            picks = [hist_rec[v.key][-1]] + ([hist_rec[v.key][-4]] if v.key in ("summit", "keystone", "northside") else [])
+            picks = hist_rec[v.key][-3:]  # the vendor's last three invoices: enough history for the layout fingerprint
             for inv, d, due, a in picks:
                 inv.pdf_path = f"{PDF_REL}/{inv.id}.pdf"
                 write(inv.id, v, v.key, d.number, d.day, due, d.amount, a)
@@ -602,6 +615,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         poisoned_emails=poisoned_emails,
         last_threads=dict(last_thread),
         summit_sept_number=sept_summit.number,
+        history=history_stats,
     )
 
 

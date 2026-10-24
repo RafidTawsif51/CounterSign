@@ -160,8 +160,10 @@ def test_demo_phone_is_used_for_summit_when_configured(tmp_path, monkeypatch):
 def test_send_times_are_consistent_per_vendor(world):
     s, *_ = world
     hours = defaultdict(set)
-    for vid, ts in s.exec(select(Message.vendor_id, Message.received_at).where(Message.is_attack.is_(False))):
-        hours[vid].add(ts.hour)
+    domains = {v.id: v.email_domain for v in s.exec(select(Vendor))}
+    for vid, frm, ts in s.exec(select(Message.vendor_id, Message.from_addr, Message.received_at).where(Message.is_attack.is_(False))):
+        if frm.endswith("@" + domains[vid]):  # the vendor's own mail; Maria's replies come at AP hours
+            hours[vid].add(ts.hour)
     for vid, hs in hours.items():
         assert max(hs) - min(hs) <= 6, vid  # one daily window per vendor
     # different vendors work different windows
@@ -199,7 +201,7 @@ def test_bank_change_attack(world):
     msg = s.get(Message, inv.message_id)
     assert msg.thread_id == "thr_summit_0919" and msg.from_addr.endswith("@summit-concrete.co")
     real = s.exec(select(Message).where(Message.thread_id == "thr_summit_0919", Message.is_attack.is_(False))).all()
-    assert real and all(m.from_addr.endswith("@summitconcrete.com") for m in real)  # a real earlier thread
+    assert real and {m.from_addr for m in real} <= {"ar@summitconcrete.com", "billing@summitconcrete.com", "maria@ridgelinebuilders.com"}  # a real earlier thread
     payment, ctx = build_context(s, inv)
     a = risk.assess(payment, ctx)
     names = {x.name for x in a.signals}
@@ -278,7 +280,7 @@ def test_two_runs_are_identical(tmp_path):
     pb = pdf_hashes()
     assert sa.counts == sb.counts
     assert digest(a) == digest(b)  # same rows, same ids, same values
-    assert pa == pb and len(pa) == 77  # PDF bytes identical, so the extraction cache keeps hitting
+    assert pa == pb and len(pa) == 134  # PDF bytes identical, so the extraction cache keeps hitting
     ids = lambda s, m: sorted(x for x in s.exec(select(m.id)))  # noqa: E731
     assert ids(a, Invoice) == ids(b, Invoice) and ids(a, Payment) == ids(b, Payment)
 

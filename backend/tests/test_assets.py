@@ -16,7 +16,7 @@ from seed import attack_cards  # noqa: E402
 from seed import seed as seedmod  # noqa: E402
 
 from app.config import Settings  # noqa: E402
-from app.models import Decision, Invoice, Message, Vendor, VendorBankAccount  # noqa: E402
+from app.models import Decision, Invoice, Message, Payment, Vendor, VendorBankAccount  # noqa: E402
 from app.services import extract, injection, layout, risk  # noqa: E402
 from app.services.injection import ScanItem  # noqa: E402
 from tests.helpers import BACKEND, build_context  # noqa: E402
@@ -114,8 +114,8 @@ def test_samples_cover_all_vendors_and_bank_changes(world):
     s, summary = world
     vendors = {s.get(Invoice, i).vendor_id for i in summary.sample_invoice_ids}
     assert len(vendors) == 30
-    for key in seedmod.BANK_CHANGES:  # the sample is the newest invoice, so it carries the post-change account
-        inv = s.get(Invoice, next(i for i in summary.sample_invoice_ids if s.get(Invoice, i).vendor_id == f"ven_{key}"))
+    for key in seedmod.BANK_CHANGES:  # the newest sample carries the post-change account
+        inv = s.get(Invoice, max(i for i in summary.sample_invoice_ids if s.get(Invoice, i).vendor_id == f"ven_{key}"))
         cur = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == f"ven_{key}", VendorBankAccount.valid_to.is_(None))).one()
         assert inv.remittance_json["account_last4"] == cur.account_last4
 
@@ -261,3 +261,17 @@ def test_attack_cards_are_caught(world):
             assert a.decision == Decision.hold_and_verify
         if pdf or "<html" in p["body"]:
             assert "hidden_instructions" in a.hard_rules_fired
+
+
+def test_every_vendor_has_three_or_more_pdfs_in_one_layout(world):
+    s, summary = world
+    per_vendor = defaultdict(list)
+    for inv in s.exec(select(Invoice).where(Invoice.pdf_path.is_not(None), ~Invoice.id.like("inv_atk%"), Invoice.number != "X-1")).all():  # X-1: rows an earlier card test added
+        per_vendor[inv.vendor_id].append(fp_of(BACKEND / inv.pdf_path))
+    assert len(per_vendor) == 30
+    for vid, fps in per_vendor.items():
+        assert len(fps) >= 3 and len(set(fps)) == 1, vid  # at least the 3 history PDFs, all in one layout
+    paid = set(s.exec(select(Payment.invoice_id)).all())
+    for v in seedmod.VENDORS:  # the three history PDFs are the vendor's LAST three paid invoices
+        mine = s.exec(select(Invoice).where(Invoice.vendor_id == f"ven_{v.key}", Invoice.id.in_(paid)).order_by(Invoice.id)).all()
+        assert all(i.pdf_path for i in mine[-3:]) and sum(1 for i in mine if i.pdf_path) == 3, v.key
