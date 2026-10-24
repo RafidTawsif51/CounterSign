@@ -293,6 +293,7 @@ Skip: Visa, Coinbase x402, Bright Data, Fetch.ai, Elastic. Anthropic track prize
 - All money is sandbox money. Calls only go to `ALLOWED_CALL_NUMBERS`; refuse anything else in code.
 - If something is unclear or needs real data, ask the user. Do not invent it.
 - No em dashes in any text or comments.
+- All frontend work must follow frontend/DESIGN.md.
 
 ## Tests (pytest)
 

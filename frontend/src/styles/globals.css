@@ -1,0 +1,274 @@
+/*
+ * Countersign design tokens. Source of truth: frontend/DESIGN.md.
+ * Change a value here and in DESIGN.md together, never one without the other.
+ */
+@import "tailwindcss";
+
+/* Dark is opt-in per subtree: <html data-theme="dark"> or any element with data-theme="dark". */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------- Raw tokens: light (default) ---------- */
+:root,
+[data-theme="light"] {
+  --paper: #f7f6f2;
+  --surface: #ffffff;
+  --surface-sunken: #efede6;
+  --ink: #16181d;
+  --ink-muted: #5b5f68;
+  --ink-faint: #8a8d94;
+  --rule: #e4e2da;
+  --rule-strong: #cfccc1;
+  --accent: #1f3a5f;
+  --accent-hover: #182e4c;
+  --accent-ink: #ffffff;
+
+  --status-paid: #2f6b4f;
+  --status-held: #b7791f;
+  --status-blocked: #b4342d;
+  --status-pending: var(--ink-muted);
+
+  /* Status text on its tint must pass WCAG AA. Only held needs a darker shade in light. */
+  --status-paid-ink: var(--status-paid);
+  --status-held-ink: #8f5e14;
+  --status-blocked-ink: var(--status-blocked);
+  --status-pending-ink: var(--status-pending);
+
+  --tint-strength: 8%;
+
+  --overlay-shadow: 0 12px 32px -12px rgb(22 24 29 / 0.22), 0 2px 6px -2px rgb(22 24 29 / 0.08);
+  --scrim: rgb(22 24 29 / 0.32);
+
+  color-scheme: light;
+}
+
+/* ---------- Raw tokens: dark (leaderboard second screen) ---------- */
+[data-theme="dark"] {
+  --paper: #10151c;
+  --surface: #161d26;
+  --surface-sunken: #0c1016;
+  --ink: #ecebe5;
+  --ink-muted: #9ba1ab;
+  --ink-faint: #6b717b;
+  --rule: #253041;
+  --rule-strong: #34404f;
+  --accent: #8fb1dc;
+  --accent-hover: #a9c4e6;
+  --accent-ink: #10151c;
+
+  --status-paid: #5fae86;
+  --status-held: #e0a443;
+  --status-blocked: #e5675f;
+  --status-pending: var(--ink-muted);
+
+  /* Only blocked needs a lighter shade in dark to pass AA on its tint. */
+  --status-paid-ink: var(--status-paid);
+  --status-held-ink: var(--status-held);
+  --status-blocked-ink: #ec7b73;
+  --status-pending-ink: var(--status-pending);
+
+  --tint-strength: 14%;
+
+  --overlay-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.6), 0 0 0 1px var(--rule-strong);
+  --scrim: rgb(0 0 0 / 0.55);
+
+  color-scheme: dark;
+}
+
+/* Tints are derived, so they stay correct in both themes. Opaque mix over surface. */
+:root,
+[data-theme] {
+  --status-paid-tint: color-mix(in srgb, var(--status-paid) var(--tint-strength), var(--surface));
+  --status-held-tint: color-mix(in srgb, var(--status-held) var(--tint-strength), var(--surface));
+  --status-blocked-tint: color-mix(in srgb, var(--status-blocked) var(--tint-strength), var(--surface));
+  --status-pending-tint: color-mix(in srgb, var(--status-pending) var(--tint-strength), var(--surface));
+  --accent-tint: color-mix(in srgb, var(--accent) var(--tint-strength), var(--surface));
+
+  /* shadcn/ui aliases so generated components pick up our palette. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--ink-muted);
+  --destructive: var(--status-blocked);
+  --border: var(--rule);
+  --input: var(--rule-strong);
+  --ring: var(--accent);
+}
+
+/* ---------- Tailwind theme ---------- */
+@theme inline {
+  /* Colors */
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-tint: var(--accent-tint);
+  --color-paid-ink: var(--status-paid-ink);
+  --color-held-ink: var(--status-held-ink);
+  --color-blocked-ink: var(--status-blocked-ink);
+  --color-pending-ink: var(--status-pending-ink);
+  --color-paid: var(--status-paid);
+  --color-paid-tint: var(--status-paid-tint);
+  --color-held: var(--status-held);
+  --color-held-tint: var(--status-held-tint);
+  --color-blocked: var(--status-blocked);
+  --color-blocked-tint: var(--status-blocked-tint);
+  --color-pending: var(--status-pending);
+  --color-pending-tint: var(--status-pending-tint);
+  --color-scrim: var(--scrim);
+
+  /* shadcn names */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Type */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-*: initial;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-md: 16px;
+  --text-md--line-height: 24px;
+  --text-lg: 20px;
+  --text-lg--line-height: 28px;
+  --text-xl: 28px;
+  --text-xl--line-height: 34px;
+  --text-2xl: 40px;
+  --text-2xl--line-height: 44px;
+
+  /* Radius: controls 6, panels 8, badges 4. Nothing else. */
+  --radius-*: initial;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Shadow: overlays only. */
+  --shadow-*: initial;
+  --shadow-overlay: var(--overlay-shadow);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ---------- Base ---------- */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--rule);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    font-feature-settings: "ss02";
+  }
+
+  table,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--accent-tint);
+    color: var(--ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---------- Ledger conventions ---------- */
+@layer components {
+  /* Money, IDs, timestamps, scores. */
+  .figure {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    letter-spacing: -0.01em;
+  }
+
+  /* Accounting total: single rule above, double rule below. */
+  .ledger-total {
+    border-top: 1px solid var(--ink);
+    border-bottom: 3px double var(--ink);
+  }
+
+  /*
+   * Flagged row: 2px status rule on the leading edge plus 8% tint.
+   * Exceptions only (held, blocked). Paid and pending rows stay plain so a clean run reads quiet.
+   */
+  .row-flag {
+    box-shadow: inset 2px 0 0 0 var(--row-flag-color, transparent);
+    background: var(--row-flag-tint, transparent);
+    transition:
+      background-color 200ms var(--ease-out),
+      box-shadow 200ms var(--ease-out);
+  }
+  .row-flag[data-status="held"] {
+    --row-flag-color: var(--status-held);
+    --row-flag-tint: var(--status-held-tint);
+  }
+  .row-flag[data-status="blocked"] {
+    --row-flag-color: var(--status-blocked);
+    --row-flag-tint: var(--status-blocked-tint);
+  }
+}
