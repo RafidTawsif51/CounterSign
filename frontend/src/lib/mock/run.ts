@@ -12,11 +12,30 @@ import {
   ATTACKER_ACCOUNTS,
   POISONED_HIDDEN_TEXT,
   accountByVendor,
+  contacts,
+  messages,
   openInvoices,
   vendorById,
   type OpenInvoice,
 } from "@/lib/mock/seed";
-import type { AttackLoggedEvent, PaymentRun, PaymentStatus, RunEvent, Signal } from "@/lib/types";
+import type {
+  AttackLoggedEvent,
+  AuditActor,
+  AuditLogEntry,
+  CallOutcome,
+  Decision,
+  HardRule,
+  InjectionFinding,
+  InjectionTechnique,
+  Payment,
+  PaymentDetail,
+  PaymentRun,
+  PaymentStatus,
+  RiskAssessment,
+  RunEvent,
+  Signal,
+  VerificationCall,
+} from "@/lib/types";
 
 // An event before the hub stamps id, at and run_id on it.
 type Draft = DistributiveOmit<RunEvent, "id" | "at" | "run_id">;
@@ -82,22 +101,57 @@ function verificationCall(
   });
 }
 
-function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: number; event: Draft }[] {
+/** What the pipeline decides for one payment, fixed when the run is scheduled. Events reveal it over time. */
+interface PaymentPlan {
+  score: number;
+  decision: Decision;
+  hardRules: HardRule[];
+  signals: Signal[]; // every signal that fired, including weight-0 ones (identity check passed)
+  identity: string | null;
+  finding: { technique: InjectionTechnique; snippet: string; confidence: number } | null;
+  callOutcome: CallOutcome | null;
+}
+
+interface Script {
+  plan: PaymentPlan;
+  steps: { gap: number; event: Draft }[];
+}
+
+const CLEAN_PLAN: PaymentPlan = {
+  score: 0,
+  decision: "auto_pay",
+  hardRules: [],
+  signals: [],
+  identity: null,
+  finding: null,
+  callOutcome: null,
+};
+
+function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
   const vendor = vendorById.get(inv.vendor_id)!;
   const pid = paymentId(inv.id);
   const parsed: Draft = { type: "invoice.parsed", invoice_id: inv.id, vendor: vendor.name, amount_usd: inv.amount_usd };
   const extract = rng.between(700, 1500);
 
   if (inv.planted === null) {
-    return [
-      { gap: extract, event: parsed },
-      { gap: rng.between(180, 420), event: { type: "risk.scored", payment_id: pid, score: 0, decision: "auto_pay", top_signals: [] } },
-      { gap: rng.between(250, 650), event: { type: "payment.paid", payment_id: pid, nessie_transfer_id: transferNo() } },
-    ];
+    return {
+      plan: CLEAN_PLAN,
+      steps: [
+        { gap: extract, event: parsed },
+        { gap: rng.between(180, 420), event: { type: "risk.scored", payment_id: pid, score: 0, decision: "auto_pay", top_signals: [] } },
+        { gap: rng.between(250, 650), event: { type: "payment.paid", payment_id: pid, nessie_transfer_id: transferNo() } },
+      ],
+    };
   }
 
   if (inv.planted === "poisoned_pdf") {
-    return [
+    const plan: PaymentPlan = {
+      ...CLEAN_PLAN,
+      decision: "hold",
+      hardRules: ["hidden_instructions"],
+      finding: { technique: "white_text", snippet: POISONED_HIDDEN_TEXT, confidence: 0.97 },
+    };
+    return { plan, steps: [
       { gap: extract, event: parsed },
       {
         gap: rng.between(500, 900),
@@ -106,7 +160,7 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: nu
       { gap: rng.between(150, 300), event: { type: "risk.scored", payment_id: pid, score: 0, decision: "hold", top_signals: [] } },
       { gap: 40, event: { type: "payment.blocked", payment_id: pid, reason: QUARANTINE_REASON } },
       { gap: 20, event: attackLogged(rng, "poisoned_invoice") },
-    ];
+    ] };
   }
 
   // bank_change (Summit) and ceo_pressure (Northside): destination changed, hold_and_verify, then a call.
@@ -132,8 +186,18 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: nu
         ];
   const score = Math.min(100, signals.reduce((sum, s) => sum + s.weight, 0)); // 95 and 60
   const identity = `CRS identity check: verified (match ${rng.between(0.9, 0.98).toFixed(2)})`;
+  // risk.py adds the identity result as a weight-0 signal when the check passes on a changed destination.
+  const plan: PaymentPlan = {
+    score,
+    decision: "hold_and_verify",
+    hardRules: ["destination_changed"],
+    signals: [...signals, signal(rng, "vendor_identity_check", 0, identity)],
+    identity,
+    finding: null,
+    callOutcome: outcome,
+  };
 
-  return [
+  return { plan, steps: [
     { gap: extract, event: parsed },
     {
       gap: rng.between(600, 1000),
@@ -148,7 +212,7 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): { gap: nu
     ...(outcome === "denied"
       ? [{ gap: rng.between(120, 250), event: { type: "payment.blocked", payment_id: pid, reason: DENIED_REASON } as Draft }]
       : []),
-  ];
+  ] };
 }
 
 function attackLogged(rng: Rng, card: string): Draft {
@@ -165,7 +229,7 @@ function attackLogged(rng: Rng, card: string): Draft {
 
 // ---------- Schedule: 5 workers pull invoices in id order ----------
 
-function buildSchedule(runId: string, durationMs: number): Step[] {
+function buildSchedule(runId: string, durationMs: number): { steps: Step[]; plans: Map<string, PaymentPlan> } {
   const rng = createRng(hashSeed(runId));
   let transfers = 0;
   const transferNo = () => `nes_mock_${String(++transfers).padStart(4, "0")}`;
@@ -173,11 +237,14 @@ function buildSchedule(runId: string, durationMs: number): Step[] {
   const steps: Step[] = [{ t: 0, event: { type: "run.started", invoice_count: openInvoices.length } }];
   const workers = Array.from({ length: CONCURRENCY }, () => rng.between(200, 500));
   const outcome = new Map<string, PaymentStatus>();
+  const plans = new Map<string, PaymentPlan>();
 
   for (const inv of openInvoices) {
     const w = workers.indexOf(Math.min(...workers));
     let t = workers[w];
-    for (const { gap, event } of script(inv, rng, transferNo)) {
+    const { plan, steps: invoiceSteps } = script(inv, rng, transferNo);
+    plans.set(paymentId(inv.id), plan);
+    for (const { gap, event } of invoiceSteps) {
       t += gap;
       steps.push({ t, event });
       if (event.type === "payment.paid") outcome.set(inv.id, "paid");
@@ -220,10 +287,20 @@ function buildSchedule(runId: string, durationMs: number): Step[] {
       },
     },
   );
-  return steps.sort((a, b) => a.t - b.t);
+  return { steps: steps.sort((a, b) => a.t - b.t), plans };
 }
 
 // ---------- Hub: one in-flight run at a time, replay for late subscribers, like the server ----------
+
+/** The rows the backend would hold for one payment, built up as events fire. */
+interface PaymentRecord {
+  payment: Payment;
+  plan: PaymentPlan;
+  risk: RiskAssessment | null;
+  findings: InjectionFinding[];
+  calls: VerificationCall[];
+  audit: AuditLogEntry[];
+}
 
 interface MockRun {
   id: string;
@@ -232,6 +309,9 @@ interface MockRun {
   events: RunEvent[];
   listeners: Set<(e: RunEvent) => void>;
   timers: ReturnType<typeof setTimeout>[];
+  plans: Map<string, PaymentPlan>;
+  records: Map<string, PaymentRecord>;
+  rng: Rng; // ids for rows and events
 }
 
 const runs = new Map<string, MockRun>();
@@ -241,25 +321,175 @@ let active: string | null = null;
 export function startMockRun(opts: { runId?: string; durationMs?: number } = {}): string {
   if (active) throw new ApiError(409, "/api/payment-runs", `A payment run is already in progress (${active})`);
   const id = opts.runId ?? `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const run: MockRun = { id, startedAt: new Date().toISOString(), completedAt: null, events: [], listeners: new Set(), timers: [] };
+  const { steps, plans } = buildSchedule(id, opts.durationMs ?? DEFAULT_DURATION_MS);
+  const run: MockRun = {
+    id,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    events: [],
+    listeners: new Set(),
+    timers: [],
+    plans,
+    records: new Map(),
+    rng: createRng(hashSeed(`${id}:ids`)),
+  };
   runs.set(id, run);
   active = id;
 
-  const rng = createRng(hashSeed(`${id}:ids`));
-  for (const step of buildSchedule(id, opts.durationMs ?? DEFAULT_DURATION_MS)) {
-    const timer = setTimeout(() => {
-      const event = { ...step.event, id: `evt_${rng.hex(12)}`, run_id: id, at: new Date().toISOString() } as RunEvent;
-      run.events.push(event);
-      run.listeners.forEach((fn) => fn(event));
-      if (event.type === "attack.logged") leaderboardListeners.forEach((fn) => fn(event));
-      if (event.type === "run.completed") {
-        run.completedAt = event.at;
-        active = null;
-      }
-    }, step.t);
-    run.timers.push(timer);
-  }
+  for (const step of steps) run.timers.push(setTimeout(() => emit(run, step.event), step.t));
   return id;
+}
+
+function emit(run: MockRun, draft: Draft) {
+  const event = { ...draft, id: `evt_${run.rng.hex(12)}`, run_id: run.id, at: new Date().toISOString() } as RunEvent;
+  record(run, event);
+  run.events.push(event);
+  run.listeners.forEach((fn) => fn(event));
+  if (event.type === "attack.logged") leaderboardListeners.forEach((fn) => fn(event));
+  if (event.type === "run.completed") {
+    run.completedAt = event.at;
+    if (active === run.id) active = null;
+  }
+}
+
+/** Mirror of the rows run.py and verify.py write, including the audit actions they use. */
+function record(run: MockRun, e: RunEvent) {
+  const audit = (rec: PaymentRecord, entity: string, entityId: string, actor: AuditActor, action: string, detail: Record<string, unknown>) =>
+    rec.audit.push({ id: `aud_${run.rng.hex(12)}`, at: e.at, entity, entity_id: entityId, actor, action, detail_json: detail });
+
+  if (e.type === "invoice.parsed") {
+    const inv = openInvoices.find((i) => i.id === e.invoice_id)!;
+    const pid = paymentId(inv.id);
+    run.records.set(pid, {
+      payment: {
+        id: pid,
+        run_id: run.id,
+        invoice_id: inv.id,
+        amount_usd: inv.amount_usd,
+        destination_account_id: accountByVendor.get(inv.vendor_id)!.id,
+        status: "pending",
+        nessie_transfer_id: null,
+      },
+      plan: run.plans.get(pid)!,
+      risk: null,
+      findings: [],
+      calls: [],
+      audit: [],
+    });
+    return;
+  }
+  if (e.type === "injection.detected") {
+    const rec = run.records.get(paymentId(e.invoice_id ?? ""));
+    if (!rec || !rec.plan.finding) return;
+    const finding: InjectionFinding = { id: `inj_${run.rng.hex(12)}`, invoice_id: e.invoice_id, message_id: e.message_id, ...rec.plan.finding };
+    rec.findings.push(finding);
+    audit(rec, "invoice", e.invoice_id ?? "", "agent", "quarantined", { finding_id: finding.id, technique: finding.technique });
+    return;
+  }
+  if (!("payment_id" in e)) return;
+  const rec = run.records.get(e.payment_id);
+  if (!rec) return;
+  const pid = e.payment_id;
+
+  switch (e.type) {
+    case "risk.scored":
+      if (rec.plan.identity) audit(rec, "vendor", `ven_${vendorKey(rec)}`, "agent", "identity_check", { summary: rec.plan.identity });
+      rec.risk = {
+        id: `ras_${run.rng.hex(12)}`,
+        payment_id: pid,
+        score: rec.plan.score,
+        decision: rec.plan.decision,
+        hard_rules_fired: rec.plan.hardRules,
+        signals_json: rec.plan.signals,
+        model_version: "mock-risk-1",
+      };
+      audit(rec, "payment", pid, "agent", "risk_assessed", { assessment_id: rec.risk.id, score: e.score, decision: e.decision });
+      break;
+    case "payment.paid":
+      rec.payment.status = "paid";
+      rec.payment.nessie_transfer_id = e.nessie_transfer_id;
+      audit(rec, "payment", pid, "agent", "paid", { transfer_id: e.nessie_transfer_id });
+      break;
+    case "payment.held":
+      rec.payment.status = "held";
+      audit(rec, "payment", pid, "agent", "held", { reason: e.reasons[0] });
+      break;
+    case "payment.blocked": {
+      const byCall = rec.calls.some((c) => c.outcome === "denied");
+      rec.payment.status = "blocked";
+      audit(rec, "payment", pid, "agent", byCall ? "blocked_by_verification" : "blocked", { reason: e.reason });
+      break;
+    }
+    case "call.started": {
+      const contact = contacts.find((c) => c.vendor_id === `ven_${vendorKey(rec)}` && c.source === e.contact_source) ?? null;
+      rec.calls.push({
+        id: `cal_${run.rng.hex(12)}`,
+        payment_id: pid,
+        contact_id: contact?.id ?? null,
+        started_at: e.at,
+        outcome: null,
+        transcript: [],
+        recording_url: null,
+      });
+      break;
+    }
+    case "call.transcript":
+      rec.calls.at(-1)?.transcript?.push({ speaker: e.speaker, text: e.text });
+      break;
+    case "call.outcome": {
+      const call = rec.calls.at(-1);
+      if (!call) break;
+      call.outcome = e.outcome;
+      audit(rec, "payment", pid, "agent", "verification_call", { call_id: call.id, outcome: e.outcome, contact_source: "on_file" });
+      if (e.outcome !== "denied" && e.outcome !== "confirmed")
+        audit(rec, "payment", pid, "agent", `verification_${e.outcome}`, { call_id: call.id, attempts: 1 });
+      break;
+    }
+  }
+}
+
+function vendorKey(rec: PaymentRecord) {
+  return openInvoices.find((i) => i.id === rec.payment.invoice_id)!.vendor_id.slice("ven_".length);
+}
+
+/** GET /api/payments/{id}: the newest run that has this payment. */
+export function getMockPaymentDetail(pid: string): PaymentDetail | null {
+  const rec = [...runs.values()].reverse().map((r) => r.records.get(pid)).find(Boolean);
+  if (!rec) return null;
+  const { planted: _planted, ...invoice } = openInvoices.find((i) => i.id === rec.payment.invoice_id)!;
+  return {
+    payment: rec.payment,
+    invoice,
+    vendor: vendorById.get(invoice.vendor_id)!,
+    message: messages.find((m) => m.id === invoice.message_id) ?? null,
+    last_verified_account: accountByVendor.get(invoice.vendor_id) ?? null,
+    risk: rec.risk,
+    findings: rec.findings,
+    calls: rec.calls.map((c) => ({ ...c, contact: contacts.find((x) => x.id === c.contact_id) ?? null })),
+    audit: [...rec.audit],
+  };
+}
+
+/** POST /api/payments/{id}/approve or /reject by the controller. Only a held payment can be decided. */
+export function decideMockPayment(pid: string, decision: "approve" | "reject", reason: string) {
+  const run = [...runs.values()].reverse().find((r) => r.records.has(pid));
+  const rec = run?.records.get(pid);
+  const path = `/api/payments/${pid}/${decision}`;
+  if (!run || !rec) throw new ApiError(404, path, `POST ${path} failed (404): payment not found`);
+  if (rec.payment.status !== "held") throw new ApiError(409, path, `POST ${path} failed (409): payment is ${rec.payment.status}, not held`);
+  if (!reason.trim()) throw new ApiError(422, path, `POST ${path} failed (422): a reason is required`);
+
+  rec.audit.push({
+    id: `aud_${run.rng.hex(12)}`,
+    at: new Date().toISOString(),
+    entity: "payment",
+    entity_id: pid,
+    actor: "human",
+    action: decision === "approve" ? "approved" : "rejected",
+    detail_json: { reason, by: "Dev (controller)" },
+  });
+  if (decision === "approve") emit(run, { type: "payment.paid", payment_id: pid, nessie_transfer_id: `nes_mock_c${run.rng.hex(3)}` });
+  else emit(run, { type: "payment.blocked", payment_id: pid, reason: `Rejected by the controller: ${reason}` });
 }
 
 /** POST /api/demo/reset in mock mode: stop any run and forget every run, back to the seeded week. */

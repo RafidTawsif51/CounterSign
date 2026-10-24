@@ -52,3 +52,27 @@ export function formatScore(score: number | null | undefined, opts: { outOf?: bo
   const n = Math.round(Math.min(100, Math.max(0, score)));
   return opts.outOf ? `${n} / 100` : String(n);
 }
+
+/** `+14155550100` as `+1 415 555 0100`. Other formats pass through unchanged. */
+export function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return EMPTY;
+  const m = phone.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+  return m ? `+1 ${m[1]} ${m[2]} ${m[3]}` : phone;
+}
+
+const clock = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const dayYear = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+/** `16:04:12`, local time. For audit trails and transcripts. */
+export function formatClock(value: string | null | undefined): string {
+  if (!value) return EMPTY;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? EMPTY : clock.format(d);
+}
+
+/** `Mar 12, 2026`. */
+export function formatDate(value: string | null | undefined): string {
+  if (!value) return EMPTY;
+  const d = new Date(value.length === 10 ? `${value}T12:00:00Z` : value);
+  return Number.isNaN(d.getTime()) ? EMPTY : dayYear.format(d);
+}

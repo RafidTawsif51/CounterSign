@@ -285,15 +285,29 @@ export type RunEventType = RunEvent["type"];
 // ---------- API responses ----------
 // Shapes below are not yet documented by the backend. Confirm with the backend lead before relying on extra fields.
 
+/**
+ * GET /api/payments/{id}. Proposed shape: the backend route does not exist yet (confirm with the backend lead).
+ * The requested destination is invoice.remittance_json ({bank_name, routing_hash, account_last4}); the drawer compares it
+ * with last_verified_account. Signals that were checked but did not fire are derived client-side from the signal list.
+ */
 export interface PaymentDetail {
   payment: Payment;
   invoice: Invoice;
   vendor: Vendor;
-  destination_account: VendorBankAccount | null;
+  /** The email that carried the invoice, for sender and Reply-To checks. Untrusted text. */
+  message: Message | null;
+  /** The vendor's current verified account (valid_to null). */
+  last_verified_account: VendorBankAccount | null;
   risk: RiskAssessment | null;
   findings: InjectionFinding[];
-  calls: VerificationCall[];
+  calls: (VerificationCall & { contact: VendorContact | null })[];
   audit: AuditLogEntry[];
+}
+
+export interface RemittanceDetails {
+  bank_name: string;
+  routing_hash: string;
+  account_last4: string;
 }
 
 export interface VendorHistory {

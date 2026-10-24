@@ -1,7 +1,15 @@
 // Mock backend for VITE_USE_MOCKS=true. Data is fictional and mirrors the backend seed (see seed.ts).
 // Routes that are not mocked yet fail loudly so a screen never silently renders made-up shapes.
 
-import { getMockRun, resetMockRuns, startMockRun, subscribeMockLeaderboard, subscribeMockRun } from "@/lib/mock/run";
+import {
+  decideMockPayment,
+  getMockPaymentDetail,
+  getMockRun,
+  resetMockRuns,
+  startMockRun,
+  subscribeMockLeaderboard,
+  subscribeMockRun,
+} from "@/lib/mock/run";
 import { vendors } from "@/lib/mock/seed";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
@@ -37,6 +45,9 @@ const routes: [string, Handler][] = [
       return { run_id, events_url: `/api/payment-runs/${run_id}/events` };
     },
   ],
+  ["GET /api/payments/:paymentId", ({ paymentId }) => getMockPaymentDetail(paymentId) ?? notFound(`/api/payments/${paymentId}`)],
+  ["POST /api/payments/:paymentId/approve", ({ paymentId }, body) => decideMockPayment(paymentId, "approve", reasonOf(body))],
+  ["POST /api/payments/:paymentId/reject", ({ paymentId }, body) => decideMockPayment(paymentId, "reject", reasonOf(body))],
   [
     "GET /api/payment-runs/:runId",
     ({ runId }) => getMockRun(runId) ?? notFound(`/api/payment-runs/${runId}`),
@@ -55,6 +66,10 @@ function match(pattern: string, method: string, path: string): Record<string, st
     else if (want[i] !== got[i]) return null;
   }
   return params;
+}
+
+function reasonOf(body: unknown): string {
+  return typeof body === "object" && body && "reason" in body ? String((body as { reason: unknown }).reason) : "";
 }
 
 function notFound(path: string): never {
