@@ -382,7 +382,7 @@ def test_verify_no_answer_twice_goes_to_controller():
 
 
 def test_verify_refuses_number_not_on_allow_list():
-    w = world(phone="+19995550123")  # on-file number outside the list
+    w = world(phone="+14085551234")  # on-file number outside the list
     with pytest.raises(verify.CallNotAllowed):
         run(verify.start_verification(w["payment"]))
     with Session(engine) as s:
@@ -394,7 +394,7 @@ def test_allow_list_is_enforced_in_real_mode_too(monkeypatch):
     s = Settings(mock_twilio=False, mock_cartesia=False, allowed_call_numbers="+14155550142")
     monkeypatch.setattr(verify, "get_settings", lambda: s)
     verify.assert_callable("+14155550142")
-    for bad in ("+14155550100", "+19995550123", ""):  # the mock number is NOT allowed outside mock mode
+    for bad in ("+14155550100", "+14085551234", ""):  # the mock number is NOT allowed outside mock mode
         with pytest.raises(verify.CallNotAllowed):
             verify.assert_callable(bad)
     assert isinstance(verify.get_caller(), verify.RealCaller)

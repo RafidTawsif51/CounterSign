@@ -16,6 +16,7 @@
 # Flags: MOCK_TWILIO and MOCK_CARTESIA. The mock caller is used if either is true.
 
 import asyncio
+import re
 from datetime import datetime
 from typing import Optional, Protocol
 
@@ -68,6 +69,10 @@ class VerificationResult(BaseModel):
 # ---------------------------------------------------------------- allow list
 
 
+# 555-0100 to 555-0199 is the block reserved for fiction: these numbers cannot ring anyone.
+_FICTION_RE = re.compile(r"^\+1\d{3}5550[1]\d{2}$")
+
+
 def allowed_numbers() -> set[str]:
     s = get_settings()
     nums = set(s.allowed_call_numbers_list)
@@ -77,8 +82,13 @@ def allowed_numbers() -> set[str]:
 
 
 def assert_callable(phone: str) -> None:
-    if phone not in allowed_numbers():
-        raise CallNotAllowed("number is not in ALLOWED_CALL_NUMBERS")
+    """Calls go only to ALLOWED_CALL_NUMBERS. In mock mode (nothing is dialed) the fictional 555-01xx block is accepted too."""
+    s = get_settings()
+    if phone in s.allowed_call_numbers_list:
+        return
+    if (s.mock_twilio or s.mock_cartesia) and (phone == MOCK_NUMBER or _FICTION_RE.match(phone)):
+        return
+    raise CallNotAllowed("number is not in ALLOWED_CALL_NUMBERS")
 
 
 # ---------------------------------------------------------------- number selection

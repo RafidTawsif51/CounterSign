@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import get_settings
@@ -18,7 +19,18 @@ def _make_engine():
         url = "postgresql+psycopg://" + url[len("postgresql://"):]
     if url.startswith("sqlite"):
         # FastAPI serves requests from a thread pool.
-        return create_engine(url, connect_args={"check_same_thread": False})
+        eng = create_engine(url, connect_args={"check_same_thread": False})
+
+        @event.listens_for(eng, "connect")
+        def _pragmas(dbapi_conn, _record):
+            # WAL lets the payment run read while event writes commit; busy_timeout waits instead of failing.
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.execute("PRAGMA busy_timeout=10000")
+            cur.close()
+
+        return eng
     return create_engine(url, pool_pre_ping=True)
 
 

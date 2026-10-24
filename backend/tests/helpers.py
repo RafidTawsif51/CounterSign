@@ -58,3 +58,12 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
     )
     payment = Payment(run_id="run_test", invoice_id=invoice.id, amount_usd=invoice.amount_usd)
     return payment, ctx
+
+
+def use_engine(monkeypatch, eng) -> None:
+    """Point the app, the event log, the audit log, verify and the run at one database (a test copy)."""
+    from app import audit, db, events
+    from app.services import run, verify
+
+    for module in (db, events, audit, verify, run):
+        monkeypatch.setattr(module, "engine", eng)
