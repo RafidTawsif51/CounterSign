@@ -11,6 +11,8 @@ from app.models import Attack, AttackResult, AuditLog, Payment, PaymentRun, Paym
 from app.services import ask, run, verify, voice
 from tests.test_run import BANK, CEO, POISON, env, go  # noqa: F401  (env is a fixture: a private seeded database + client)
 
+SEEDED = verify.SEEDED_CALLS
+
 
 @pytest.fixture
 def real_calls(env, monkeypatch, tmp_path):
@@ -21,6 +23,9 @@ def real_calls(env, monkeypatch, tmp_path):
     monkeypatch.setattr(cfg, "mock_twilio", False)
     monkeypatch.setattr(cfg, "mock_cartesia", False)
     monkeypatch.setattr(cfg, "public_base_url", "https://pub.example")
+    # These tests drive late outcomes through the planted attacks' payments, so lift the "seeded calls are scripted" rule here
+    # (test_seeded_calls_never_dial covers that rule).
+    monkeypatch.setattr(verify, "SEEDED_CALLS", frozenset())
     with Session(eng) as s:  # the planted attacks' vendors each have their own on-file number; allow them for the fake calls
         phones = {c.phone for c in s.exec(select(VendorContact).where(VendorContact.vendor_id.in_(["ven_summit", "ven_northside"])))}
     monkeypatch.setattr(cfg, "allowed_call_numbers", ", ".join(sorted(phones | {"+14155550142"})))
@@ -170,3 +175,13 @@ def test_config_flags_replace_the_environment_reads(monkeypatch):
 
     from app import integrations
     assert "getenv" not in inspect.getsource(integrations)
+
+
+def test_seeded_calls_never_dial(real_calls, monkeypatch):
+    """Live Twilio and Cartesia on, but the seeded run's planted attacks take their scripted outcomes: nothing is dialed."""
+    client, eng, queue, dialed = real_calls
+    monkeypatch.setattr(verify, "SEEDED_CALLS", SEEDED)
+    body, done = go(client)
+    assert dialed == []
+    assert totals(client, body["run_id"]) == (37, 1, 2)
+    assert status(eng, BANK) == PaymentStatus.blocked and status(eng, CEO) == PaymentStatus.held

@@ -9,6 +9,7 @@ os.environ["EXTRACT_CACHE_DIR"] = os.path.join(_tmp, "extract_cache")
 os.environ["INJECTION_CACHE_DIR"] = os.path.join(_tmp, "injection_cache")
 os.environ["RISK_CACHE_DIR"] = os.path.join(_tmp, "risk_cache")
 os.environ["CONTACTS_CACHE_DIR"] = os.path.join(_tmp, "contacts_cache")
+os.environ["LIVENESS_PATH"] = os.path.join(_tmp, "last_success.json")
 os.environ["FRONTEND_URL"] = "https://countersign.example"
 os.environ["PAGES_BASE_URL"] = "https://aayushswami123.github.io/Countersign"  # the published base URL; the path is case-sensitive
 # Tests never use the live .env: environment variables beat the .env file, so these pin every mock on and the key off.
@@ -60,3 +61,12 @@ def copy_seeded(seed_template, dest_dir: Path, name: str = "db.sqlite") -> Path:
     dest = Path(dest_dir) / name
     shutil.copyfile(seed_template[0], dest)
     return dest
+
+
+@pytest.fixture(autouse=True)
+def _private_liveness(tmp_path, monkeypatch):
+    """Successes recorded under test must never reach the running server's status panel (backend/.cache/last_success.json)."""
+    from app.services import liveness
+
+    monkeypatch.setattr(liveness, "PATH", tmp_path / "last_success.json")
+    monkeypatch.setattr(liveness, "_seen", {})

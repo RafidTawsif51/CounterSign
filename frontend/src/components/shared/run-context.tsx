@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { errorMessage } from "@/lib/api-error";
+import { ApiError, errorMessage } from "@/lib/api-error";
 import { getDataMode, isMock, useDataMode, type DataMode } from "@/lib/data-mode";
 import { mergeEvents, useGlobalEvents, useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
@@ -122,13 +122,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
     api
       .run(runId)
       .then((r) => !stale && setFailedRun(r.status === "failed" ? runId : null))
-      .catch(() => {
-        // The stream is live, so the server is up; a failed lookup is not worth surfacing.
+      .catch((e) => {
+        // The stream is live, so the server is up; a failed lookup is not worth surfacing. A 404 means the database was
+        // rebuilt under this tab (seed.py from the terminal): forget the run so the board offers a new one instead of waiting.
+        if (!stale && e instanceof ApiError && e.status === 404) {
+          storeRun(null);
+          setRunId(null);
+        }
       });
     return () => {
       stale = true;
     };
-  }, [runId, status, summary.completed]);
+  }, [runId, status, summary.completed, setRunId]);
   const runFailed = failedRun !== null && failedRun === runId;
 
   // A run records requested accounts and changes vendor history, so vendor data is stale once it completes.

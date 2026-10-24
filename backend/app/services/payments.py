@@ -25,6 +25,7 @@ from sqlmodel import Session, select
 
 from app.audit import write_audit
 from app.config import get_settings
+from app.services import liveness
 from app import db
 from app.models import Invoice, Payment, PaymentStatus, Vendor, VendorBankAccount, new_id, utcnow
 
@@ -230,6 +231,7 @@ async def create_transfer(destination_account_id: str, amount_usd: float, descri
         try:
             real = await asyncio.to_thread(_real_transfer, destination_account_id, amount_usd, description)
             _health["last_success_at"] = time.time()
+            liveness.mark("nessie")
             return TransferId(real, "nessie")
         except Exception as exc:  # noqa: BLE001
             log.warning("Nessie transfer failed (%s); using a mock transfer id", type(exc).__name__)

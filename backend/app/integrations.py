@@ -95,11 +95,13 @@ def _signature_ok(request: Request, form: dict) -> bool:
 async def twilio_form(request: Request) -> dict:
     """The form Twilio posted, after authenticating the request.
 
-    1. The per-call secret (?t=) must match the one made when the call was placed, or 403. On by default in real mode.
+    1. The per-call secret (?t=, or the last path segment of the status callback) must match the one made when the call was
+       placed, or 403. On by default in real mode.
     2. A Twilio signature is an extra check: required (403) only in strict mode, otherwise logged when present.
     """
     call_id = request.path_params.get("call_id") or request.query_params.get("call_id") or ""
-    if call_token_required() and not voice.check_call_token(call_id, request.query_params.get("t")):
+    token = request.path_params.get("t") or request.query_params.get("t")
+    if call_token_required() and not voice.check_call_token(call_id, token):
         log.warning("webhook rejected: missing or wrong call token (%s)", request.url.path)
         raise HTTPException(403, "bad call token")
     form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
@@ -187,8 +189,19 @@ async def call_gather(call_id: str, request: Request, background: BackgroundTask
                                      _url(f"/api/voice/twiml/{call_id}?end=1&r=1", request)))
 
 
+@webhook_router.post("/status/{call_id}/{t}")
+async def call_status_path(call_id: str, t: str, background: BackgroundTasks, form: dict = Depends(twilio_form)) -> dict:
+    """The status callback placed calls use: call id and token in the path, so nothing depends on Twilio keeping a query string."""
+    return _apply_status(call_id, background, form)
+
+
 @webhook_router.post("/status")
 async def call_status(call_id: str, background: BackgroundTasks, form: dict = Depends(twilio_form)) -> dict:
+    """The older query-string form (?call_id=&t=), kept for calls placed before the path form."""
+    return _apply_status(call_id, background, form)
+
+
+def _apply_status(call_id: str, background: BackgroundTasks, form: dict) -> dict:
     """Twilio's call status callback. A call nobody answered (no-answer, busy, failed, canceled) is a no_answer; other
     statuses are ignored (an answered call finishes through the gather route or the 60 s rule)."""
     status = (form.get("CallStatus") or "").lower()
@@ -234,7 +247,7 @@ async def start_call(payment_id: str, background: BackgroundTasks, answer: Optio
             raise HTTPException(409, f"payment is {payment.status.value}; only a held payment can be verified")
         run_id = payment.run_id
     cfg = get_settings()
-    if cfg.mock_twilio or cfg.mock_cartesia:
+    if cfg.mock_twilio or cfg.mock_cartesia or verify.is_seeded_call(payment_id):  # the seeded demo calls are always scripted
         background.add_task(_run_mock_call, payment_id, answer)
         return {"payment_id": payment_id, "run_id": run_id, "mode": "mock", "status": "started"}
     try:

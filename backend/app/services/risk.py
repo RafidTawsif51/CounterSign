@@ -45,6 +45,7 @@ from pydantic import BaseModel, ValidationError
 from rapidfuzz.distance import Levenshtein
 
 from app.config import get_settings
+from app.services import liveness
 from app.models import Decision, Message, Payment, RiskAssessment, Signal, Vendor, utcnow
 from app.services.identity import IdentityResult
 from app.services.injection import Finding, _NO_FORCED_TOOL_CHOICE, _wrap
@@ -531,4 +532,7 @@ def get_assessor() -> RiskAssessor:
 
 
 def assess(payment: Payment, context: RiskContext) -> Assessment:
-    return get_assessor().assess(payment, context)
+    result = get_assessor().assess(payment, context)
+    if not get_settings().mock_risk:
+        liveness.mark("risk")
+    return result

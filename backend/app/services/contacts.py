@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services import liveness
 from app.models import Vendor, utcnow
 
 log = logging.getLogger("countersign.contacts")
@@ -98,6 +99,7 @@ class Health:
 
     def ok(self) -> None:
         self.degraded, self.last_ok_at = False, _now()
+        liveness.mark("apify", self.last_ok_at)
 
     def failed(self, error: str) -> None:
         self.degraded, self.last_error, self.last_failure_at = True, error, _now()

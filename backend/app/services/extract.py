@@ -20,6 +20,7 @@ from sqlmodel import Session
 
 from app.audit import write_audit
 from app.config import get_settings
+from app.services import liveness
 from app.models import Invoice
 
 log = logging.getLogger("countersign.extract")
@@ -381,6 +382,7 @@ def _extract_live(text: str, sha: str) -> Extraction:
             feedback = _errors(exc)
             log.warning("extract %s attempt %d invalid: %s", sha[:12], attempt, feedback)
         else:
+            liveness.mark("claude")
             return sanitize(raw, sha, "claude", model)
     raise ExtractionFailed("invalid_output_after_retry")
 

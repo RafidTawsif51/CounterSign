@@ -540,6 +540,7 @@ def test_right_token_passes_and_travels_through_the_call(real_hooks):
     retry = client.post(f"/api/voice/twiml/cal_t?retry=1&t={tok}")
     assert f"end=1&amp;t={tok}" in retry.text
     assert client.post(f"/api/webhooks/twilio/status?call_id=cal_t&t={tok}", data={"CallStatus": "ringing"}).status_code == 200
+    assert client.post(f"/api/webhooks/twilio/status/cal_t/{tok}", data={"CallStatus": "ringing"}).status_code == 200  # token in the path
     assert client.post(f"/api/voice/gather/cal_t?t={tok}", data={"SpeechResult": "no never"}).status_code == 200
     assert _call_row(eng)[0].outcome == CallOutcome.denied
 
@@ -552,6 +553,7 @@ def test_wrong_or_missing_token_is_403_on_every_route(real_hooks, suffix):
     assert client.post(f"/api/voice/gather/cal_t{suffix}", data={"SpeechResult": "yes"}).status_code == 403
     status_url = "/api/webhooks/twilio/status?call_id=cal_t" + (suffix.replace("?", "&") if suffix else "")
     assert client.post(status_url, data={"CallStatus": "no-answer"}).status_code == 403
+    assert client.post("/api/webhooks/twilio/status/cal_t/" + (suffix.split("=", 1)[-1] or "x"), data={"CallStatus": "no-answer"}).status_code == 403
     assert _call_row(eng)[0].outcome is None and _call_row(eng)[1].status == PaymentStatus.held
 
 
@@ -643,7 +645,7 @@ def test_real_mode_start_verification_returns_at_once(fdb, monkeypatch, tmp_path
     tok = voice._token_path(new.id).read_text().strip()
     assert voice.check_call_token(new.id, tok)
     assert dialed == [("+14155550142", f"https://pub.example/api/voice/twiml/{new.id}?t={tok}",
-                       f"https://pub.example/api/webhooks/twilio/status?call_id={new.id}&t={tok}")]
+                       f"https://pub.example/api/webhooks/twilio/status/{new.id}/{tok}")]
     with Session(eng) as s:
         assert tok not in " ".join(str(a.detail_json) for a in s.exec(select(AuditLog))) and not any(tok in c for c in clips)
     assert len(clips) == 8 and any("9999" in c for c in clips)

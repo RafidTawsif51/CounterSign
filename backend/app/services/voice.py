@@ -24,6 +24,7 @@ from typing import Any, Optional
 import httpx
 
 from app.config import Settings, get_settings
+from app.services import liveness
 
 log = logging.getLogger("countersign.voice")
 
@@ -145,7 +146,9 @@ async def place_call(
         kwargs["record"] = True  # the only place recording is requested, and the only case in which the call says "recorded"
     if status_callback_url:
         kwargs["status_callback"] = status_callback_url
-    return await asyncio.wait_for(asyncio.to_thread(_create_call, s, kwargs), PLACE_CALL_TIMEOUT_SECONDS)
+    sid = await asyncio.wait_for(asyncio.to_thread(_create_call, s, kwargs), PLACE_CALL_TIMEOUT_SECONDS)
+    liveness.mark("twilio")
+    return sid
 
 
 # ---------------------------------------------------------------- Cartesia text to speech
@@ -214,6 +217,7 @@ def _generate_clip(text: str, s: Settings) -> Path:
         _write_silent_wav(tmp)
     else:
         tmp.write_bytes(_cartesia_wav(text, s))
+        liveness.mark("cartesia")
     tmp.replace(path)
     return path
 
@@ -383,7 +387,7 @@ def with_token(url: str, token: str) -> str:
     return f"{url}{'&' if '?' in url else '?'}t={token}"
 
 
-_TOKEN_IN_URL = re.compile(r"([?&]t=)[A-Za-z0-9_\-]+")
+_TOKEN_IN_URL = re.compile(r"([?&]t=|/api/webhooks/twilio/status/[A-Za-z0-9_]+/)[A-Za-z0-9_\-]+")
 
 
 class RedactCallToken(logging.Filter):

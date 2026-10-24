@@ -34,6 +34,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services import liveness
 from app.models import Vendor, utcnow
 
 log = logging.getLogger("countersign.identity")
@@ -579,7 +580,10 @@ async def check_for(vendor: Vendor, request_context: Optional[dict] = None) -> d
                 "dial_index": 0, "vendor": {"status": status, "summary": f"vendor {vendor.name} {_WORD[status]} (mock)", "checks": checks,
                                             "persona": r.test_identity_id, "checked_at": r.checked_at.isoformat()},
                 "request": None, "source": r.source, "checked_at": r.checked_at.isoformat()}
-    return await check_vendor_for(vendor, request_context)
+    result = await check_vendor_for(vendor, request_context)
+    if any(c.get("crs_request_id") for c in result.get("checks") or []):  # CRS answered at least one check
+        liveness.mark("crs")
+    return result
 
 
 async def check_vendor(vendor_id: str, request_context: Optional[dict] = None) -> dict:

@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import Session
 
 from app.config import get_settings
+from app.services import liveness
 from app.models import InjectionFinding, new_id
 
 log = logging.getLogger("countersign.injection")
@@ -677,7 +678,10 @@ def get_scanner() -> Scanner:
 
 
 def scan(item: ScanItem) -> list[Finding]:
-    return get_scanner().scan(item)
+    findings = get_scanner().scan(item)
+    if not get_settings().mock_injection:
+        liveness.mark("injection")
+    return findings
 
 
 def save_findings(session: Session, findings: list[Finding]) -> None:

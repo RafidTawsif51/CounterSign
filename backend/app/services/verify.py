@@ -133,12 +133,13 @@ def allowed_numbers() -> set[str]:
     return nums
 
 
-def assert_callable(phone: str) -> None:
-    """Calls go only to ALLOWED_CALL_NUMBERS. In mock mode (nothing is dialed) the fictional 555-01xx block is accepted too."""
+def assert_callable(phone: str, simulated: bool = False) -> None:
+    """Calls go only to ALLOWED_CALL_NUMBERS. When nothing is dialed (mock mode, or a seeded call) the fictional 555-01xx block
+    is accepted too."""
     s = get_settings()
     if phone in s.allowed_call_numbers_list:
         return
-    if (s.mock_twilio or s.mock_cartesia) and (phone == MOCK_NUMBER or _FICTION_RE.match(phone)):
+    if (simulated or s.mock_twilio or s.mock_cartesia) and (phone == MOCK_NUMBER or _FICTION_RE.match(phone)):
         return
     raise CallNotAllowed("number is not in ALLOWED_CALL_NUMBERS")
 
@@ -356,6 +357,14 @@ MOCK_PACE: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar("moc
 # seeded demo run end 37 paid, 1 held, 2 blocked: the CEO-pressure vendor cannot be reached clearly. A judge's
 # attack gets a new payment id, so it is never matched here and still gets a denied call.
 SEEDED_OUTCOMES: dict[str, CallOutcome] = {"pay_atk_ceo_pressure": CallOutcome.unclear}
+
+# The seeded run never dials, even with live Twilio: its planted attacks always take the scripted outcome above (bank change
+# denied, CEO pressure unclear). Only console, judge and bounty attacks, which get new payment ids, place real calls.
+SEEDED_CALLS = frozenset({"pay_atk_bank_change", "pay_atk_ceo_pressure"})
+
+
+def is_seeded_call(payment_id: str) -> bool:
+    return payment_id in SEEDED_CALLS
 
 
 class MockCaller:
@@ -781,7 +790,7 @@ async def _crs_gate(session: Session, payment: Payment, vendor: Vendor, message:
     return phone, source, flagged or idx > 0, row
 
 
-async def _prepare(session: Session, payment_id: str):
+async def _prepare(session: Session, payment_id: str, simulated: bool = False):
     """Everything a call needs before it is placed. Raises before anything is stored or dialed if the number is not allowed."""
     payment = session.get(Payment, payment_id)
     if payment is None:
@@ -809,7 +818,7 @@ async def _prepare(session: Session, payment_id: str):
                                                            (choice.phone, choice.source, choice.flagged, choice.contact))
         choice = replace(choice, phone=phone, source=source, flagged=flagged, contact=existing if source == ContactSource.on_file else None)
     dial, routed = route_number(choice.phone)
-    assert_callable(dial)  # raises before anything is stored or dialed; the allow list applies to the routed number too
+    assert_callable(dial, simulated)  # raises before anything is stored or dialed; the allow list applies to the routed number too
     contact = choice.contact
     if choice.record is not None:
         stored = _store_contact(session, vendor.id, choice.record)
@@ -865,7 +874,7 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
             try:
                 sid = await voice.place_call(
                     dial, voice.with_token(voice.public_url(f"/api/voice/twiml/{call.id}", s), token),
-                    voice.with_token(voice.public_url(f"/api/webhooks/twilio/status?call_id={call.id}", s), token), s)
+                    voice.public_url(f"/api/webhooks/twilio/status/{call.id}/{token}", s), s)
             except Exception as exc:  # noqa: BLE001
                 if not voice.vendor_phone_recent(vendor.id):
                     raise
@@ -978,11 +987,12 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
             transcript=open_call.transcript or [], in_progress=True)
 
     s = get_settings()
-    if not (s.mock_twilio or s.mock_cartesia):
+    seeded = is_seeded_call(payment_id)
+    if not (s.mock_twilio or s.mock_cartesia or seeded):
         return await begin_real_call(session, payment_id)  # real mode never blocks the payment run
 
     try:
-        payment, vendor, rem, message, phone, source, flagged, call, _prior, choice, dial, routed, _info = await _prepare(session, payment_id)
+        payment, vendor, rem, message, phone, source, flagged, call, _prior, choice, dial, routed, _info = await _prepare(session, payment_id, simulated=True)
     except NoDialableNumber as nd:
         return nd.result
     run_id = payment.run_id
@@ -991,8 +1001,8 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
         session.commit()
     await ev.emit(_call_started(payment, source, choice))
 
-    # Simulated call.
-    outcome, transcript = await get_caller().call(
+    # Simulated call. A seeded call is scripted even when live calls are on.
+    outcome, transcript = await (MockCaller() if seeded else get_caller()).call(
         phone, rem["account_last4"], vendor.name, bool(message and message.is_attack), payment.id
     )
     pace = MOCK_PACE.get()

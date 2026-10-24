@@ -69,7 +69,7 @@ def under_base(url: str) -> bool:
 def test_the_urls_given_to_twilio_when_the_call_is_placed_are_under_public_base_url(call):
     _, _, given = call
     assert under_base(given["twiml_url"]) and under_base(given["status_callback"])
-    assert given["twiml_url"].endswith(f"?t={given['token']}") and given["status_callback"].endswith(f"&t={given['token']}")
+    assert given["twiml_url"].endswith(f"?t={given['token']}") and given["status_callback"].endswith(f"/{given['token']}")
     assert given["to"] == ON_FILE
 
 
