@@ -593,7 +593,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
             pdfs += 1
 
         # three poisoned HTML emails
-        for key, technique in (("alder", "html_comment"), ("bayview", "display_none"), ("granite", "same_color")):
+        for key, technique in (("alder", "html_comment"), ("bayview", "display_none"), ("granite", "same_color"), ("tidewater", "css_class")):
             v = BY_KEY[key]
             html = html_email(technique, vendor=v.name, number=f"{key[:3].upper()}-9101", amount=round(v.base * 0.9, 2), terms=v.terms, hidden=attack_text)
             (EMAIL_DIR / f"poisoned_{technique}.html").write_text(html)

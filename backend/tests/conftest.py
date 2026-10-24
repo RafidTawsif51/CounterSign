@@ -8,6 +8,11 @@ os.environ["UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
 os.environ["EXTRACT_CACHE_DIR"] = os.path.join(_tmp, "extract_cache")
 os.environ["INJECTION_CACHE_DIR"] = os.path.join(_tmp, "injection_cache")
 os.environ["FRONTEND_URL"] = "https://countersign.example"
+# Tests never use the live .env: environment variables beat the .env file, so these pin every mock on and the key off.
+for _flag in ("NESSIE", "CRS", "APIFY", "TWILIO", "CARTESIA", "CLAUDE", "RISK"):
+    os.environ[f"MOCK_{_flag}"] = "true"
+os.environ["MOCK_INJECTION"] = "false"
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 
 import shutil  # noqa: E402

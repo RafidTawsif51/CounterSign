@@ -178,6 +178,51 @@ def test_html_hiding_techniques(html, technique):
     assert max(x.confidence for x in f) >= 0.9
 
 
+@pytest.mark.parametrize(
+    "css, element, technique",
+    [
+        (".x{display:none}", '<div class="x">{e}</div>', "hidden_element"),
+        (".x { visibility: hidden; }", '<span class="x">{e}</span>', "hidden_element"),
+        (".x{font-size:0}", '<span class="x">{e}</span>', "hidden_element"),
+        (".x{font-size:0px;line-height:0}", '<span class="x">{e}</span>', "hidden_element"),
+        ("#note{display:none}", '<div id="note">{e}</div>', "hidden_element"),
+        ("span{display:none}", "<span>{e}</span>", "hidden_element"),
+        ("div.legal{opacity:0}", '<div class="a legal b">{e}</div>', "hidden_element"),
+        (".wrap .x{display:none}", '<div class="wrap"><p class="x">{e}</p></div>', "hidden_element"),
+        ("@media screen { .x { display: none } }", '<div class="x">{e}</div>', "hidden_element"),
+        ("body{background:#f7f7f7} .t{color:#f7f7f7}", '<span class="t">{e}</span>', "same_color_text"),
+        ("body{background-color:white} .t{color:#fefefe}", '<span class="t">{e}</span>', "same_color_text"),
+        (".card{background:#102030} .t{color:#102030}", '<div class="card"><span class="t">{e}</span></div>', "same_color_text"),
+        (".x{color:#000} .x{color:#fff}", '<span class="x">{e}</span>', "same_color_text"),  # the later declaration wins
+    ],
+)
+def test_text_hidden_through_a_style_block(css, element, technique):
+    f = scan_mail(f"<html><head><style>{css}</style></head><body><p>Hi</p>{element.format(e=EVIL)}</body></html>")
+    assert technique in techniques(f), techniques(f)
+    assert max(x.confidence for x in f) >= 0.9
+
+
+def test_a_style_block_that_only_styles_visible_text_is_clean():
+    html = ("<html><head><style>body{background:#f7f7f7;color:#222} .btn{background:#0645ad;color:#fff} .muted{color:#777} a:hover{display:none}"
+            " .small{font-size:12px} @media (max-width:600px){.small{font-size:11px}} .gone{display:none}</style></head><body>"
+            '<p class="small">Invoice attached.</p><a class="btn">Pay</a><span class="muted">thanks</span><a href="x">link</a></body></html>')
+    assert scan_mail(html) == []  # .gone is defined but nothing uses it
+
+
+def test_light_text_on_its_own_dark_background_is_visible():
+    html = ('<html><body style="background:#ffffff"><div style="background:#102030"><table><tr><td><span style="color:#ffffff">Header</span></td></tr></table></div>'
+            '<table bgcolor="#0645ad"><tr><td style="color:#fff">Pay now</td></tr></table></body></html>')
+    assert scan_mail(html) == []
+    hidden = '<html><body style="background:#ffffff"><div style="background:#102030"><span style="color:#ffffff">Header</span></div><span style="color:#ffffff">' + EVIL + "</span></body></html>"
+    assert techniques(scan_mail(hidden)) == ["same_color_text"]  # white on white outside the dark box is still hidden
+
+
+def test_inline_style_overrides_a_hiding_class():
+    html = '<html><head><style>.x{display:none}</style></head><body><p>Hi</p><div class="x" style="display:block">Visible note</div></body></html>'
+    # the inline display:block wins over the class, but the hiding declaration is still present in the cascade we merge, so be strict
+    assert techniques(scan_mail(html)) in ([], ["hidden_element"])
+
+
 def test_normal_styled_html_is_clean():
     html = ('<html><body style="background:#f7f7f7;color:#222"><p style="color:#222222">Invoice attached.</p>'
             '<span style="color:#ff0000;font-size:14px">Overdue</span><a style="color:#0645ad">link</a>'
@@ -186,7 +231,7 @@ def test_normal_styled_html_is_clean():
 
 
 @pytest.mark.parametrize("name, technique", [("poisoned_html_comment.html", "html_comment"), ("poisoned_display_none.html", "hidden_element"),
-                                             ("poisoned_same_color.html", "same_color_text")])
+                                             ("poisoned_same_color.html", "same_color_text"), ("poisoned_css_class.html", "hidden_element")])
 def test_seeded_poisoned_emails(name, technique):
     f = scan_mail((EMAIL_DIR / name).read_text())
     assert techniques(f) == [technique] and f[0].confidence >= 0.9
@@ -408,7 +453,7 @@ def test_every_poisoned_pdf_and_email_is_flagged(corpus):
     for name in POISONED_PDFS:
         f = scan_pdf((PDF_DIR / name).read_bytes())
         assert techniques(f) == [expected[name]] and f[0].confidence >= 0.9, name
-    for name in ("poisoned_html_comment.html", "poisoned_display_none.html", "poisoned_same_color.html"):
+    for name in ("poisoned_html_comment.html", "poisoned_display_none.html", "poisoned_same_color.html", "poisoned_css_class.html"):
         f = scan_mail((EMAIL_DIR / name).read_text())
         assert len(f) == 1 and f[0].confidence >= 0.9, name
 

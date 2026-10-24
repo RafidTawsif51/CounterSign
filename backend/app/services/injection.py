@@ -14,7 +14,8 @@
 #             2 pt, text outside the page box.
 #     any   : zero-width and other invisible Unicode, including text smuggled in zero-width bits.
 #     HTML  : comments, hidden attributes, display:none, visibility:hidden, font-size 0 or tiny, opacity 0,
-#             off-screen positioning, text colored like its background.
+#             off-screen positioning, text colored like its background. Inline styles AND classes/ids/tags styled
+#             in a <style> block (simple selectors; the last compound of a selector is matched).
 #     MIME  : text parts a mail client never shows (attachments, the non-rendered alternative) that carry
 #             instructions or invisible characters.
 #   Layer 2, instruction classifier
@@ -191,14 +192,6 @@ def _hidden_finding(technique: str, text: str) -> Finding:
     return Finding(technique=technique, snippet=_clip(text), confidence=conf)
 
 
-def _elements(body: str):
-    """Yield (tag, attrs, inner_text) for every opening tag, nested ones included. inner runs to the first closing tag."""
-    for m in _OPEN_TAG_RE.finditer(body):
-        close = re.search(rf"</{re.escape(m.group(1))}\s*>", body[m.end():], re.I)
-        inner = body[m.end(): m.end() + close.start()] if close else ""
-        yield m.group(1).lower(), m.group(2), _TAG_RE.sub(" ", _HTML_COMMENT_RE.sub(" ", inner))
-
-
 def _style_of(attrs: str) -> str:
     m = _STYLE_ATTR_RE.search(attrs)
     return (m.group(1) or m.group(2) or "") if m else ""
@@ -271,31 +264,95 @@ def _pdf_layer1(data: bytes) -> tuple[list[Finding], str]:
 # ---------------------------------------------------------------- layer 1: HTML email and MIME
 
 
+_STYLE_BLOCK_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
+_RULE_RE = re.compile(r"([^{}@]+)\{([^{}]*)\}")
+_CLASS_ATTR_RE = re.compile(r"\bclass\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.I)
+_ID_ATTR_RE = re.compile(r"\bid\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.I)
+
+
+def _style_rules(body: str) -> list[tuple[list[str], str]]:
+    """Rules from <style> blocks as (selectors, declarations). @media and similar wrappers are flattened."""
+    rules = []
+    for block in _STYLE_BLOCK_RE.findall(body):
+        block = re.sub(r"/\*.*?\*/", " ", block, flags=re.S)
+        for selectors, decls in _RULE_RE.findall(block):
+            rules.append(([s.strip() for s in selectors.split(",") if s.strip()], decls))
+    return rules
+
+
+def _selector_matches(selector: str, tag: str, classes: set[str], eid: str) -> bool:
+    """Match the last compound of a selector (tag, .class, #id) against one element. Pseudo-classes never match."""
+    comp = re.split(r"[\s>+~]+", selector.strip())[-1]
+    if ":" in comp or "[" in comp:
+        return False
+    m = re.fullmatch(r"([A-Za-z][\w-]*|\*)?((?:[.#][\w-]+)*)", comp)
+    if not m or not (m.group(1) or m.group(2)):
+        return False
+    if m.group(1) and m.group(1) != "*" and m.group(1).lower() != tag:
+        return False
+    return all((name in classes) if kind == "." else (name == eid) for kind, name in re.findall(r"([.#])([\w-]+)", m.group(2)))
+
+
+def _effective_style(tag: str, attrs: str, rules: list) -> str:
+    """Declarations from matching <style> rules, then the inline style (which wins)."""
+    cm, im = _CLASS_ATTR_RE.search(attrs), _ID_ATTR_RE.search(attrs)
+    classes = set(((cm.group(1) or cm.group(2)) if cm else "").split())
+    eid = (im.group(1) or im.group(2)) if im else ""
+    parts = [decls for selectors, decls in rules if any(_selector_matches(s, tag, classes, eid) for s in selectors)]
+    return ";".join(parts + [_style_of(attrs)])
+
+
+_VOID = {"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
+_ANY_TAG_RE = re.compile(r"<(/?)([A-Za-z][\w:-]*)\b([^>]*)>", re.S)
+
+
+def _walk(body: str, rules: list) -> list[tuple[str, str, str, str, tuple]]:
+    """Every opening tag as (tag, attrs, inner_text, effective_style, local_background).
+
+    local_background is the nearest declared background on the element or an ancestor (page white if none), so
+    white text on a blue button is not "the same color as the background"."""
+    clean = _HTML_COMMENT_RE.sub(lambda m: " " * len(m.group()), body)  # same length, so offsets still line up
+    out, stack = [], []  # stack of (tag, own background or None)
+    for m in _ANY_TAG_RE.finditer(clean):
+        closing, tag, attrs = m.group(1), m.group(2).lower(), m.group(3)
+        if closing:
+            for i in range(len(stack) - 1, -1, -1):
+                if stack[i][0] == tag:
+                    del stack[i:]
+                    break
+            continue
+        style = _effective_style(tag, attrs, rules)
+        own = None
+        bgs = [c for c in (_css_color(x.group(1).split()[-1]) for x in _BG_RE.finditer(style)) if c]
+        if bgs:
+            own = bgs[-1]  # the last declaration wins
+        else:
+            bm = _BGCOLOR_ATTR_RE.search(attrs)
+            own = _css_color(bm.group(1)) if bm else None
+        if tag not in _VOID and not attrs.rstrip().endswith("/"):
+            stack.append((tag, own))
+        local = own or next((bg for _t, bg in reversed(stack) if bg), None) or (1.0, 1.0, 1.0)
+        close = re.search(rf"</{re.escape(tag)}\s*>", clean[m.end():], re.I)
+        inner = _TAG_RE.sub(" ", clean[m.end(): m.end() + close.start()]) if close else ""
+        out.append((tag, attrs, inner, style, local))
+    return out
+
+
 def _email_layer1(body: str) -> tuple[list[Finding], str]:
     """Hidden-content findings for one body (plain text or HTML) and its visible-ish text."""
     findings: list[Finding] = []
     if "<" in body:
         findings += [_hidden_finding("html_comment", m.group(1)) for m in _HTML_COMMENT_RE.finditer(body) if m.group(1).strip()]
-        backgrounds = [(1.0, 1.0, 1.0)]
-        for tag, attrs, _inner in _elements(body):
-            for m in _BG_RE.finditer(_style_of(attrs)):
-                c = _css_color(m.group(1).split()[-1])
-                if c:
-                    backgrounds.append(c)
-            m = _BGCOLOR_ATTR_RE.search(attrs)
-            if m and _css_color(m.group(1)):
-                backgrounds.append(_css_color(m.group(1)))  # type: ignore[arg-type]
         seen: set[str] = set()
-        for tag, attrs, inner in _elements(body):
+        for tag, attrs, inner, style, background in _walk(body, _style_rules(body)):
             if tag in ("body", "html", "head", "style", "script", "title") or not inner.strip():
                 continue
-            style = _style_of(attrs)
             technique = None
             if _HIDDEN_ATTR_RE.search(attrs) or _HIDDEN_STYLE_RE.search(style) or _tiny_font(style) or _OFFSCREEN_RE.search(style):
                 technique = "hidden_element"
             else:
-                color = _COLOR_RE.search(style)
-                if color and any(_near(_css_color(color.group(1)), bg) for bg in backgrounds):
+                colors = _COLOR_RE.findall(style)  # the last declaration wins
+                if colors and _near(_css_color(colors[-1]), background):
                     technique = "same_color_text"
             if technique and _clip(inner) not in seen:
                 seen.add(_clip(inner))

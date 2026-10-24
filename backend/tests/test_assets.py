@@ -190,7 +190,8 @@ def test_planted_poisoned_invoice_hides_white_text():
 
 @pytest.mark.parametrize(
     "name, technique",
-    [("poisoned_html_comment.html", "html_comment"), ("poisoned_display_none.html", "hidden_element"), ("poisoned_same_color.html", "same_color_text")],
+    [("poisoned_html_comment.html", "html_comment"), ("poisoned_display_none.html", "hidden_element"), ("poisoned_same_color.html", "same_color_text"),
+     ("poisoned_css_class.html", "hidden_element")],
 )
 def test_poisoned_html_email_is_caught(name, technique):
     html = (EMAIL_DIR / name).read_text()

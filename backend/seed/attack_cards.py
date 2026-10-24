@@ -119,7 +119,7 @@ def build_cards(s) -> list[dict]:
             },
         },
     ]
-    email_threads = {"html_comment": "alder", "display_none": "bayview", "same_color": "granite"}
+    email_threads = {"html_comment": "alder", "display_none": "bayview", "same_color": "granite", "css_class": "tidewater"}
     for technique, filename in s.poisoned_emails.items():
         key = email_threads[technique]
         cards.append({
@@ -131,7 +131,7 @@ def build_cards(s) -> list[dict]:
                 "card": "freestyle",
                 "payload": {
                     "thread_id": t[key],
-                    "from_addr": f"ar@{ {'alder': 'alderlumber.com', 'bayview': 'bayviewelectric.com', 'granite': 'graniteridgeagg.com'}[key] }",
+                    "from_addr": f"ar@{ {'alder': 'alderlumber.com', 'bayview': 'bayviewelectric.com', 'granite': 'graniteridgeagg.com', 'tidewater': 'tidewaterdrywall.com'}[key] }",
                     "subject": f"Invoice {key[:3].upper()}-9101",
                     "body": (EMAIL_DIR / filename).read_text(),
                 },
