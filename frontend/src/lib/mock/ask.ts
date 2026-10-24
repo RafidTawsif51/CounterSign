@@ -28,19 +28,23 @@ type Draft = [string, string | null | undefined][];
 
 const last4 = (v: string | null | undefined) => formatAccount(v).slice(-4);
 
+/** A payment with a known vendor: everything the written answers read. */
+type Detail = PaymentDetail & { vendor: NonNullable<PaymentDetail["vendor"]> };
+const hasVendor = (d: PaymentDetail): d is Detail => d.vendor !== null;
+
 /** What the drawer's records say, gathered once so every answer reads from the same facts. */
-function facts(d: PaymentDetail) {
-  const signal = (name: string) => d.risk?.signals_json.find((s) => s.name === name && s.weight > 0);
+function facts(d: Detail) {
+  const signal = (name: string) => d.risk?.signals.find((s) => s.name === name && s.weight > 0);
   const call = d.calls.at(-1);
   return {
     d,
     signal,
     call,
     audit: (action: string) => d.audit.find((a) => a.action === action),
-    finding: d.findings[0],
-    verified: d.last_verified_account,
-    verified4: last4(d.last_verified_account?.account_last4),
-    requested: (d.invoice.remittance_json as { account_last4?: string } | null)?.account_last4 ?? null,
+    finding: d.injection_findings[0],
+    verified: d.payment.last_verified_account,
+    verified4: last4(d.payment.last_verified_account?.account_last4),
+    requested: d.invoice?.requested_remittance?.account_last4 ?? null,
     vendorLine: call?.transcript?.find((l) => l.speaker === "vendor")?.text ?? null,
   };
 }
@@ -64,7 +68,7 @@ function bankHistory(f: Facts): Draft {
 
 function attackAnswer(f: Facts, intent: Intent): Draft | null {
   const { d, call } = f;
-  const kind = d.findings.length ? "poisoned" : call?.outcome === "denied" ? "denied" : call?.outcome === "unclear" ? "unclear" : null;
+  const kind = d.injection_findings.length ? "poisoned" : call?.outcome === "denied" ? "denied" : call?.outcome === "unclear" ? "unclear" : null;
   if (!kind) return null;
   if (intent === "history") return bankHistory(f);
   const bank = f.signal("bank_details_changed");
@@ -121,19 +125,19 @@ function templateAnswer(f: Facts, intent: Intent): Draft {
   const draft: Draft = [[`This payment of ${formatUSD(d.payment.amount_usd)} is ${status}.`, d.payment.id]];
   for (const r of (d.risk?.hard_rules_fired ?? []) as HardRule[])
     draft.push([`A hard rule applied: ${(HARD_RULES[r]?.label ?? r).toLowerCase()}.`, `rule:${r}`]);
-  const fired = (d.risk?.signals_json ?? []).filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight).slice(0, 2);
+  const fired = (d.risk?.signals ?? []).filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight).slice(0, 2);
   for (const s of fired) draft.push([`Risk signal: ${(SIGNALS[s.name]?.label ?? s.name).toLowerCase()} (${s.detail}).`, s.evidence_id]);
   if (!fired.length && !d.risk?.hard_rules_fired.length && status === "paid" && d.risk)
     draft.push(["No hard rule fired and no risk signal added to the score.", d.risk.id]);
   return draft;
 }
 
-function evidenceFor(d: PaymentDetail, id: string): AskEvidence | null {
-  const signal = d.risk?.signals_json.find((s) => s.evidence_id === id);
+function evidenceFor(d: Detail, id: string): AskEvidence | null {
+  const signal = d.risk?.signals.find((s) => s.evidence_id === id);
   if (signal) return { id, kind: "signal", label: `Signal: ${signal.name}`, text: `Signal ${signal.name}, weight ${signal.weight}: ${signal.detail}` };
   if (id.startsWith("rule:")) return { id, kind: "hard_rule", label: `Hard rule: ${id.slice(5)}`, text: HARD_RULES[id.slice(5) as HardRule]?.label ?? id };
   if (d.risk?.id === id) return { id, kind: "risk_assessment", label: "The risk assessment", text: `Risk score ${d.risk.score} of 100, decision ${d.risk.decision}.` };
-  const finding = d.findings.find((x) => x.id === id);
+  const finding = d.injection_findings.find((x) => x.id === id);
   if (finding) return { id, kind: "injection_finding", label: `Injection finding: ${finding.technique}`, text: `Detected ${finding.technique} with confidence ${finding.confidence.toFixed(2)}.`, untrusted_text: finding.snippet };
   const call = d.calls.find((c) => c.id === id);
   if (call)
@@ -146,7 +150,7 @@ function evidenceFor(d: PaymentDetail, id: string): AskEvidence | null {
     };
   const audit = d.audit.find((a) => a.id === id);
   if (audit) return { id, kind: "audit", label: `Audit: ${audit.action}`, text: `${audit.actor} did ${audit.action}.` };
-  const acct = d.last_verified_account;
+  const acct = d.payment.last_verified_account;
   if (acct?.id === id) return { id, kind: "bank_account", label: "A bank account of this vendor", text: `Account ending ${last4(acct.account_last4)} at ${acct.bank_name}, on file from onboarding.` };
   if (d.payment.id === id) return { id, kind: "payment", label: "The payment", text: `Payment ${d.payment.id} for ${formatUSD(d.payment.amount_usd)} is ${d.payment.status}.` };
   return null;
@@ -155,10 +159,15 @@ function evidenceFor(d: PaymentDetail, id: string): AskEvidence | null {
 export async function mockAsk(paymentId: string, question: string): Promise<AskAnswer> {
   const path = `/api/payments/${paymentId}/ask`;
   const q = question.trim();
-  if (q.length < 3) throw new ApiError(422, path, `POST ${path} failed (422): question is too short`);
+  if (q.length < 3) throw new ApiError(422, path, `Question is too short`);
   const d = getMockPaymentDetail(paymentId);
-  if (!d) throw new ApiError(404, path, `POST ${path} failed (404): payment not found`);
+  if (!d) throw new ApiError(404, path, `Payment not found`);
 
+  // A payment with no vendor yet (an uploaded PDF before extraction) has nothing to explain from.
+  if (!hasVendor(d)) {
+    await new Promise((r) => setTimeout(r, 600));
+    return { payment_id: paymentId, question: q, answer: NO_ANSWER, claims: [], evidence: [], source: "template", model: null, cached: false, elapsed_ms: 600 };
+  }
   const f = facts(d);
   const intent = intentOf(q);
   const draft: Draft =

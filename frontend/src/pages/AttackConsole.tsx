@@ -10,8 +10,11 @@ import { AttackCardPicker } from "@/components/attack/attack-card-picker";
 import { EmailEditor } from "@/components/attack/email-editor";
 import { PdfDropzone, type PdfChoice } from "@/components/attack/pdf-dropzone";
 import { iconProps } from "@/components/shared/icon";
+import { PageHeader } from "@/components/shared/page-header";
 import { useCurrentRun } from "@/components/shared/run-context";
-import { USE_MOCKS, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useDataMode } from "@/lib/data-mode";
+import { errorMessage } from "@/lib/api-error";
 import { CARDS, SAMPLE_PDFS, type AttackPayloadDraft } from "@/lib/attack-cards";
 import type { AttackCard, LaunchAttackRequest } from "@/lib/types";
 
@@ -30,6 +33,7 @@ function readName() {
 
 export function AttackConsole() {
   const navigate = useNavigate();
+  const mode = useDataMode();
   const { pinAttack } = useCurrentRun();
   const [name, setName] = useState(readName);
   const [card, setCard] = useState<AttackCard | null>(null);
@@ -83,76 +87,79 @@ export function AttackConsole() {
   }
 
   return (
-    <div className="mx-auto max-w-[1120px] px-4 py-8 sm:px-6">
-      <h1 className="text-xl font-semibold">Try to rob us.</h1>
-      <p className="mt-1 text-md text-ink-muted">Pick an attack or write your own. Countersign will process it in this week's payment run.</p>
-
-      <form onSubmit={submit} className="mt-8 space-y-8" noValidate>
-        <div className="max-w-sm">
-          <label htmlFor="attacker-name" className="mb-1 block text-sm font-medium">
-            Your name for the leaderboard
-          </label>
-          <Input
-            id="attacker-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            autoComplete="nickname"
-            placeholder="Judge Priya"
-            aria-invalid={tried && !name.trim() ? true : undefined}
-          />
-        </div>
-
-        <AttackCardPicker label="Attack" options={CARDS} value={card} onChange={setCard} />
-
-        {def && draft && (
-          <section aria-label="Your attack" className="rounded-lg border border-rule bg-surface p-5">
-            <h2 className="text-md font-semibold">{def.takesPdf ? "Your email and invoice" : "Your email"}</h2>
-            <p className="mb-4 text-sm text-ink-muted">Pre-filled from the card. Change anything.</p>
-            <EmailEditor
-              value={draft}
-              onChange={(v) => setDrafts((d) => ({ ...d, [def.id]: v }))}
-              thread={
-                def.id === "freestyle" ? (
-                  <VendorThreadPicker
-                    threadId={draft.thread_id}
-                    fallbackVendor={def.vendor}
-                    onChange={(thread_id) => setDrafts((d) => ({ ...d, freestyle: { ...d.freestyle, thread_id } }))}
-                  />
-                ) : (
-                  <>
-                    Sent into the <span className="text-ink">{def.vendor}</span> invoice thread, as if it came from them.
-                  </>
-                )
-              }
+    <>
+      <PageHeader
+        title="Try to rob us."
+        description="Pick an attack or write your own. Countersign will process it in this week's payment run."
+      />
+      <div className="max-w-[1120px] px-4 py-6 sm:px-6">
+        <form onSubmit={submit} className="space-y-8" noValidate>
+          <div className="max-w-sm">
+            <label htmlFor="attacker-name" className="mb-1 block text-sm font-medium">
+              Your name for the leaderboard
+            </label>
+            <Input
+              id="attacker-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              autoComplete="nickname"
+              placeholder="Judge Priya"
+              aria-invalid={tried && !name.trim() ? true : undefined}
             />
-            {def.takesPdf && (
-              <div className="mt-4">
-                <p className="mb-1 text-sm font-medium">Invoice PDF</p>
-                {/* The mock cannot scan an uploaded PDF, so only the sample is offered there. */}
-                <PdfDropzone value={pdf} onChange={setPdf} allowUpload={!USE_MOCKS} />
-              </div>
-            )}
-          </section>
-        )}
+          </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Button type="submit" variant="primary" disabled={!def || launch.isPending}>
-            <Crosshair {...iconProps} />
-            {launch.isPending ? "Launching" : "Launch attack"}
-          </Button>
-          <p className="text-sm text-ink-muted" aria-live="polite">
-            {!def
-              ? "Pick an attack to start."
-              : tried && missing
-                ? <span className="text-ink">{missing}</span>
-                : launch.isError
-                  ? <span className="text-ink">The attack was not sent: {launch.error.message}</span>
-                  : "It goes through the same checks as every invoice this week. Watch the result on the board."}
-          </p>
-        </div>
-      </form>
-    </div>
+          <AttackCardPicker label="Attack" options={CARDS} value={card} onChange={setCard} />
+
+          {def && draft && (
+            <section aria-label="Your attack" className="rounded-lg border border-rule bg-surface p-5">
+              <h2 className="text-md font-semibold">{def.takesPdf ? "Your email and invoice" : "Your email"}</h2>
+              <p className="mb-4 text-sm text-ink-muted">Pre-filled from the card. Change anything.</p>
+              <EmailEditor
+                value={draft}
+                onChange={(v) => setDrafts((d) => ({ ...d, [def.id]: v }))}
+                thread={
+                  def.id === "freestyle" ? (
+                    <VendorThreadPicker
+                      threadId={draft.thread_id}
+                      fallbackVendor={def.vendor}
+                      onChange={(thread_id) => setDrafts((d) => ({ ...d, freestyle: { ...d.freestyle, thread_id } }))}
+                    />
+                  ) : (
+                    <>
+                      Sent into the <span className="text-ink">{def.vendor}</span> invoice thread, as if it came from them.
+                    </>
+                  )
+                }
+              />
+              {def.takesPdf && (
+                <div className="mt-4">
+                  <p className="mb-1 text-sm font-medium">Invoice PDF</p>
+                  {/* The mock cannot scan an uploaded PDF, so only the sample is offered there. */}
+                  <PdfDropzone value={pdf} onChange={setPdf} allowUpload={mode !== "mock"} />
+                </div>
+              )}
+            </section>
+          )}
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Button type="submit" variant="primary" disabled={!def || launch.isPending}>
+              <Crosshair {...iconProps} />
+              {launch.isPending ? "Launching" : "Launch attack"}
+            </Button>
+            <p className="text-sm text-ink-muted" aria-live="polite">
+              {!def
+                ? "Pick an attack to start."
+                : tried && missing
+                  ? <span className="text-ink">{missing}</span>
+                  : launch.isError
+                    ? <span className="text-ink">The attack was not sent. {errorMessage(launch.error)}. Launch again to retry.</span>
+                    : "It goes through the same checks as every invoice this week. Watch the result on the board."}
+            </p>
+          </div>
+        </form>
+      </div>
+    </>
   );
 }
 

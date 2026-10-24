@@ -2,7 +2,7 @@ import { EvidenceRef, useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
 import { formatScore } from "@/lib/format";
 import { SIGNALS, THRESHOLDS, signalInfo } from "@/lib/risk-catalog";
-import type { RiskAssessment, Signal } from "@/lib/types";
+import type { PaymentDetail, Signal } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface Placed extends Signal {
@@ -10,7 +10,7 @@ interface Placed extends Signal {
   width: number; // its share of the track, clipped so the total never passes 100
 }
 
-export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
+export function RiskBreakdown({ risk }: { risk: PaymentDetail["risk"] }) {
   if (!risk) {
     return (
       <Section title="Risk score">
@@ -20,7 +20,7 @@ export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
   }
 
   // Positive signals, heaviest first, laid end to end. Weight-0 results (identity passed) count as checked.
-  const fired = risk.signals_json.filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight);
+  const fired = risk.signals.filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight);
   let cursor = 0;
   const placed: Placed[] = fired.map((s) => {
     const width = Math.max(0, Math.min(s.weight, 100 - cursor));
@@ -28,8 +28,8 @@ export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
     cursor += width;
     return p;
   });
-  const passed = risk.signals_json.filter((s) => s.weight <= 0);
-  const firedNames = new Set(risk.signals_json.map((s) => s.name));
+  const passed = risk.signals.filter((s) => s.weight <= 0);
+  const firedNames = new Set(risk.signals.map((s) => s.name));
   // The CRS identity check only runs on a changed destination or a first payment, so it is listed only when it ran.
   const unchecked = Object.keys(SIGNALS).filter((name) => !firedNames.has(name) && name !== "vendor_identity_check");
 
@@ -126,7 +126,7 @@ function QuietRow({ name, detail, evidenceId }: { name: string; detail: string; 
     <li
       {...source}
       title={detail}
-      className={cn(source.className, "flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-ink-faint")}
+      className={cn(source.className, "flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-ink-muted")}
     >
       <span className="truncate text-ink-muted">{signalInfo(name).label}</span>
       <EvidenceRef id={evidenceId} />

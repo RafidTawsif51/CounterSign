@@ -16,11 +16,11 @@ export function CallSlot({ detail }: { detail: PaymentDetail }) {
   const stored = callFromDetail(detail);
   // A live call card from before the number check existed has no finding; the stored record does.
   const call = live ? { ...live, finding: live.finding ?? stored?.finding ?? null } : stored;
-  const trust = useNumberTrust(detail.vendor.id, record?.contact ?? null, call?.contactSource ?? null);
+  const trust = useNumberTrust(detail.vendor?.id ?? null, record?.contact ?? null, call?.contactSource ?? null);
   const source = useEvidenceSource([record?.id]);
 
   if (!call) {
-    const quarantined = detail.findings.length > 0;
+    const quarantined = detail.injection_findings.length > 0;
     return (
       <Section title="Verification call">
         <p className="text-sm text-ink-muted">

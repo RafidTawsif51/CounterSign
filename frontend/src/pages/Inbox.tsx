@@ -7,6 +7,7 @@ import { ThreadView } from "@/components/inbox/thread-view";
 import { useDetections } from "@/components/inbox/use-detections";
 import { VendorRail } from "@/components/inbox/vendor-rail";
 import { iconProps } from "@/components/shared/icon";
+import { InlineError } from "@/components/shared/inline-error";
 import { useArrivals } from "@/hooks/use-arrivals";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -66,10 +67,14 @@ export function Inbox() {
     if (pick) setParams((p) => (p.delete("vendor"), p.set("thread", pick.thread_id), p), { replace: true });
   }, [threads.data, selected, vendorParam, setParams]);
 
-  const rail = <VendorRail history={history.data} hasVendor={thread.data ? Boolean(thread.data.vendor) : true} />;
+  const rail = history.isError ? (
+    <InlineError what="The vendor on file" error={history.error} onRetry={() => void history.refetch()} retrying={history.isFetching} className="px-4 py-5" />
+  ) : (
+    <VendorRail history={history.data} hasVendor={thread.data ? Boolean(thread.data.vendor) : true} />
+  );
 
   return (
-    <div className="flex flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className="flex flex-col lg:h-[calc(100dvh/var(--present-zoom)-3rem)]">
       <div className="flex min-h-0 flex-1">
         <section
           aria-label="Threads"
@@ -80,7 +85,7 @@ export function Inbox() {
             {threads.data && <span className="figure text-xs text-ink-muted">{threads.data.length} threads</span>}
           </div>
           {threads.isError ? (
-            <p className="px-4 py-6 text-sm">Threads did not load: {threads.error.message}</p>
+            <InlineError what="The AP inbox" error={threads.error} onRetry={() => void threads.refetch()} retrying={threads.isFetching} className="px-4 py-6" />
           ) : (
             <ThreadList threads={threads.data} selected={selected} detections={detections} fresh={fresh} onSelect={select} />
           )}
@@ -98,7 +103,7 @@ export function Inbox() {
                 All threads
               </button>
               {thread.isError ? (
-                <p className="px-6 py-6 text-sm">This thread did not load: {thread.error.message}</p>
+                <InlineError what="This thread" error={thread.error} onRetry={() => void thread.refetch()} retrying={thread.isFetching} className="px-6 py-6" />
               ) : (
                 <ThreadView thread={thread.data} history={history.data} detection={detections.get(selected)} />
               )}

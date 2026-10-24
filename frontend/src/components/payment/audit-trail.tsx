@@ -4,12 +4,12 @@ import { Section } from "@/components/payment/section";
 import { formatClock, formatScore } from "@/lib/format";
 import { ACTORS, AUDIT_ACTIONS, CONTACT_SOURCES, DECISIONS, SIGNALS, hardRuleInfo } from "@/lib/risk-catalog";
 import type { ContactSource } from "@/lib/types";
-import type { AuditLogEntry, Decision } from "@/lib/types";
+import type { AuditEntry, Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ACTOR_ICON = { agent: Bot, human: UserRound, system: Server } as const;
 
-export function AuditTrail({ entries }: { entries: AuditLogEntry[] }) {
+export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   return (
     <Section title="Audit trail" aside={<span className="text-xs text-ink-muted">Append-only</span>}>
       {entries.length === 0 ? (
@@ -26,8 +26,8 @@ export function AuditTrail({ entries }: { entries: AuditLogEntry[] }) {
   );
 }
 
-function AuditRow({ entry }: { entry: AuditLogEntry }) {
-  const d = (entry.detail_json ?? {}) as Record<string, unknown>;
+function AuditRow({ entry }: { entry: AuditEntry }) {
+  const d = entry.detail ?? {};
   // A row is also a source for the ids it mentions, so hovering a call or assessment id lights up its history.
   const source = useEvidenceSource([entry.id, d.call_id as string, d.assessment_id as string, d.finding_id as string]);
   const Icon = ACTOR_ICON[entry.actor];

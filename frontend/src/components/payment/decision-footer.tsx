@@ -7,21 +7,21 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { iconProps } from "@/components/shared/icon";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/api-error";
+import { useDataMode } from "@/lib/data-mode";
 import { formatAccount, formatUSD } from "@/lib/format";
 import type { PaymentDetail } from "@/lib/types";
 import { destinationChanged, requestedAccount } from "@/lib/verdict";
 
 type Mode = "approve" | "reject";
 
+/** The controller persona who decides exceptions in the demo; the backend records it as the approver. */
 const DEFAULT_APPROVER = "Dev (Controller)";
 
-/**
- * What Approve pays, in one sentence. The API says which account (approve_pays); approving never pays the requested one.
- * In mock mode the API fields are absent and the last verified account stands in.
- */
+/** What Approve pays, in one sentence. The backend says which account (approve_pays); approving never pays the requested one. */
 export function approveSentence(detail: PaymentDetail): string | null {
-  const pays = detail.approve_pays ?? detail.last_verified_account;
+  const pays = detail.payment.approve_pays;
   if (!pays) return null;
   const verified = `verified account ending ${formatAccount(pays.account_last4).slice(-4)}`;
   const req = requestedAccount(detail);
@@ -30,29 +30,29 @@ export function approveSentence(detail: PaymentDetail): string | null {
     : `Pays ${verified}.`;
 }
 
-// The controller's decision on a held payment. The API says what is allowed (actions); a reason is required either way
-// and goes into the audit trail with the approver's name.
+// The controller's decision on a held payment. The backend says what is allowed (actions); a reason is required either
+// way and goes into the audit trail with the approver's name.
 export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
   const [mode, setMode] = useState<Mode | null>(null);
   const [calling, setCalling] = useState(false);
   const queryClient = useQueryClient();
-  const { payment, vendor } = detail;
-  const held = payment.status === "held";
-  // Mock mode sends no actions: a held payment can be decided there.
-  const canApprove = held && (detail.actions?.can_approve ?? true);
-  const canReject = held && (detail.actions?.can_reject ?? true);
-  const canCall = held && destinationChanged(detail);
-  if (!canApprove && !canReject && !canCall) return null;
-  const blockedReason = held && !canApprove ? detail.actions?.approve_blocked_reason : null;
+  const dataMode = useDataMode();
+  const { payment } = detail;
+  const vendor = detail.vendor?.name ?? "this vendor";
+  const { can_approve, approve_blocked_reason, can_reject } = detail.actions;
+  if (payment.status !== "held") return null;
+  // The mock plays one call per run and has no manual call route, so the offline demo does not offer another.
+  const canCall = dataMode === "live" && destinationChanged(detail);
+  const sentence = can_approve ? approveSentence(detail) : null;
 
   async function callAgain() {
     setCalling(true);
     try {
       await api.startCall(payment.id);
-      toast.success("Calling the vendor", { description: `${vendor.name}, at an independent number, not the one in the email.` });
+      toast.success("Calling the vendor", { description: `${vendor}, at an independent number, not the one in the email.` });
       void queryClient.invalidateQueries({ queryKey: ["payment", payment.id] });
     } catch (err) {
-      toast.error("Call not started", { description: err instanceof ApiError ? err.detail : "The server did not respond." });
+      toast.error("Call not started", { description: errorMessage(err) });
     } finally {
       setCalling(false);
     }
@@ -61,10 +61,10 @@ export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-rule bg-surface px-5 py-3">
       <p className="mr-auto min-w-[16ch] text-sm text-ink-muted">
-        {blockedReason ? `Approve unavailable: ${blockedReason}.` : "Held for the controller. Your reason is recorded in the audit trail."}
-        {canApprove && approveSentence(detail) && (
-          <span className="mt-0.5 block font-medium text-ink">Approve: {approveSentence(detail)}</span>
-        )}
+        {can_approve || !approve_blocked_reason
+          ? "Held for the controller. Your reason is recorded in the audit trail."
+          : `Approve is unavailable: ${approve_blocked_reason}.`}
+        {sentence && <span className="mt-0.5 block font-medium text-ink">Approve: {sentence}</span>}
       </p>
       {canCall && (
         <Button onClick={() => void callAgain()} disabled={calling}>
@@ -72,18 +72,14 @@ export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
           Call vendor again
         </Button>
       )}
-      {canReject && (
-        <Button variant="danger" onClick={() => setMode("reject")}>
-          <X {...iconProps} />
-          Reject
-        </Button>
-      )}
-      {canApprove && (
-        <Button variant="primary" onClick={() => setMode("approve")}>
-          <Check {...iconProps} />
-          Approve
-        </Button>
-      )}
+      <Button variant="danger" onClick={() => setMode("reject")} disabled={!can_reject}>
+        <X {...iconProps} />
+        Reject
+      </Button>
+      <Button variant="primary" onClick={() => setMode("approve")} disabled={!can_approve}>
+        <Check {...iconProps} />
+        Approve
+      </Button>
       {mode && <DecisionDialog key={mode} mode={mode} detail={detail} onClose={() => setMode(null)} />}
     </div>
   );
@@ -97,7 +93,8 @@ function DecisionDialog({ mode, detail, onClose }: { mode: Mode; detail: Payment
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
   const approving = mode === "approve";
-  const { payment, vendor } = detail;
+  const { payment } = detail;
+  const vendor = detail.vendor?.name ?? "Unknown vendor";
   const sentence = approveSentence(detail);
   const ready = reason.trim().length >= 3 && approver.trim().length > 0;
 
@@ -108,13 +105,13 @@ function DecisionDialog({ mode, detail, onClose }: { mode: Mode; detail: Payment
     try {
       await (approving ? api.approve : api.reject)(payment.id, reason.trim(), approver.trim());
       toast.success(approving ? "Payment approved" : "Payment rejected", {
-        description: approving && sentence ? `${vendor.name}. ${sentence}` : vendor.name,
+        description: approving && sentence ? `${vendor}. ${sentence}` : vendor,
       });
       onClose();
       await queryClient.invalidateQueries({ queryKey: ["payment", payment.id] });
     } catch (err) {
-      // 409: the API's own reason (for example the verified account changed after the hold). The dialog stays open.
-      setError(err instanceof ApiError ? err.detail : "The server did not respond.");
+      // 409: the backend's own reason (for example the verified account changed after the hold). The dialog stays open.
+      setError(errorMessage(err));
     } finally {
       setPending(false);
     }
@@ -139,7 +136,7 @@ function DecisionDialog({ mode, detail, onClose }: { mode: Mode; detail: Payment
           <DialogHeader>
             <DialogTitle>{approving ? "Approve payment" : "Reject payment"}</DialogTitle>
             <DialogDescription>
-              {vendor.name}, {formatUSD(payment.amount_usd)}
+              {vendor}, {formatUSD(payment.amount_usd)}
             </DialogDescription>
           </DialogHeader>
 
@@ -166,7 +163,11 @@ function DecisionDialog({ mode, detail, onClose }: { mode: Mode; detail: Payment
               onChange={(e) => setReason(e.target.value)}
               maxLength={1000}
               className="min-h-20 text-sm"
-              placeholder={approving ? "Confirmed the invoice amount with the vendor's office." : "Vendor did not confirm the change."}
+              placeholder={
+                approving
+                  ? "The amount matches the rental agreement; paying the account we already verified."
+                  : "Vendor did not confirm the new account; paying the verified account next week."
+              }
             />
           </div>
 

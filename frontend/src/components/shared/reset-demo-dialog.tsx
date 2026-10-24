@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,22 +17,20 @@ import { iconProps } from "@/components/shared/icon";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { api } from "@/lib/api";
 
-export function ResetDemoDialog() {
-  const [open, setOpen] = useState(false);
+/** Controlled by the shell, so the R shortcut can open it too. */
+export function ResetDemoDialog({ open, onOpenChange: setOpen }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [pending, setPending] = useState(false);
-  const queryClient = useQueryClient();
-  const { clearRun } = useCurrentRun();
+  const { forgetAfterReset } = useCurrentRun();
 
   async function reset() {
     setPending(true);
     try {
       await api.resetDemo(true);
-      clearRun();
-      await queryClient.invalidateQueries();
+      forgetAfterReset();
       setOpen(false);
       toast.success("Demo reset", { description: "40 open invoices, no payment runs. The leaderboard was kept." });
     } catch (err) {
-      toast.error("Demo not reset", { description: err instanceof Error ? err.message : "The server did not respond." });
+      toast.error("Demo not reset", { description: errorMessage(err) });
     } finally {
       setPending(false);
     }

@@ -43,7 +43,7 @@ function overlap(a: Set<string>, b: Set<string>) {
 export function drawerTarget(evidenceId: string, claim: AskClaim, detail: PaymentDetail): string {
   if (evidenceId.startsWith("rule:")) return detail.risk?.id ?? evidenceId;
   if (evidenceId.startsWith("identity:"))
-    return detail.risk?.signals_json.find((s) => s.name === "vendor_identity_check")?.evidence_id ?? evidenceId;
+    return detail.risk?.signals.find((s) => s.name === "vendor_identity_check")?.evidence_id ?? evidenceId;
   if (evidenceId.startsWith("cal_")) {
     const call = detail.calls.find((c) => c.id === evidenceId);
     const lines = call?.transcript ?? [];

@@ -7,7 +7,8 @@ import { InvoicePreview } from "@/components/inbox/invoice-preview";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { useArrivals } from "@/hooks/use-arrivals";
-import { USE_MOCKS, api, invoicePdfUrl } from "@/lib/api";
+import { api, invoicePdfUrl } from "@/lib/api";
+import { isMock } from "@/lib/data-mode";
 import type { DiffPart } from "@/lib/domain-diff";
 import { formatClock, formatDate, formatRelativeTime } from "@/lib/format";
 import { bodyText, headerFlags, type Detection, type HeaderFlag } from "@/lib/inbox";
@@ -146,7 +147,7 @@ function MessageItem({
       {detection && (
         <p className="mx-4 flex flex-wrap items-center gap-x-2 border-t border-rule py-2 text-sm text-blocked-ink">
           <ShieldAlert {...iconProps} />
-          <span className="font-medium">{detection.status === "blocked" ? "Payment blocked" : "Payment held"}:</span>
+          <span className="font-medium">{detectionLabel(detection)}:</span>
           <span>{detection.reason}.</span>
           <Link to={`/payments/${detection.paymentId}`} className="text-accent underline-offset-4 hover:underline">
             Open payment
@@ -191,6 +192,13 @@ function Address({ address, flags, marks }: { address: string; flags: HeaderFlag
       ))}
     </>
   );
+}
+
+/** What happened to the caught payment, in the order it happened. */
+function detectionLabel(d: Detection) {
+  if (d.reviewed?.decision === "approved") return `Held, then approved by ${d.reviewed.by} to the verified account`;
+  if (d.reviewed?.decision === "rejected") return `Held, then rejected by ${d.reviewed.by}`;
+  return d.status === "blocked" ? "Payment blocked" : "Payment held";
 }
 
 const domainKey = (f: HeaderFlag) => f.diff!.fake.map((p) => p.text).join("");
@@ -239,7 +247,7 @@ function AttachmentRow({
   const [open, setOpen] = useState(false);
   // The payment record exists once a run has read the invoice; it carries the injection findings.
   const { data: detail } = useQuery({ queryKey: ["payment", pid], queryFn: () => api.payment(pid), retry: false });
-  const findings = detail?.findings.filter((f) => f.invoice_id === invoiceId) ?? [];
+  const findings = detail?.injection_findings.filter((f) => f.invoice_id === invoiceId) ?? [];
   const name = `${invoice?.number ?? invoiceId}.pdf`;
 
   return (
@@ -261,7 +269,7 @@ function AttachmentRow({
         <span className="ml-auto text-sm text-accent">Preview</span>
       </button>
       {invoice && history && (
-        <InvoicePreview open={open} onOpenChange={setOpen} pdfUrl={hasPdf && !USE_MOCKS ? invoicePdfUrl(invoiceId) : null} name={name} invoice={invoice} vendor={history.vendor} findings={findings} />
+        <InvoicePreview open={open} onOpenChange={setOpen} pdfUrl={hasPdf && !isMock() ? invoicePdfUrl(invoiceId) : null} name={name} invoice={invoice} vendor={history.vendor} findings={findings} />
       )}
     </li>
   );

@@ -7,7 +7,9 @@ import { ShieldCheck } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NumberTicker } from "@/components/board/number-ticker";
 import { iconProps } from "@/components/shared/icon";
+import { InlineError } from "@/components/shared/inline-error";
 import { BOUNTY_EMAIL, api } from "@/lib/api";
+import { useDataMode } from "@/lib/data-mode";
 import { subscribeLeaderboard } from "@/lib/events";
 import { formatClock, formatUSD } from "@/lib/format";
 import type { AttackLoggedEvent, LeaderboardRow } from "@/lib/types";
@@ -34,17 +36,29 @@ export function Leaderboard() {
   // Attempts seen on the stream before the next fetch includes them, by attack id.
   const [live, setLive] = useState<Map<string, AttackLoggedEvent>>(new Map());
   const idle = useIdleCursor(tv);
+  // The offline-demo switch in the main window flips this window too; attempts from the other source do not carry over.
+  const mode = useDataMode();
 
-  useEffect(
-    () =>
-      subscribeLeaderboard((e) => {
+  useEffect(() => {
+    let dropped = false;
+    setLive(new Map());
+    return subscribeLeaderboard(
+      (e) => {
         if (e.moderation_status === "hidden") return;
         setLive((m) => new Map(m).set(e.attack_id, e));
         // A result can move money; the totals come from the server.
         if (e.result) void queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-      }),
-    [queryClient],
-  );
+      },
+      (s) => {
+        // The leaderboard stream does not replay, so attempts made while it was down come from a fresh fetch.
+        if (s === "reconnecting") dropped = true;
+        if (s === "live" && dropped) {
+          dropped = false;
+          void queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+        }
+      },
+    );
+  }, [queryClient, mode]);
 
   const rows = useMemo(() => merge(board.data?.attempts ?? [], live), [board.data, live]);
   const totals = board.data?.totals;
@@ -61,7 +75,7 @@ export function Leaderboard() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">Rob Countersign</h1>
           <p className="mt-1 text-md text-ink-muted">Try to get our AI to pay the wrong account. Every attempt runs live, in sandbox money.</p>
-          <dl className="mt-6 flex flex-wrap items-end gap-x-10 gap-y-4">
+          <dl className="mt-6 flex flex-wrap items-stretch gap-x-10 gap-y-4">
             <Stat label="Money moved to attackers">
               <NumberTicker value={totals?.sandbox_usd_moved ?? 0} format={formatUSD} className="text-2xl font-medium" />
             </Stat>
@@ -80,7 +94,7 @@ export function Leaderboard() {
         {board.isLoading ? (
           <TableSkeleton />
         ) : board.isError && rows.length === 0 ? (
-          <p className="py-8 text-md">The leaderboard did not load: {board.error.message}. It retries every 10 seconds on the TV view.</p>
+          <InlineError what="The leaderboard" error={board.error} onRetry={() => void board.refetch()} retrying={board.isFetching} className="py-8 text-md" />
         ) : rows.length === 0 ? (
           <p className="py-8 text-md text-ink-muted">No attempts yet. Open the attack console{BOUNTY_EMAIL ? " or email the bounty inbox" : ""} and try.</p>
         ) : (
@@ -122,7 +136,8 @@ function merge(rows: LeaderboardRow[], live: Map<string, AttackLoggedEvent>): Le
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
+    // Labels share the top line and figures share the bottom, whatever size each figure is set in.
+    <div className="flex flex-col justify-between">
       <dt className="text-sm text-ink-muted">{label}</dt>
       <dd className="mt-0.5">{children}</dd>
     </div>

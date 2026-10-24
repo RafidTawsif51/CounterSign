@@ -13,6 +13,7 @@ import { HardRules } from "@/components/payment/hard-rules";
 import { InjectionFindings } from "@/components/payment/injection-findings";
 import { PaymentHeader } from "@/components/payment/payment-header";
 import { RiskBreakdown } from "@/components/payment/risk-breakdown";
+import { InlineError } from "@/components/shared/inline-error";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { ApiError, api } from "@/lib/api";
 
@@ -21,6 +22,17 @@ export function PaymentDetail() {
   const navigate = useNavigate();
   const query = useQuery({ queryKey: ["payment", paymentId], queryFn: () => api.payment(paymentId), retry: false });
   useLiveRefresh(paymentId);
+  // Closing navigates away and unmounts the drawer before Radix can restore focus, so a keyboard user would land on
+  // the page body. Put them back on the row they opened, unless focus already went somewhere on purpose.
+  useEffect(
+    () => () => {
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        document.querySelector<HTMLElement>(`[data-payment-id="${CSS.escape(paymentId)}"]`)?.focus();
+      });
+    },
+    [paymentId],
+  );
 
   const detail = query.data;
 
@@ -35,7 +47,7 @@ export function PaymentDetail() {
               <HardRules risk={detail.risk} />
               <RiskBreakdown risk={detail.risk} />
               <Destination detail={detail} />
-              <InjectionFindings findings={detail.findings} />
+              <InjectionFindings findings={detail.injection_findings} />
               <CallSlot detail={detail} />
               <AuditTrail entries={detail.audit} />
             </div>
@@ -43,12 +55,20 @@ export function PaymentDetail() {
           </EvidenceProvider>
         ) : query.isError ? (
           <div className="px-5 pt-4">
-            <SheetTitle>Payment not found</SheetTitle>
-            <SheetDescription className="mt-1">
-              {query.error instanceof ApiError && query.error.status === 404
-                ? `${paymentId} is not part of a payment run yet. Start a payment run, then open the payment from the board.`
-                : query.error.message}
-            </SheetDescription>
+            {query.error instanceof ApiError && query.error.status === 404 ? (
+              <>
+                <SheetTitle>Payment not found</SheetTitle>
+                <SheetDescription className="mt-1">
+                  {paymentId} is not part of a payment run yet. Start a payment run, then open the payment from the board.
+                </SheetDescription>
+              </>
+            ) : (
+              <>
+                <SheetTitle className="sr-only">Payment did not load</SheetTitle>
+                <SheetDescription className="sr-only">The payment detail could not be loaded.</SheetDescription>
+                <InlineError what="This payment" error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} className="pr-10" />
+              </>
+            )}
           </div>
         ) : (
           <LoadingState />

@@ -10,6 +10,7 @@
       try {
         var t = localStorage.getItem("countersign-theme");
         if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+        if (sessionStorage.getItem("countersign-presenting") === "1") document.documentElement.setAttribute("data-presenting", "");
       } catch (e) {}
     </script>
   </head>
