@@ -738,15 +738,15 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
     through the webhooks in app/integrations.py and is applied by handle_outcome."""
     payment, vendor, rem, _msg, phone, source, flagged, call, prior, choice, dial, routed, _info = await _prepare(session, payment_id)
     s = get_settings()
-    base = s.public_base_url.rstrip("/")
+    voice.public_url("/")  # PUBLIC_BASE_URL must be https: refuse now, before any clip is made or call placed
     script = voice.call_script(vendor.name, rem["account_last4"])
     try:
         for text in script.all_texts():
             await voice.tts_clip(text, s)
         token = voice.new_call_token(call.id)  # per-call webhook secret, kept in a file; never logged or stored in an event
         sid = await voice.place_call(
-            dial, voice.with_token(f"{base}/api/voice/twiml/{call.id}", token),
-            voice.with_token(f"{base}/api/webhooks/twilio/status?call_id={call.id}", token), s)
+            dial, voice.with_token(voice.public_url(f"/api/voice/twiml/{call.id}", s), token),
+            voice.with_token(voice.public_url(f"/api/webhooks/twilio/status?call_id={call.id}", s), token), s)
     except Exception:
         session.delete(call)  # nothing was dialed: leave no half-open call behind and let the caller see the error
         session.commit()

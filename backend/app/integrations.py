@@ -129,7 +129,7 @@ def _context(session: Session, call_id: str):
 
 def _url(path: str, request: Optional[Request] = None) -> str:
     """A public URL for Twilio to call back. Carries the incoming request's call token along, so the whole call stays authenticated."""
-    url = get_settings().public_base_url.rstrip("/") + path
+    url = voice.public_url(path)  # PUBLIC_BASE_URL over https, never the request's own URL
     token = request.query_params.get("t") if request is not None else None
     return voice.with_token(url, token) if token else url
 

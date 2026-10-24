@@ -16,6 +16,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 from typing import Literal, Optional, Protocol
 
@@ -34,6 +35,7 @@ NESSIE_URL = "https://api.nessieisreal.com"  # plain http (port 80) is refused
 OPERATING_NICKNAME = "ridgeline-operating"
 OPERATING_BALANCE = 100_000_000
 _account_cache: dict[str, str] = {}  # nickname -> Nessie account id
+_account_lock = threading.Lock()  # two payments to a brand new account must not each create it
 
 
 class TransferRefused(Exception):
@@ -176,6 +178,12 @@ def setup_sandbox(session: Session) -> dict:
     return _setup_sandbox_sync(rows)
 
 
+def _vendor_name_for_account(account_id: str) -> Optional[str]:
+    """The vendor that owns a vendor_bank_accounts row, from our database, or None for an id we do not know."""
+    with Session(db.engine) as session:
+        return session.exec(select(Vendor.name).join(VendorBankAccount, VendorBankAccount.vendor_id == Vendor.id).where(VendorBankAccount.id == account_id)).first()
+
+
 def _real_transfer(destination_account_id: str, amount_usd: float, description: str) -> str:
     """Record a transfer in the Nessie sandbox and return its id.
 
@@ -188,7 +196,16 @@ def _real_transfer(destination_account_id: str, amount_usd: float, description: 
         _load_accounts()
     payee = _account_cache.get(destination_account_id)
     if not payee:
-        raise RuntimeError("Nessie account not set up; run setup-nessie")
+        # The account may be newer than the last setup: a bank change that a call just verified is promoted to a verified account,
+        # and its Nessie account has not been created yet. Create it now, once, for any bank account row of ours (by id, from our
+        # own database). An id that is not ours is still refused.
+        name = _vendor_name_for_account(destination_account_id)
+        if name is None:
+            raise RuntimeError("Nessie account not set up and not a known bank account; run setup-nessie")
+        with _account_lock:
+            _load_accounts()  # another transfer may have just created it
+            _ensure_account(destination_account_id, name, 0)
+        payee = _account_cache[destination_account_id]
     resp = _nessie("POST", f"/accounts/{payee}/transfers", json={
         "transaction_date": utcnow().date().isoformat(), "status": "pending", "amount": round(amount_usd, 2),
         "description": f"From {OPERATING_NICKNAME}: {description}"[:200],

@@ -116,9 +116,20 @@ def _clip_name(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest() + ".wav"
 
 
+def public_url(path: str, settings: Optional[Settings] = None) -> str:
+    """THE one way a URL for Twilio is made: PUBLIC_BASE_URL plus a path, nothing from the incoming request (a proxy or a forwarded
+    header can make a request's own URL say http or an internal host). Twilio only reaches an https address, so anything else is
+    refused here, before a call is placed."""
+    base = (settings or get_settings()).public_base_url.strip().rstrip("/")
+    if not base.startswith("https://") or len(base) <= len("https://"):
+        raise RuntimeError("PUBLIC_BASE_URL must be the public https address Twilio can reach (for example the ngrok https link)")
+    if not path.startswith("/"):
+        raise ValueError("a path starts with /")
+    return base + path
+
+
 def clip_url(text: str, settings: Optional[Settings] = None) -> str:
-    s = settings or get_settings()
-    return f"{s.public_base_url.rstrip('/')}/api/voice/audio/{_clip_name(text)}"
+    return public_url(f"/api/voice/audio/{_clip_name(text)}", settings)
 
 
 def _write_silent_wav(path: Path, seconds: float = 0.5) -> None:
@@ -237,11 +248,20 @@ def _twiml(body: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
 
 
+# How long Twilio waits for the vendor to START talking once the question has finished. A person needs a moment after a question,
+# and a phone line adds more: 6 s was short. speechTimeout="auto" ends the answer by itself when they stop. The worst case for a call
+# (intro, question, 10 s of silence, retry, 10 s of silence, closing line) stays well inside the 60 second rule.
+GATHER_TIMEOUT_SECONDS = 10
+# Words a phone speech model should expect: short answers like "yes" and "no" are the hardest to catch without them.
+GATHER_HINTS = "yes, no, yeah, nope, correct, that is right, we did, we did not, we never changed banks, I don't know"
+
+
 def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings: Optional[Settings] = None, first: bool = True) -> str:
     """Intro (first pass only), then a speech Gather around the question (or the retry prompt). Silence redirects to retry_url."""
     prompt = script.question if first else script.retry
     gather = (
-        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
+        f'<Gather input="speech" speechTimeout="auto" timeout="{GATHER_TIMEOUT_SECONDS}" speechModel="phone_call" language="en-US" hints="{_esc(GATHER_HINTS)}" '
+        f'action="{_esc(gather_url)}" method="POST">'
         f"{_speak(prompt, settings)}</Gather>"
     )
     return _twiml((_speak(script.intro, settings) if first else "") + gather + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')

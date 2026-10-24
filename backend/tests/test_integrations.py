@@ -467,7 +467,7 @@ def test_status_callback_no_answer_and_ignored_statuses(fdb, monkeypatch):
 def test_twiml_flow_first_retry_end(fdb):
     client, eng = fdb
     first = client.post("/api/voice/twiml/cal_t").text
-    assert 'input="speech"' in first and 'timeout="6"' in first and "/api/voice/gather/cal_t" in first and "retry=1" in first
+    assert 'input="speech"' in first and 'timeout="10"' in first and "/api/voice/gather/cal_t" in first and "retry=1" in first
     retry = client.post("/api/voice/twiml/cal_t?retry=1").text
     assert "end=1" in retry and "<Gather" in retry
     end = client.post("/api/voice/twiml/cal_t?end=1")
