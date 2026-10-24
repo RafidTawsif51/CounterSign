@@ -41,3 +41,4 @@ demo/backup-run.mp4
 .vscode/
 *.db-shm
 *.db-wal
+frontend/.21st/
