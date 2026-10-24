@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     allowed_call_numbers: str = ""
 
     bounty_webhook_secret: str = ""
+    bounty_moderator_token: str = ""  # when set, GET /api/bounty/queue and POST /api/bounty/{id}/moderate need the header x-moderator-token
 
     # Where uploaded invoice PDFs are saved (generated filenames only).
     upload_dir: str = "./uploads"

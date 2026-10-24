@@ -4,7 +4,7 @@
 #   POST /api/attacks                    launch an attack card: {attacker_name, source, card, payload} -> 201 {attack_id, message_id, run_id, ...}
 #                                        cards: classic_bank_change, poisoned_invoice, ceo_pressure, freestyle. A PDF (a seed file name or
 #                                        pdf_base64) is accepted on poisoned_invoice and freestyle.
-#   POST /api/bounty/inbound             inbound-email webhook for the Rob Countersign bounty (secret, rate limit, moderation)
+#   (the bounty inbox, POST /api/bounty/inbound, its queue and moderation live in services/bounty.py; it uses _build and _launch below)
 #   GET  /api/attacks/leaderboard        newest first: handle, source, attack type, result, top reasons, and totals (attempts, unique
 #                                        attackers, sandbox dollars moved). The attack text (subject, sender, body) is included ONLY when
 #                                        moderation_status is approved; hidden rows are left out unless include_hidden. Bounty handles and
@@ -30,7 +30,6 @@
 import asyncio
 import base64
 import binascii
-import hmac
 import logging
 import re
 import shutil
@@ -68,14 +67,15 @@ from app.services import run, verify
 from app.services.extract import hash_routing
 from app.services.ingest import MAX_BODY_CHARS, MAX_PDF_BYTES, _EMAIL_RE, vendor_for_thread
 
+BOUNTY_LIMIT = 5  # submissions per sender per hour
+BOUNTY_WINDOW = timedelta(hours=1)
+
 log = logging.getLogger("countersign.attacks")
 router = APIRouter()
 
 BACKEND = Path(__file__).resolve().parents[2]
 SEED_INVOICES = BACKEND / "seed" / "invoices"
 POLL_SECONDS = 0.05
-BOUNTY_LIMIT = 5  # submissions per sender per hour
-BOUNTY_WINDOW = timedelta(hours=1)
 
 
 class Job(NamedTuple):
@@ -332,80 +332,6 @@ async def launch_attack(body: AttackIn, session: Session = Depends(get_session))
     return await _launch(attack, msg, inv, run_id)
 
 
-# ---------------------------------------------------------------- POST /api/bounty/inbound
-
-
-def _first(d: dict, *names: str) -> Any:
-    for n in names:
-        if d.get(n) not in (None, ""):
-            return d[n]
-    return None
-
-
-def _sender(raw: str) -> str:
-    from email.utils import parseaddr
-
-    addr = parseaddr(raw or "")[1].lower()
-    if not _EMAIL_RE.match(addr):
-        raise HTTPException(422, "the From address is not valid")
-    return addr
-
-
-def _vendor_hint(s: Session, text: str) -> Optional[str]:
-    """A brand-new bounty thread has no vendor. If the email names one (or its domain), use it as a hint. The sender is never used."""
-    low = text.lower()
-    best = None
-    for v in s.exec(select(Vendor)):
-        if v.name.lower() in low or v.email_domain.lower() in low:
-            if best is None or len(v.name) > len(best.name):
-                best = v
-    return best.id if best else None
-
-
-@router.post("/bounty/inbound")
-async def bounty_inbound(request: Request, session: Session = Depends(get_session)) -> dict:
-    """Inbound-email webhook. Accepts a normalized body {from, subject, text, html, attachments:[{filename, content_type, content_base64}]}
-    or Postmark's field names (From, Subject, TextBody, HtmlBody, Attachments:[{Name, ContentType, Content}])."""
-    secret = get_settings().bounty_webhook_secret
-    if not secret:
-        raise HTTPException(503, "the bounty inbox is not configured (BOUNTY_WEBHOOK_SECRET)")
-    if not hmac.compare_digest(request.headers.get("x-webhook-secret", ""), secret):
-        raise HTTPException(401, "bad webhook secret")
-    try:
-        data = await request.json()
-        assert isinstance(data, dict)
-    except Exception:
-        raise HTTPException(422, "expected a JSON object")
-
-    sender = _sender(str(_first(data, "from", "From", "sender") or ""))
-    now = utcnow()
-    recent = session.exec(select(Attack).where(Attack.source == AttackSource.bounty_email, Attack.attacker_name == sender, Attack.created_at >= now - BOUNTY_WINDOW)).all()
-    if len(recent) >= BOUNTY_LIMIT:
-        oldest = min(a.created_at for a in recent)
-        retry = max(1, int((oldest + BOUNTY_WINDOW - now).total_seconds()))
-        raise HTTPException(429, detail={"error": f"at most {BOUNTY_LIMIT} submissions per sender per hour", "retry_after_seconds": retry}, headers={"Retry-After": str(retry)})
-
-    subject = re.sub(r"[\x00-\x1f\x7f]+", " ", str(_first(data, "subject", "Subject") or "(no subject)"))[:300].strip() or "(no subject)"
-    body = str(_first(data, "text", "TextBody", "html", "HtmlBody") or "")[:MAX_BODY_CHARS]
-    pdf = None
-    for att in _first(data, "attachments", "Attachments") or []:
-        if not isinstance(att, dict):
-            continue
-        try:
-            raw = base64.b64decode(str(_first(att, "content_base64", "Content") or ""), validate=False)
-        except (binascii.Error, ValueError):
-            continue
-        if raw.startswith(b"%PDF-") and 0 < len(raw) <= MAX_PDF_BYTES:
-            pdf = raw
-            break
-    hint = _vendor_hint(session, f"{subject}\n{body}")
-    attack, msg, inv, run_id = _build(session, attacker_name=sender, source=AttackSource.bounty_email, card="bounty", thread_id=None, from_addr=sender, reply_to=None,
-                                      subject=subject, body=body, pdf=pdf, vendor_id=hint)
-    session.commit()
-    session.refresh(attack), session.refresh(msg), session.refresh(inv)
-    return await _launch(attack, msg, inv, run_id)
-
-
 # ---------------------------------------------------------------- leaderboard and moderation
 
 
@@ -425,6 +351,9 @@ def leaderboard_row(a: Attack) -> dict:
         "amount_usd": d.get("amount_usd"), "paid_usd": d.get("paid_usd", 0.0), "created_at": a.created_at, "moderation_status": a.moderation_status.value,
         "text": None,
     }
+    if bounty and a.moderation_status != ModerationStatus.approved:
+        # Until a moderator approves it a bounty row shows only the handle and the result: no reasons, outcome or amounts.
+        row.update(outcome=None, top_reasons=[], amount_usd=None, paid_usd=None)
     if a.moderation_status == ModerationStatus.approved:  # the attack text is shown only once a person approved it
         row["text"] = {"subject": d.get("subject"), "from_addr": _mask_addr(d["from_addr"]) if bounty and d.get("from_addr") else d.get("from_addr"),
                        "body": (d.get("body") or "")[:2000], "has_pdf": d.get("has_pdf", False)}
@@ -442,7 +371,7 @@ def leaderboard(limit: int = Query(100, ge=1, le=500), include_hidden: bool = Fa
         "attempts": rows,
         "totals": {
             "attempts": len(rows), "unique_attackers": len({a.attacker_name.lower() for a in attacks}),
-            "sandbox_usd_moved": round(sum(r["paid_usd"] or 0.0 for r in rows if r["result"] == "missed"), 2),
+            "sandbox_usd_moved": round(sum((a.detail_json or {}).get("paid_usd") or 0.0 for a in attacks if a.result == AttackResult.missed), 2),
             "caught": sum(r["result"] == "caught" for r in rows), "missed": sum(r["result"] == "missed" for r in rows),
             "pending_result": sum(r["result"] is None for r in rows),
             "by_card": {c: sum(r["card"] == c for r in rows) for c in sorted({r["card"] for r in rows})},
