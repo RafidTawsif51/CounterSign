@@ -164,11 +164,13 @@ async def call_twiml(call_id: str, request: Request, background: BackgroundTasks
     voice.log_state(call_id, "answered", channel="twilio")
     gather = _url(f"/api/voice/gather/{call_id}", request)
     nxt = _url(f"/api/voice/twiml/{call_id}?end=1", request) if retry else _url(f"/api/voice/twiml/{call_id}?retry=1", request)
+    if retry:
+        gather += "?rt=1"  # the answer to the retry prompt: an empty result there is the end of the road
     return _xml(voice.twiml_question(script, gather, nxt, first=not retry))
 
 
 @voice_router.post("/gather/{call_id}")
-async def call_gather(call_id: str, request: Request, background: BackgroundTasks, r: int = 0, form: dict = Depends(twilio_form)) -> Response:
+async def call_gather(call_id: str, request: Request, background: BackgroundTasks, r: int = 0, rt: int = 0, form: dict = Depends(twilio_form)) -> Response:
     """The vendor's spoken answer. Classified within the 3 s Claude cap and answered inside Twilio's 5 s: a closing line and a
     hangup, or (once, r=1 afterwards) a clarifying or "take your time" clip and another Gather. Applied in the background."""
     answer = (form.get("SpeechResult") or "").strip()
@@ -176,6 +178,11 @@ async def call_gather(call_id: str, request: Request, background: BackgroundTask
         call, payment, script = _context(s, call_id)
         if call.outcome is not None:  # Twilio retried, or the 60 s rule already ended the call
             return _xml(voice.twiml_close(script.closing(call.outcome.value)))
+    if not answer and not r and not rt:
+        # Speech was heard but nothing was recognised (the vendor talked over the question, or noise): the existing retry
+        # ("Sorry, I did not catch that"), not straight to unclear. After the retry, silence ends the call as before.
+        voice.log_state(call_id, "empty-answer", action="retry")
+        return _xml(voice.twiml_redirect(_url(f"/api/voice/twiml/{call_id}?retry=1", request)))
     res = await verify.finish_answer(call_id, answer, bool(r))
     if res is None:
         return _xml(voice.twiml_close(script.unclear))

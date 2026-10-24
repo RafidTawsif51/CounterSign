@@ -429,11 +429,11 @@ def _call_row(eng):
 @pytest.mark.parametrize("speech,expected,paid", [
     ("No we never changed banks", CallOutcome.denied, False),
     ("Yes we did", CallOutcome.confirmed, True),
-    ("", CallOutcome.unclear, False),  # silence is never re-asked (it already had its own retry)
+    ("", CallOutcome.unclear, False),  # empty after the retry (rt=1) ends unclear; before the retry it goes to the retry (see the empty-answer tests)
 ])
 def test_gather_endpoint(fdb, speech, expected, paid):
     client, eng = fdb
-    r = client.post("/api/voice/gather/cal_t", data={"SpeechResult": speech, "Confidence": "0.9"})
+    r = client.post("/api/voice/gather/cal_t?rt=1", data={"SpeechResult": speech, "Confidence": "0.9"})
     assert r.status_code == 200 and r.text.endswith("<Hangup/></Response>")
     call, pay = _call_row(eng)  # the background task has run
     assert call.outcome == expected
@@ -473,6 +473,69 @@ def test_twiml_flow_first_retry_end(fdb):
     end = client.post("/api/voice/twiml/cal_t?end=1")
     assert "<Hangup/>" in end.text
     assert _call_row(eng)[0].outcome == CallOutcome.unclear
+
+
+def _no_nested_prompt(page: str) -> None:
+    """Everything spoken comes BEFORE the Gather, which is empty: nothing can be cut off by the vendor talking early."""
+    m = re.search(r"<Gather [^>]*></Gather>", page)
+    assert m, page
+    assert "<Gather" not in page[:m.start()] and not re.search(r"<(Say|Play)", page[m.start():m.end()])
+    before = page[:m.start()]
+    assert before.count("<Play>") + before.count("<Say>") >= 2  # the prompt and then the cue
+    cue = voice.call_script("Test Co", "9999").cue
+    assert cue in page or voice.clip_url(cue) in page  # the cue is the last thing before the Gather
+    last = re.findall(r"<(?:Play|Say)>(.*?)</(?:Play|Say)>", before)[-1]
+    assert last in (voice.clip_url(cue), cue)
+    assert 'hints="yes, no, never, we did, we did not, didn&#x27;t, correct, that&#x27;s right, not us"' in page or "we did not" in page
+    for attr in ('input="speech"', 'speechTimeout="auto"', 'timeout="6"', 'speechModel="phone_call"'):
+        assert attr in page, attr
+    assert "bargeIn" not in page and "enhanced" not in page
+
+
+def test_every_listen_plays_the_prompt_and_a_short_cue_before_an_empty_gather(fdb):
+    client, _ = fdb
+    for sc in (voice.call_script("Test Co", "9999"),):
+        assert len(sc.cue) < 25 and sc.cue in sc.all_texts()  # a very short clip, pre-generated with the others
+    first = client.post("/api/voice/twiml/cal_t").text
+    _no_nested_prompt(first)
+    _no_nested_prompt(client.post("/api/voice/twiml/cal_t?retry=1").text)
+    _no_nested_prompt(client.post("/api/voice/gather/cal_t", data={"SpeechResult": "who is this"}).text)  # clarify
+    client.post("/api/voice/twiml/cal_t?end=1&r=1")
+
+
+def test_hold_regather_also_has_the_cue_before_an_empty_gather(fdb):
+    client, _ = fdb
+    _no_nested_prompt(client.post("/api/voice/gather/cal_t", data={"SpeechResult": "hold on a second"}).text)
+
+
+def test_the_cue_and_prompts_play_as_pre_generated_clips_when_they_exist(fdb, monkeypatch, tmp_path):
+    client, _ = fdb
+    monkeypatch.setattr(voice, "AUDIO_DIR", tmp_path / "audio")
+    sc = voice.call_script("Test Co", "9999")
+    for text in sc.all_texts():
+        run(voice.tts_clip(text, get_settings()))
+    page = voice.twiml_question(sc, "https://x/g", "https://x/r")
+    assert page.count("<Play>") == 3 and "<Say>" not in page and voice.clip_url(sc.cue) in page  # intro, question, cue
+
+
+def test_an_empty_first_answer_goes_to_the_retry_not_straight_to_unclear(fdb):
+    client, eng = fdb
+    page = client.post("/api/voice/gather/cal_t", data={"SpeechResult": ""}).text
+    assert "<Redirect" in page and "twiml/cal_t?retry=1" in page and "<Hangup/>" not in page
+    call = _call_row(eng)[0]
+    assert call.outcome is None and not call.transcript  # nothing recorded, nothing decided
+    retry = client.post("/api/voice/twiml/cal_t?retry=1").text
+    assert "gather/cal_t?rt=1" in retry and "end=1" in retry
+    again = client.post("/api/voice/gather/cal_t?rt=1", data={"SpeechResult": ""})
+    assert "<Hangup/>" in again.text and _call_row(eng)[0].outcome == CallOutcome.unclear  # still nothing after the retry: unclear
+    assert "Sorry, I did not catch that" in voice.call_script("Test Co", "9999").retry
+
+
+def test_a_clear_answer_after_the_retry_still_counts(fdb):
+    client, eng = fdb
+    client.post("/api/voice/gather/cal_t", data={"SpeechResult": ""})
+    assert "<Hangup/>" in client.post("/api/voice/gather/cal_t?rt=1", data={"SpeechResult": "No, never"}).text
+    assert _call_row(eng)[0].outcome == CallOutcome.denied
 
 
 def test_only_last4_is_ever_spoken():
@@ -646,7 +709,7 @@ def test_real_mode_start_verification_returns_at_once(fdb, monkeypatch, tmp_path
                        f"https://pub.example/api/webhooks/twilio/status?call_id={new.id}&t={tok}")]
     with Session(eng) as s:
         assert tok not in " ".join(str(a.detail_json) for a in s.exec(select(AuditLog))) and not any(tok in c for c in clips)
-    assert len(clips) == 8 and any("9999" in c for c in clips)
+    assert len(clips) == 9 and any("9999" in c for c in clips) and voice.call_script("Test Co", "9999").cue in clips  # the cue is made before dialing
 
 
 def test_real_mode_refuses_a_number_off_the_allow_list(fdb, monkeypatch):

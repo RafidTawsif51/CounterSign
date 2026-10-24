@@ -256,12 +256,13 @@ class CallScript:
         self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account? Please say yes or no."
         self.clarify = f"Sorry, I need a yes or no. Did your company ask us to send payments to a new account ending {last4}?"
         self.hold = "Sure, take your time."
+        self.cue = "Please answer now."  # short clip played right before every listen, so nothing is spoken while we listen
         self.confirmed = "Thank you. I have noted your answer and will pass it to our accounts payable team. Goodbye."
         self.denied = "Thank you. We will not process that change and our controller has been alerted. Goodbye."
         self.unclear = "Thank you. I will pass this to a person on our accounts payable team, who will follow up. Goodbye."
 
     def all_texts(self) -> list[str]:
-        return [self.intro, self.question, self.retry, self.clarify, self.hold, self.confirmed, self.denied, self.unclear]
+        return [self.intro, self.question, self.retry, self.clarify, self.hold, self.cue, self.confirmed, self.denied, self.unclear]
 
     def closing(self, outcome: str) -> str:
         return {"confirmed": self.confirmed, "denied": self.denied}.get(outcome, self.unclear)
@@ -305,23 +306,33 @@ def _twiml(body: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
 
 
+# Speech Gather settings. No prompt is nested inside the Gather: the question is played BEFORE it, so the vendor answering early,
+# room noise or speaker echo can never cut the question off (Gather only starts listening after the short cue). `hints` and
+# speechModel improve recognition of a yes or no on a phone line.
+GATHER_HINTS = "yes, no, never, we did, we did not, didn't, correct, that's right, not us"
+
+
+def _gather(action_url: str) -> str:
+    return (f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" speechModel="phone_call" hints="{_esc(GATHER_HINTS)}" '
+            f'action="{_esc(action_url)}" method="POST"></Gather>')
+
+
 def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings: Optional[Settings] = None, first: bool = True) -> str:
-    """Intro (first pass only), then a speech Gather around the question (or the retry prompt). Silence redirects to retry_url."""
+    """Intro (first pass only) and the question (or the retry prompt) outside the Gather, then the cue, then an empty speech Gather.
+    Silence falls through to a Redirect to retry_url."""
     prompt = script.question if first else script.retry
-    gather = (
-        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
-        f"{_speak(prompt, settings)}</Gather>"
-    )
-    return _twiml((_speak(script.intro, settings) if first else "") + gather + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
+    return _twiml((_speak(script.intro, settings) if first else "") + _speak(prompt, settings) + _speak(script.cue, settings)
+                  + _gather(gather_url) + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
 
 
 def twiml_regather(script: CallScript, text: str, gather_url: str, end_url: str, settings: Optional[Settings] = None) -> str:
-    """Play `text` (clarifying or hold clip) inside a speech Gather; silence goes to end_url, which finishes the call as unclear."""
-    gather = (
-        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
-        f"{_speak(text, settings)}</Gather>"
-    )
-    return _twiml(gather + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
+    """Play `text` (clarifying or hold clip), then the cue, then an empty speech Gather; silence goes to end_url, which finishes the
+    call as unclear."""
+    return _twiml(_speak(text, settings) + _speak(script.cue, settings) + _gather(gather_url) + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
+
+
+def twiml_redirect(url: str) -> str:
+    return _twiml(f'<Redirect method="POST">{_esc(url)}</Redirect>')
 
 
 def twiml_close(text: str, settings: Optional[Settings] = None) -> str:
