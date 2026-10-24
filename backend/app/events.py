@@ -182,6 +182,21 @@ class RunReport(EventBase):
     findings: list[str]
 
 
+class RunUpdated(EventBase):
+    """Not in the spec. A call outcome that arrived after run.completed changed a payment of that run; these are the run's new
+    totals. Sent to the run channel and the global channel."""
+
+    type: Literal["run.updated"] = "run.updated"
+    run_id: str
+    payment_id: str
+    status: Literal["paid", "held", "blocked", "pending"]
+    paid: int
+    held: int
+    blocked: int
+    total_usd: float
+    blocked_usd: float
+
+
 class AttackLogged(EventBase):
     """Goes to the leaderboard channel, and to the run channel too when run_id is set."""
 
@@ -212,6 +227,7 @@ EVENT_MODELS: dict[str, type[EventBase]] = {
         DemoReset,
         RunCompleted,
         RunReport,
+        RunUpdated,
         AttackLogged,
     )
 }
@@ -237,9 +253,15 @@ def stored_messages(run_id: str) -> list[dict]:
         return [_wire(r.id, r.at, r.type, r.run_id, r.payload or {}) for r in rows]
 
 
+GLOBAL_CALL_EVENTS = (CallStarted, CallTranscript, CallOutcomeEvent)
+GLOBAL_AFTER_CALL_EVENTS = (PaymentPaid, PaymentHeld, PaymentBlocked)  # only for a payment that has a call
+CALL_PAYMENTS_MAX = 5000
+
+
 class Broadcaster:
     def __init__(self) -> None:
         self._subs: dict[str, set[asyncio.Queue]] = {}
+        self._call_payments: set[str] = set()  # payments that have had a call: their payment events also go to the global channel
 
     def subscribe(self, key: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(QUEUE_MAX)
@@ -274,6 +296,19 @@ class Broadcaster:
             self._publish(event.run_id, msg)
         if isinstance(event, (AttackLogged, AttackQueued, DemoReset)) and getattr(event, "source", None) != AttackSource.seeded:
             self._publish(LEADERBOARD, msg)  # (a seeded attack's events stay on its run channel)
+        # A call outcome arrives after the run's stream may be closed, so the call and the payment event it causes also go to the
+        # global channel (the one the leaderboard reads). So does run.updated.
+        if isinstance(event, DemoReset):
+            self._call_payments.clear()
+        if isinstance(event, GLOBAL_CALL_EVENTS):
+            if len(self._call_payments) >= CALL_PAYMENTS_MAX:
+                self._call_payments.clear()
+            self._call_payments.add(event.payment_id)
+            self._publish(LEADERBOARD, msg)
+        elif isinstance(event, GLOBAL_AFTER_CALL_EVENTS) and event.payment_id in self._call_payments:
+            self._publish(LEADERBOARD, msg)
+        elif isinstance(event, RunUpdated):
+            self._publish(LEADERBOARD, msg)
         return msg
 
 

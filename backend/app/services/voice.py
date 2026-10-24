@@ -176,14 +176,14 @@ async def tts_file(text: str, settings: Optional[Settings] = None) -> Path:
 # ---------------------------------------------------------------- the verification call script and its TwiML
 
 # Rules of the call (CLAUDE.md): say it is automated, only the last 4 digits of an account, accept no new details,
-# never confirm on the vendor's behalf. Trial accounts cannot record, so the intro says "transcribed", not "recorded".
+# never confirm on the vendor's behalf. California needs all-party consent, so the intro says the call is recorded and transcribed.
 
 
 class CallScript:
     """Every sentence the verification call can speak. All of them are generated as clips before dialing."""
 
     def __init__(self, vendor_name: str, last4: str) -> None:
-        self.intro = "Hi, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is transcribed."
+        self.intro = "Hi, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is recorded and transcribed."
         self.question = (
             f"We received a request to change where we send {vendor_name}'s payments, to an account ending {last4}. "
             "Did your company make this change? Please say yes or no."

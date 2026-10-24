@@ -596,6 +596,14 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
             await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=_pub_list(ld, [note] + reasons)))
             return
 
+    if result.in_progress:
+        # Real mode: the call was placed and is still going. The outcome on this result is a placeholder, not an answer. The payment
+        # stays held (the run's totals count it as held); the webhook applies the final outcome later (services/late.py).
+        note = CALL_IN_PROGRESS
+        _release(pid, run_id, None, PaymentStatus.held, note, "verification_in_progress")
+        stats.notes[pid] = note
+        await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=[note]))
+        return
     if result.outcome == CallOutcome.denied:
         stats.notes[pid] = "Vendor denied the bank change on the verification call"
         return  # verify blocked it and emitted payment.blocked
@@ -610,6 +618,9 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
         await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=[stats.notes[pid]]))
         return
     await _pay_existing(run_id, pid, stats, marks, ld, a)
+
+
+CALL_IN_PROGRESS = "verification call in progress"
 
 
 # ---------------------------------------------------------------- the run

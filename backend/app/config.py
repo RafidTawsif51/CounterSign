@@ -1,5 +1,7 @@
 from functools import lru_cache
+from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +28,11 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
+    # Webhook authentication. REQUIRE_CALL_TOKEN: each verification call has its own secret in its webhook URLs. Blank means on
+    # whenever MOCK_TWILIO is false. VALIDATE_SIGNATURES: strict mode, a valid X-Twilio-Signature is also required (off by
+    # default because trial accounts fetch TwiML without one).
+    twilio_require_call_token: Optional[bool] = None
+    twilio_validate_signatures: bool = False
     public_base_url: str = ""
 
     cartesia_api_key: str = ""
@@ -58,6 +65,16 @@ class Settings(BaseSettings):
     risk_cache_dir: str = "./.cache/risk"
 
     frontend_url: str = ""
+
+    @field_validator("twilio_require_call_token", mode="before")
+    @classmethod
+    def _blank_is_default(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @property
+    def call_token_required(self) -> bool:
+        """Per-call webhook secret: the setting if given, otherwise on whenever Twilio is real."""
+        return (not self.mock_twilio) if self.twilio_require_call_token is None else self.twilio_require_call_token
 
     @property
     def allowed_call_numbers_list(self) -> list[str]:

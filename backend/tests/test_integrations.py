@@ -464,7 +464,7 @@ def test_twiml_flow_first_retry_end(fdb):
 def test_only_last4_is_ever_spoken():
     sc = voice.call_script("Summit Concrete", "123456789")
     assert "6789" in sc.question and "12345" not in " ".join(sc.all_texts())
-    assert "automated" in sc.intro and "transcribed" in sc.intro and "recorded" not in " ".join(sc.all_texts())
+    assert "automated" in sc.intro and "recorded and transcribed" in sc.intro
 
 
 def test_twiml_uses_only_allowed_verbs(fdb):
@@ -482,7 +482,7 @@ def test_bad_signature_is_rejected_when_validation_is_on(fdb, monkeypatch):
     from twilio.request_validator import RequestValidator
 
     client, _ = fdb
-    monkeypatch.setenv("TWILIO_VALIDATE_SIGNATURES", "true")
+    monkeypatch.setattr(get_settings(), "twilio_validate_signatures", True)
     monkeypatch.setattr(get_settings(), "twilio_auth_token", "secret-token")
     for path in ("/api/voice/twiml/cal_t", "/api/voice/gather/cal_t", "/api/webhooks/twilio/status?call_id=cal_t"):
         assert client.post(path, data={"CallStatus": "no-answer"}, headers={"X-Twilio-Signature": "bad"}).status_code == 403
@@ -496,13 +496,13 @@ def test_bad_signature_is_rejected_when_validation_is_on(fdb, monkeypatch):
 def test_defaults_per_mode(fdb, monkeypatch):
     from app import integrations
 
-    monkeypatch.delenv("TWILIO_VALIDATE_SIGNATURES", raising=False)
-    monkeypatch.delenv("TWILIO_REQUIRE_CALL_TOKEN", raising=False)
+    monkeypatch.setattr(get_settings(), "twilio_validate_signatures", False)
+    monkeypatch.setattr(get_settings(), "twilio_require_call_token", None)
     assert integrations.call_token_required() is False and integrations.signature_validation_on() is False
     monkeypatch.setattr(get_settings(), "mock_twilio", False)
     assert integrations.call_token_required() is True  # protection is on by default in real mode
     assert integrations.signature_validation_on() is False  # trial TwiML fetches carry no signature
-    monkeypatch.setenv("TWILIO_REQUIRE_CALL_TOKEN", "false")
+    monkeypatch.setattr(get_settings(), "twilio_require_call_token", False)
     assert integrations.call_token_required() is False
 
 
@@ -510,8 +510,8 @@ def test_defaults_per_mode(fdb, monkeypatch):
 def real_hooks(fdb, monkeypatch, tmp_path):
     """Real mode webhooks: tokens required, with a token minted for the call cal_t."""
     monkeypatch.setattr(voice, "AUDIO_DIR", tmp_path / "audio")
-    monkeypatch.delenv("TWILIO_VALIDATE_SIGNATURES", raising=False)
-    monkeypatch.delenv("TWILIO_REQUIRE_CALL_TOKEN", raising=False)
+    monkeypatch.setattr(get_settings(), "twilio_validate_signatures", False)
+    monkeypatch.setattr(get_settings(), "twilio_require_call_token", None)
     monkeypatch.setattr(get_settings(), "mock_twilio", False)
     client, eng = fdb
     return client, eng, voice.new_call_token("cal_t")
@@ -552,7 +552,7 @@ def test_strict_signature_mode_still_requires_a_valid_signature(real_hooks, monk
     from twilio.request_validator import RequestValidator
 
     client, _, tok = real_hooks
-    monkeypatch.setenv("TWILIO_VALIDATE_SIGNATURES", "true")
+    monkeypatch.setattr(get_settings(), "twilio_validate_signatures", True)
     monkeypatch.setattr(get_settings(), "twilio_auth_token", "secret-token")
     path = f"/api/webhooks/twilio/status?call_id=cal_t&t={tok}"
     form = {"CallStatus": "ringing"}
@@ -590,7 +590,7 @@ def test_token_never_reaches_logs_events_or_the_database(real_hooks, caplog):
 
 def test_mock_mode_needs_no_token(fdb, monkeypatch):
     client, _ = fdb
-    monkeypatch.delenv("TWILIO_REQUIRE_CALL_TOKEN", raising=False)
+    monkeypatch.setattr(get_settings(), "twilio_require_call_token", None)
     assert client.post("/api/voice/twiml/cal_t").status_code == 200
 
 
@@ -695,7 +695,7 @@ def test_manual_call_route_in_mock_mode(fdb, monkeypatch):
     with Session(eng) as s:
         assert s.get(Payment, "pay_t").status == PaymentStatus.paid  # confirmed mock call pays through the guard
         types = [e.type for e in s.exec(select(Event).where(Event.run_id == "run_t").order_by(Event.at))]
-    assert types[0] == "call.started" and "call.outcome" in types and types[-1] == "payment.paid"
+    assert types[0] == "call.started" and "call.outcome" in types and types.index("payment.paid") > types.index("call.outcome")
     assert client.post("/api/verifications/pay_t/call").status_code == 409  # no longer held
     assert client.post("/api/verifications/nope/call").status_code == 404
 

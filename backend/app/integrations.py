@@ -2,7 +2,6 @@
 the manual call route, plus integration_status() for /api/system/status. Same pattern as dev.py."""
 
 import logging
-import os
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -71,20 +70,15 @@ def smoke_twiml_post() -> Response:
 NO_STORE = {"Cache-Control": "no-store"}
 
 
-def _flag(name: str, default: bool) -> bool:
-    raw = (os.getenv(name) or "").strip().lower()
-    return default if not raw else raw in ("1", "true", "yes", "on")
-
-
 def call_token_required() -> bool:
-    """TWILIO_REQUIRE_CALL_TOKEN (read at request time); unset means on whenever Twilio is real."""
-    return _flag("TWILIO_REQUIRE_CALL_TOKEN", not get_settings().mock_twilio)
+    """TWILIO_REQUIRE_CALL_TOKEN (config.py); blank means on whenever Twilio is real."""
+    return get_settings().call_token_required
 
 
 def signature_validation_on() -> bool:
     """TWILIO_VALIDATE_SIGNATURES: strict mode, a valid X-Twilio-Signature is also required. Off by default, because trial
     accounts fetch TwiML without a signature. When a signature IS sent it is still checked and the result is logged."""
-    return _flag("TWILIO_VALIDATE_SIGNATURES", False)
+    return get_settings().twilio_validate_signatures
 
 
 def _signature_ok(request: Request, form: dict) -> bool:
@@ -212,6 +206,9 @@ async def _run_mock_call(payment_id: str, answer: Optional[str]) -> None:
         if result.outcome == CallOutcome.confirmed and result.payment_status == PaymentStatus.pending:
             with Session(db.engine) as s:
                 await payments.pay_payment(s, payment_id)
+        from app.services import late
+
+        await late.after_outcome(payment_id)  # the manual call runs outside a payment run, like a webhook outcome
     except Exception as exc:  # noqa: BLE001
         log.warning("mock verification for %s failed: %s", payment_id, type(exc).__name__)
     finally:

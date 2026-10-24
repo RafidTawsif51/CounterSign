@@ -255,7 +255,7 @@ class MockCaller:
             outcome = SEEDED_OUTCOMES.get(payment_id) or (CallOutcome.denied if is_attack else CallOutcome.confirmed)
         agent_q = (
             f"Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. "
-            f"This call is recorded. We received a request to change where we send {vendor_name}'s payments, "
+            f"This call is recorded and transcribed. We received a request to change where we send {vendor_name}'s payments, "
             f"to an account ending {question_last4}. Did your company make this change?"
         )
         script = {
@@ -548,6 +548,11 @@ async def handle_outcome(
     elif follow_up == "retry":
         _spawn(_retry_call(payment.id, call.id))
     session.refresh(payment)
+    if pay:  # a webhook outcome, after the run's stream may be closed: finish the attack row, /ask cache and run totals
+        from app.services import late  # lazy: late imports run, which imports verify
+
+        await late.after_outcome(payment.id)
+        session.refresh(payment)
     return VerificationResult(
         payment_id=payment.id, call_id=call.id, outcome=outcome, payment_status=payment.status, attempts=attempts,
         needs_controller=needs_controller, contact_source=contact_source, number_flagged=number_flagged, transcript=transcript,
