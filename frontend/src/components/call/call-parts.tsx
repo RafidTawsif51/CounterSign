@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { CALL_LIMIT_S, numberTrust, type CallPhase, type ContactLike, type NumberTrust } from "@/lib/calls";
+import { CALL_LIMIT_S, numberTrust, type CallPhase, type ContactLike, type NumberFinding, type NumberTrust } from "@/lib/calls";
 import type { CallOutcome, ContactSource, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -112,6 +112,57 @@ export function useNumberTrust(vendorId: string | null, dialed: ContactLike | nu
   const contacts = data?.contacts ?? [];
   const contact = dialed ?? contacts.find((c) => c.source === (source ?? "on_file")) ?? null;
   return numberTrust(contact, contacts);
+}
+
+const CONFIDENCE_LABEL = { high: "high confidence", medium: "medium confidence", low: "low confidence" } as const;
+
+/**
+ * "Number found by Apify Vendor Contact Verifier": the page of the vendor's own website that shows the number, how sure the
+ * Actor is and whether the website agreed with the number on file. When it found no usable number, or Apify did not answer,
+ * it says so and why the on-file number was used. `compact` is the one-line form for the board's call strip, where a link
+ * would sit inside a link.
+ */
+export function NumberFindingLine({ finding, compact = false }: { finding: NumberFinding | null; compact?: boolean }) {
+  if (!finding) return null;
+  const agree = finding.sourcesAgree == null ? null : finding.sourcesAgree ? "same as the number on file" : "differs from the number on file";
+  if (compact) {
+    return (
+      <p className="mt-0.5 truncate text-xs text-ink-muted">
+        {finding.found
+          ? `Found by Apify Vendor Contact Verifier, ${finding.confidence ? CONFIDENCE_LABEL[finding.confidence] : "confidence unknown"}${agree ? `, ${agree}` : ""}`
+          : (finding.holdReasons[0] ?? "No independent number from the vendor's website")}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 border-t border-rule pt-2 text-sm">
+      <p className="font-medium">
+        {finding.found ? "Number found by Apify Vendor Contact Verifier" : "Apify Vendor Contact Verifier: no number from the vendor's website"}
+      </p>
+      {finding.found && (
+        <p className="mt-0.5 text-ink-muted">
+          {finding.sourceUrl && (
+            <>
+              <a href={finding.sourceUrl} target="_blank" rel="noreferrer" className="figure break-all text-accent underline-offset-4 hover:underline">
+                {shortUrl(finding.sourceUrl)}
+              </a>
+              {", "}
+            </>
+          )}
+          {finding.confidence ? CONFIDENCE_LABEL[finding.confidence] : "confidence unknown"}
+          {finding.agreement && `, the website's pages ${finding.agreement === "consistent" ? "agree" : finding.agreement}`}
+          {agree && `, ${agree}`}
+        </p>
+      )}
+      {finding.holdReasons.length > 0 && (
+        <ul className="mt-1 list-disc pl-5 text-ink-muted">
+          {finding.holdReasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /** `summitconcrete.com/contact` from `https://www.summitconcrete.com/contact`. */

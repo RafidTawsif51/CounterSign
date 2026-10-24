@@ -107,6 +107,13 @@ class CallStarted(EventBase):
     run_id: str
     payment_id: str
     contact_source: ContactSource
+    # Where the number came from. contact_source is on_file, website or listing; when the vendor's website is the proof, source_url is
+    # the page that shows the number and confidence and agreement are what the Apify Vendor Contact Verifier said about it.
+    source_url: Optional[str] = None
+    confidence: Optional[str] = None  # high, medium or low
+    agreement: Optional[str] = None  # consistent, conflicting or none_found
+    sources_agree: Optional[bool] = None  # the website and the on-file number are the same number; null when the website gave no number
+    hold_reasons: list[str] = []  # why the call went where it did, for example "contact sources disagree"
 
 
 class CallTranscript(EventBase):

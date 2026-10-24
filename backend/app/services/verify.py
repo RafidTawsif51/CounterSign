@@ -23,6 +23,7 @@ import asyncio
 import contextvars
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Protocol
 
@@ -34,6 +35,7 @@ from app.audit import write_audit
 from app.config import get_settings
 from app.db import engine
 from app.models import (
+    new_id,
     AuditLog,
     Attack,
     AttackResult,
@@ -137,6 +139,86 @@ def select_number(
     if _when(best.last_verified, best.first_seen) <= independent.found_at:
         return best.phone, ContactSource.on_file, True, best
     return independent.phone, ContactSource(independent.source), True, None
+
+
+@dataclass
+class NumberChoice:
+    """Which number the verification call uses, and what the independent check (Apify) said about it."""
+
+    phone: str  # the verified number, fictional on the hosted demo sites; this is what evidence, /ask, payment detail and events show
+    source: ContactSource
+    flagged: bool  # on-file and independent numbers disagreed
+    contact: Optional[VendorContact]  # the existing on-file row the call is attached to, if the on-file number is used
+    record: Optional[contacts.IndependentContact]  # the independent number to store as a website contact, if one was found
+    hold_reasons: list[dict] = field(default_factory=list)  # [{reason, detail, evidence_id}]
+    lookup: Optional[contacts.LookupResult] = None
+    on_file_ending: Optional[str] = None
+    found_ending: Optional[str] = None
+
+    @property
+    def source_url(self) -> Optional[str]:
+        return self.record.source_url if self.record and self.source == ContactSource.website else None
+
+
+def _ending(phone: Optional[str]) -> Optional[str]:
+    return _digits(phone)[-4:] if phone else None
+
+
+def choose_number(on_file: list[VendorContact], lookup: contacts.LookupResult) -> NumberChoice:
+    """The spec's number rule. Take the most recently verified on-file contact from before the change and cross-check it against the
+    Actor's primary_phone (never a number from the request).
+
+      match                 use it, with source website and the Actor's source_url as proof
+      differ                prefer the one verified longest ago, flag it, hold reason "contact sources disagree"
+      low / none_found      use the on-file number, hold reason says the independent check found nothing usable
+      Apify failed          use the on-file number, hold reason "independent contact check unavailable"
+
+    A hold reason never moves money or removes a hold: the payment is already held, these only say why the call went where it did."""
+    best = max(on_file, key=lambda c: _when(c.last_verified, c.first_seen), default=None)
+    ind = lookup.contact if lookup.status == "found" else None
+    reasons: list[dict] = []
+
+    def reason(text: str, detail: str = "") -> None:
+        reasons.append({"reason": text, "detail": detail, "evidence_id": new_id("evd")})
+
+    if ind is None:
+        if best is None:
+            raise ValueError("no independent phone number available")
+        if lookup.status == "unavailable":
+            reason("independent contact check unavailable", f"Apify did not answer ({lookup.error or 'error'}); the on-file number is used.")
+        elif lookup.status == "no_website":
+            reason("independent contact check not possible", "The vendor record has no website_url; the on-file number is used.")
+        else:
+            reason("independent contact check found no usable number",
+                   f"agreement {lookup.agreement or 'none_found'}, confidence {lookup.confidence or 'low'}: {lookup.confidence_reason or 'nothing found'}; the on-file number is used.")
+        return NumberChoice(best.phone, ContactSource.on_file, False, best, None, reasons, lookup, _ending(best.phone), None)
+
+    phone, source, flagged, row = select_number(on_file, ind)
+    if best is not None and not flagged:
+        source = ContactSource.website  # the website agrees with the on-file number: the website is the proof
+    if flagged:
+        reason("contact sources disagree", f"On file the number ends {_ending(best.phone) if best else '?'}, the vendor's website shows one ending {_ending(ind.phone)}; "
+                                           "the one verified longest ago is used.")
+    return NumberChoice(phone, source, flagged, row if source == ContactSource.on_file else None, ind, reasons, lookup,
+                        _ending(best.phone) if best else None, _ending(ind.phone))
+
+
+def route_number(phone: str) -> tuple[str, bool]:
+    """(number to dial, routed). DEMO_CALL_ROUTES swaps a verified fictional number for a team phone, at dial time only."""
+    target = get_settings().demo_call_route_map.get(phone)
+    return (target, True) if target else (phone, False)
+
+
+def independent_contact_info(choice: NumberChoice) -> dict:
+    """What payment detail, /ask and the audit log say about the number. Endings only: never a full number."""
+    lk = choice.lookup
+    return {
+        "status": lk.status if lk else None, "number_source": choice.source.value, "source_url": choice.source_url or (lk.source_url if lk else None),
+        "agreement": lk.agreement if lk else None, "confidence": lk.confidence if lk else None, "confidence_reason": lk.confidence_reason if lk else None,
+        "actor_run_id": lk.actor_run_id if lk else None, "cached": lk.cached if lk else False, "error": lk.error if lk else None,
+        "number_ending": _ending(choice.phone), "on_file_ending": choice.on_file_ending, "website_ending": choice.found_ending,
+        "sources_agree": (not choice.flagged) if choice.record is not None else None, "hold_reasons": choice.hold_reasons,
+    }
 
 
 # ---------------------------------------------------------------- callers
@@ -333,13 +415,15 @@ def _reject_candidate(session: Session, vendor_id: str, account_id: Optional[str
 
 
 def _store_contact(session: Session, vendor_id: str, c: contacts.IndependentContact) -> VendorContact:
-    row = VendorContact(
-        vendor_id=vendor_id,
-        phone=c.phone,
-        source=ContactSource(c.source),
-        source_url=c.source_url,
-        first_seen=c.found_at,
-    )
+    """Record the number the vendor's website shows (phone, source, source_url, last_verified). An existing contact with the same
+    number is updated, so a repeat check does not pile up rows. Only this module writes vendor_contacts."""
+    source = ContactSource(c.source)
+    row = next((r for r in session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor_id, VendorContact.source == source))
+                if _digits(r.phone) == _digits(c.phone)), None)
+    if row is None:
+        row = VendorContact(vendor_id=vendor_id, phone=c.phone, source=source, source_url=c.source_url, first_seen=c.found_at, last_verified=c.found_at)
+    else:
+        row.source_url, row.last_verified = c.source_url, c.found_at
     session.add(row)
     return row
 
@@ -604,29 +688,55 @@ async def _prepare(session: Session, payment_id: str):
         raise ValueError("invoice has no remittance details to verify")
     message = session.get(Message, invoice.message_id) if invoice.message_id else None
 
-    # Pick the number. Never from the request.
+    # Pick the number. Never from the request: the lookup uses the vendor's own website_url from our records, nothing from the email or invoice.
     on_file = list(session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id, VendorContact.source == ContactSource.on_file)))
     try:
-        independent = await contacts.lookup_phone(vendor)
-    except NotImplementedError:  # real Apify lookup not built: fall back to the on-file number alone
-        independent = None
-    phone, source, flagged, existing = select_number(on_file, independent)
-    assert_callable(phone)  # raises before anything is stored or dialed
-    if existing is None:
-        existing = _store_contact(session, vendor.id, independent)  # type: ignore[arg-type]
+        lookup = await contacts.lookup(vendor)
+    except Exception as exc:  # noqa: BLE001  (the independent check must never stop or change the verification)
+        log.warning("independent contact lookup failed: %s", type(exc).__name__)
+        contacts.health.failed(type(exc).__name__)
+        lookup = contacts.LookupResult(status="unavailable", error=type(exc).__name__, checked_at=utcnow())
+    choice = choose_number(on_file, lookup)
+    dial, routed = route_number(choice.phone)
+    assert_callable(dial)  # raises before anything is stored or dialed; the allow list applies to the routed number too
+    contact = choice.contact
+    if choice.record is not None:
+        stored = _store_contact(session, vendor.id, choice.record)
+        contact = contact or stored
+        write_audit("vendor_contact", stored.id if stored.id else vendor.id, "agent", "contact_recorded",
+                    {"vendor_id": vendor.id, "source": stored.source.value, "source_url": stored.source_url, "number_ending": _ending(stored.phone),
+                     "confidence": lookup.confidence, "agreement": lookup.agreement}, session=session)
+    info = independent_contact_info(choice)
+    audit = write_audit("payment", payment.id, "agent", "independent_contact_checked", info, session=session)
+    info["audit_id"] = audit.id
     prior_no_answers = len(
         session.exec(select(VerificationCall).where(VerificationCall.payment_id == payment.id, VerificationCall.outcome == CallOutcome.no_answer)).all()
     )
-    call = VerificationCall(payment_id=payment.id, contact_id=existing.id)
+    call = VerificationCall(payment_id=payment.id, contact_id=contact.id)
     session.add(call)
     session.commit()
-    return payment, vendor, rem, message, phone, source, flagged, call, prior_no_answers
+    return payment, vendor, rem, message, choice.phone, choice.source, choice.flagged, call, prior_no_answers, choice, dial, routed, info
+
+
+def _call_started(payment: Payment, source: ContactSource, choice: NumberChoice) -> "ev.CallStarted":
+    lk = choice.lookup
+    return ev.CallStarted(run_id=payment.run_id, payment_id=payment.id, contact_source=source, source_url=choice.source_url,
+                          confidence=lk.confidence if lk else None, agreement=lk.agreement if lk else None,
+                          sources_agree=(not choice.flagged) if choice.record is not None else None,
+                          hold_reasons=[r["reason"] for r in choice.hold_reasons])
+
+
+def _audit_routing(session: Session, payment_id: str, call_id: str, dial: str, phone: str, *, delivered: bool) -> None:
+    """No part of the team phone is written: the audit trail is shown in payment detail, which shows the fictional number only."""
+    write_audit("payment", payment_id, "system",
+                "demo routing: call delivered to team phone" if delivered else "demo routing: simulated call, nothing was dialed",
+                {"call_id": call_id, "verified_number_ending": _ending(phone)}, session=session)
 
 
 async def begin_real_call(session: Session, payment_id: str) -> VerificationResult:
     """Place the real call and return at once. Clips are generated first (Twilio waits 5 s for TwiML); the answer comes back
     through the webhooks in app/integrations.py and is applied by handle_outcome."""
-    payment, vendor, rem, _msg, phone, source, flagged, call, prior = await _prepare(session, payment_id)
+    payment, vendor, rem, _msg, phone, source, flagged, call, prior, choice, dial, routed, _info = await _prepare(session, payment_id)
     s = get_settings()
     base = s.public_base_url.rstrip("/")
     script = voice.call_script(vendor.name, rem["account_last4"])
@@ -635,15 +745,17 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
             await voice.tts_clip(text, s)
         token = voice.new_call_token(call.id)  # per-call webhook secret, kept in a file; never logged or stored in an event
         sid = await voice.place_call(
-            phone, voice.with_token(f"{base}/api/voice/twiml/{call.id}", token),
+            dial, voice.with_token(f"{base}/api/voice/twiml/{call.id}", token),
             voice.with_token(f"{base}/api/webhooks/twilio/status?call_id={call.id}", token), s)
     except Exception:
         session.delete(call)  # nothing was dialed: leave no half-open call behind and let the caller see the error
         session.commit()
         raise
     write_audit("payment", payment.id, "agent", "verification_call_placed", {"call_id": call.id, "call_sid": sid, "contact_source": source.value, "number_flagged": flagged}, session=session)
+    if routed:
+        _audit_routing(session, payment.id, call.id, dial, phone, delivered=True)
     session.commit()
-    await ev.emit(ev.CallStarted(run_id=payment.run_id, payment_id=payment.id, contact_source=source))
+    await ev.emit(_call_started(payment, source, choice))
     return VerificationResult(
         payment_id=payment.id, call_id=call.id, outcome=CallOutcome.unclear, payment_status=payment.status, attempts=prior + 1,
         needs_controller=False, contact_source=source, number_flagged=flagged, transcript=[], in_progress=True,
@@ -659,9 +771,12 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
     if not (s.mock_twilio or s.mock_cartesia):
         return await begin_real_call(session, payment_id)  # real mode never blocks the payment run
 
-    payment, vendor, rem, message, phone, source, flagged, call, _prior = await _prepare(session, payment_id)
+    payment, vendor, rem, message, phone, source, flagged, call, _prior, choice, dial, routed, _info = await _prepare(session, payment_id)
     run_id = payment.run_id
-    await ev.emit(ev.CallStarted(run_id=run_id, payment_id=payment.id, contact_source=source))
+    if routed:
+        _audit_routing(session, payment.id, call.id, dial, phone, delivered=False)
+        session.commit()
+    await ev.emit(_call_started(payment, source, choice))
 
     # Simulated call.
     outcome, transcript = await get_caller().call(

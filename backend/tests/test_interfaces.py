@@ -301,10 +301,14 @@ def test_contacts_mock_without_a_demo_phone_uses_the_fiction_number(monkeypatch)
     assert run(contacts.lookup_phone(v)).phone == contacts.MOCK_PHONE
 
 
-def test_contacts_real_flag_not_built(monkeypatch):
-    monkeypatch.setattr(contacts, "get_settings", lambda: Settings(mock_apify=False))
-    with pytest.raises(NotImplementedError):
-        run(contacts.lookup_phone(mkvendor()))
+def test_contacts_real_flag_without_a_token_is_unavailable_not_an_error(monkeypatch):
+    monkeypatch.setattr(contacts, "get_settings", lambda: Settings(mock_apify=False, apify_token=""))
+    contacts.health.reset()
+    v = mkvendor()
+    v.website_url = "https://pages.example/acme/"
+    result = run(contacts.lookup(v))
+    assert result.status == "unavailable" and result.contact is None and contacts.health.degraded
+    contacts.health.reset()
 
 
 # ================================================================ verify
@@ -347,7 +351,7 @@ def test_verify_denied_blocks_and_marks_fraud():
     w = world(attack=True)
     res = run(verify.start_verification(w["payment"]))
     assert res.outcome == CallOutcome.denied and res.payment_status == PaymentStatus.blocked
-    assert res.contact_source.value == "on_file" and not res.number_flagged
+    assert res.contact_source.value == "website" and not res.number_flagged  # the website agrees with the on-file number: the website is the proof
     assert res.transcript[0]["speaker"] == "agent" and "automated" in res.transcript[0]["text"] and "This call is being transcribed." in res.transcript[0]["text"] and "recorded" not in res.transcript[0]["text"]
     assert "7781" in res.transcript[0]["text"] and not re.search(r"\d{5,}", " ".join(t["text"] for t in res.transcript))
     with Session(engine) as s:

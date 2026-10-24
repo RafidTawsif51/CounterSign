@@ -99,8 +99,24 @@ def main(argv: list[str]) -> int:
             print(f"Emails: classified {len(msgs)} messages behind the open invoices")
         print(f"Injection classifier: {injection.classifier.calls} live calls, {injection.classifier.errors} errors")
         print(f"Urgency classifier: {pressure_classifier.calls} live calls, {pressure_classifier.errors} errors")
+    _warm_contacts(settings)
     print(f"Done in {time.perf_counter() - started:.1f}s")
     return 0 if failed == 0 else 2
+
+
+def _warm_contacts(settings) -> None:
+    """Run the independent phone lookup (our Vendor Contact Verifier Actor on Apify) for the demo vendor, so the first demo call starts fast.
+    The result is cached for one hour (app/services/contacts.py), so run this shortly before the demo; the server also does it at start."""
+    import asyncio
+
+    from app.services import contacts
+
+    if settings.mock_apify:
+        print("MOCK_APIFY is true: the independent contact lookup is mocked, nothing to warm.")
+        return
+    t = time.perf_counter()
+    result = asyncio.run(contacts.warm())
+    print(f"Independent contact lookup (Apify): {result} in {time.perf_counter() - t:.1f}s, cached for {contacts.CACHE_TTL_SECONDS // 60} minutes in {settings.contacts_cache_dir}")
 
 
 if __name__ == "__main__":

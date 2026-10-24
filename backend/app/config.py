@@ -44,6 +44,8 @@ class Settings(BaseSettings):
 
     nessie_api_key: str = ""
     apify_token: str = ""
+    # The published Vendor Contact Verifier Actor ("<username>/<actor-name>" or its id). See docs/apify.md.
+    apify_actor_id: str = "earnest_grill/vendor-contact-verifier"
     crs_api_key: str = ""
 
     database_url: str = "sqlite:///./countersign.db"
@@ -51,6 +53,10 @@ class Settings(BaseSettings):
     demo_vendor_phone: str = ""
     # Comma separated. Kept as a string because pydantic-settings parses list env vars as JSON.
     allowed_call_numbers: str = ""
+    # Demo routing: "+14155550100=+1XXXXXXXXXX,..." The hosted vendor sites show fictional 555 numbers only. At dial time, and only
+    # then, a verified number that has a route here is replaced by the routed number (a team phone). The routed number must be on
+    # ALLOWED_CALL_NUMBERS too. Everything else (evidence, /ask, payment detail, events) shows the fictional number.
+    demo_call_routes: str = ""
 
     bounty_webhook_secret: str = ""
     # Required whenever BOUNTY_WEBHOOK_SECRET is set (the inbox is live): GET /api/bounty/queue and POST /api/bounty/{id}/moderate need the
@@ -60,6 +66,9 @@ class Settings(BaseSettings):
 
     # Where uploaded invoice PDFs are saved (generated filenames only).
     upload_dir: str = "./uploads"
+
+    # Independent contact lookups (Apify) keyed by vendor, valid for one hour.
+    contacts_cache_dir: str = "./.cache/contacts"
 
     # Extraction results keyed by SHA-256 of the document. Survives demo resets; rebuild with
     # `python -m scripts.warm_cache` after a fresh deploy.
@@ -89,6 +98,19 @@ class Settings(BaseSettings):
     @property
     def allowed_call_numbers_list(self) -> list[str]:
         return [n.strip() for n in self.allowed_call_numbers.split(",") if n.strip()]
+
+    @property
+    def demo_call_route_map(self) -> dict[str, str]:
+        """{fictional E.164: team phone E.164}. Malformed pairs are ignored."""
+        import re
+
+        out: dict[str, str] = {}
+        for pair in self.demo_call_routes.split(","):
+            src, _, dst = pair.partition("=")
+            src, dst = src.strip(), dst.strip()
+            if re.fullmatch(r"\+[1-9]\d{6,14}", src) and re.fullmatch(r"\+[1-9]\d{6,14}", dst):
+                out[src] = dst
+        return out
 
     @property
     def cors_origins(self) -> list[str]:

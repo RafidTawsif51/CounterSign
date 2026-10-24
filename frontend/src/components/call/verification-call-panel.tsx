@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck } from "lucide-react";
-import { CallMark, LimitLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, shortUrl, useElapsed } from "@/components/call/call-parts";
+import { CallMark, LimitLine, NumberFindingLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, shortUrl, useElapsed } from "@/components/call/call-parts";
 import { iconProps } from "@/components/shared/icon";
 import { useEvidenceSource } from "@/components/payment/evidence";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -73,6 +73,7 @@ function TrustedNumber({ call, trust }: { call: CallView; trust: NumberTrust }) 
       {trust.crossCheck && !trust.crossCheck.matches && (
         <p className="mt-1 text-sm text-ink-muted">The sources disagree, so the agent dials the number verified longest ago and flags it.</p>
       )}
+      <NumberFindingLine finding={call.finding} />
     </div>
   );
 }

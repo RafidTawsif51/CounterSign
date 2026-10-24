@@ -37,7 +37,7 @@ from app.models import (
     VerificationCall,
 )
 from app.services import payments, risk, run, verify
-from app.services.vendors import call_view, identity_for
+from app.services.vendors import call_view, identity_for, mask_phone
 
 router = APIRouter()
 
@@ -127,6 +127,21 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
         reasons += [f"{s['name']}: {s['detail']}" for s in ras.signals_json if s.get("weight", 0) > 0 and s["name"] != "vendor_identity_check"][:4]
     ident = await identity_for(session, vendor) if vendor else None
 
+    # The independent number check (Apify Vendor Contact Verifier) that picked or confirmed the number for the verification call.
+    check = next((a for a in reversed(audit) if a.action == "independent_contact_checked"), None)
+    independent = None
+    if check is not None:
+        d = check.detail_json or {}
+        dialed = contacts.get(calls[-1].contact_id) if calls and calls[-1].contact_id else None
+        independent = {
+            "provider": "Apify Vendor Contact Verifier", "evidence_id": check.id, "checked_at": check.at, "status": d.get("status"),
+            "number": mask_phone(dialed.phone) if dialed else None, "number_source": d.get("number_source"), "source_url": d.get("source_url"),
+            "confidence": d.get("confidence"), "agreement": d.get("agreement"), "confidence_reason": d.get("confidence_reason"),
+            "sources_agree": d.get("sources_agree"), "cached": d.get("cached"), "actor_run_id": d.get("actor_run_id"),
+            "hold_reasons": d.get("hold_reasons") or [],
+        }
+        reasons += [h["reason"] for h in independent["hold_reasons"] if h.get("reason") not in reasons]
+
     can_approve, approve_blocked = True, None
     if pay.status != PaymentStatus.held:
         can_approve, approve_blocked = False, f"payment is {pay.status.value}"
@@ -161,6 +176,7 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
                                 "page": f.page, "bbox": f.bbox_json, "page_width": f.page_width, "page_height": f.page_height} for f in findings],
         "identity": ident,
         "calls": [call_view(c, contacts.get(c.contact_id) if c.contact_id else None) for c in calls],
+        "independent_contact": independent,
         "audit": [{"id": a.id, "at": a.at, "entity": a.entity, "entity_id": a.entity_id, "actor": a.actor.value, "action": a.action, "detail": a.detail_json} for a in audit],
         "actions": {"can_approve": can_approve, "approve_blocked_reason": approve_blocked, "can_reject": pay.status == PaymentStatus.held and not run.is_active(pay.run_id)},
     }

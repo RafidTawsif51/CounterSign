@@ -7,23 +7,34 @@
     "businesses": {
       "title": "Businesses",
       "type": "array",
-      "description": "The businesses to check, each an object with name (how you know the business) and website_url (its own website, a full https:// URL taken from your vendor records). Only the host of each website_url is crawled.",
+      "description": "The businesses to check, each an object with name (how you know the business) and website_url (its own website, a full https:// URL taken from your vendor records). Only pages on the host of each website_url and under its folder are crawled.",
       "editor": "json",
       "items": {
         "type": "object"
       },
+      "default": [
+        {
+          "name": "Summit Concrete",
+          "website_url": "https://aayushswami123.github.io/Countersign/summit-concrete/"
+        }
+      ],
       "prefill": [
-        { "name": "Example Concrete Co", "website_url": "https://example.com/" }
+        {
+          "name": "Summit Concrete",
+          "website_url": "https://aayushswami123.github.io/Countersign/summit-concrete/"
+        }
       ],
       "example": [
-        { "name": "Summit Concrete", "website_url": "https://vendors.example.org/summit-concrete/" },
-        { "name": "Northside Rentals", "website_url": "https://vendors.example.org/northside-rentals/" }
+        {
+          "name": "Summit Concrete",
+          "website_url": "https://aayushswami123.github.io/Countersign/summit-concrete/"
+        }
       ]
     },
     "maxPagesPerSite": {
       "title": "Max pages per site",
       "type": "integer",
-      "description": "The most pages requested on one website: the homepage, the extra paths and the same-host links found on the pages. A request that fails (a 404) counts too. Lower it for a quick check.",
+      "description": "The most pages requested on one website: the homepage, the extra paths and the in-scope links found on the pages (same host, inside the folder). A request that fails (a 404) counts too. Lower it for a quick check.",
       "default": 10,
       "minimum": 1,
       "maximum": 30,
@@ -32,14 +43,26 @@
     "extraPaths": {
       "title": "Extra paths",
       "type": "array",
-      "description": "Pages to try besides the homepage, written as paths. They are read inside the website_url: for https://host/shop/ the path /contact means https://host/shop/contact. A path that does not exist is skipped.",
+      "description": "Pages to try besides the homepage, written as paths. They are read inside the folder of website_url: for https://host/shop/ the path /contact means https://host/shop/contact. A path that does not exist, or that would leave the folder, is skipped.",
       "editor": "stringList",
-      "default": ["/contact", "/contact-us", "/about"],
-      "prefill": ["/contact", "/contact-us", "/about"],
+      "default": [
+        "/contact",
+        "/contact-us",
+        "/about"
+      ],
+      "prefill": [
+        "/contact",
+        "/contact-us",
+        "/about"
+      ],
       "items": {
         "type": "string"
       },
-      "example": ["/contact", "/contact-us", "/about"]
+      "example": [
+        "/contact",
+        "/contact-us",
+        "/about"
+      ]
     },
     "requestTimeoutSecs": {
       "title": "Request timeout (seconds)",
@@ -52,5 +75,7 @@
       "example": 15
     }
   },
-  "required": ["businesses"]
+  "required": [
+    "businesses"
+  ]
 }

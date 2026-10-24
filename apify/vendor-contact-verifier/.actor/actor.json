@@ -3,9 +3,13 @@
   "name": "vendor-contact-verifier",
   "title": "Vendor Contact Verifier",
   "description": "Find a vendor's real phone number on the vendor's own website, with proof of where it was found, before you call to confirm a bank change. Built for payment fraud callbacks.",
-  "version": "0.1",
+  "version": "0.2",
   "buildTag": "latest",
-  "categories": ["BUSINESS", "LEAD_GENERATION", "AUTOMATION"],
+  "categories": [
+    "BUSINESS",
+    "LEAD_GENERATION",
+    "AUTOMATION"
+  ],
   "dockerfile": "./Dockerfile",
   "readme": "../README.md",
   "input": "./input_schema.json",
@@ -14,5 +18,6 @@
     "dataset": "./dataset_schema.json"
   },
   "minMemoryMbytes": 256,
-  "maxMemoryMbytes": 1024
+  "maxMemoryMbytes": 1024,
+  "changelog": "../CHANGELOG.md"
 }

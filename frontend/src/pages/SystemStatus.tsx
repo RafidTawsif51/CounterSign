@@ -10,6 +10,7 @@ const MODE: Record<ComponentMode, { label: string; variant: "accent" | "neutral"
   real: { label: "Real", variant: "accent" },
   simulated: { label: "Simulated", variant: "neutral" },
   mock: { label: "Mock", variant: "neutral" },
+  degraded: { label: "Degraded", variant: "neutral" },
   down: { label: "Down", variant: "neutral" },
 };
 

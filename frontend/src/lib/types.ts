@@ -243,6 +243,14 @@ export interface CallStartedEvent extends EventBase {
   type: "call.started";
   payment_id: string;
   contact_source: ContactSource;
+  /** The page of the vendor's own website that shows the number: Apify Vendor Contact Verifier's proof. Null for an on-file number alone. */
+  source_url?: string | null;
+  confidence?: "high" | "medium" | "low" | null;
+  agreement?: "consistent" | "conflicting" | "none_found" | null;
+  /** The website's number and the number on file are the same number. Null when the website gave no usable number. */
+  sources_agree?: boolean | null;
+  /** Why the call went where it did, for example "contact sources disagree". They never release a hold. */
+  hold_reasons?: string[];
 }
 export interface CallTranscriptEvent extends EventBase {
   type: "call.transcript";
@@ -365,8 +373,35 @@ export interface PaymentDetail {
   audit: AuditLogEntry[];
   /** What the controller may do now, decided by the API. Absent in mock mode. */
   actions?: PaymentActions;
+  /** What the independent number check (Apify Vendor Contact Verifier) found for the verification call. Absent before a call is prepared. */
+  independent_contact?: IndependentContact | null;
   /** The account Approve would pay. Never the account the invoice asked for. */
   approve_pays?: VendorBankAccount | null;
+}
+
+export interface HoldReason {
+  reason: string;
+  detail: string;
+  evidence_id: string;
+}
+
+export interface IndependentContact {
+  provider: string;
+  evidence_id: string;
+  checked_at: ISODateTime;
+  /** found: a usable number. not_usable: none, conflicting or low confidence. unavailable: Apify failed. no_website: nothing to check. */
+  status: "found" | "not_usable" | "unavailable" | "no_website";
+  /** The number the call used, masked. */
+  number: string | null;
+  number_source: ContactSource | null;
+  source_url: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  agreement: "consistent" | "conflicting" | "none_found" | null;
+  confidence_reason: string | null;
+  sources_agree: boolean | null;
+  cached: boolean | null;
+  actor_run_id: string | null;
+  hold_reasons: HoldReason[];
 }
 
 export interface PaymentActions {
@@ -617,7 +652,7 @@ export interface RedTeamResults {
   median_run_seconds: { baseline: number; countersign: number };
 }
 
-export type ComponentMode = "real" | "simulated" | "mock" | "down";
+export type ComponentMode = "real" | "simulated" | "mock" | "degraded" | "down";
 
 export interface SystemComponentStatus {
   name: string;

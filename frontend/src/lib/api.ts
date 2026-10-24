@@ -27,6 +27,7 @@ import type {
   VendorContact,
   AuditLogEntry,
   PaymentActions,
+  IndependentContact,
   StartRunResponse,
   SystemComponentStatus,
   VendorSummary,
@@ -143,6 +144,7 @@ interface BackendPayment {
     approve_pays: BackendAccount | null;
   };
   actions: PaymentActions;
+  independent_contact: IndependentContact | null;
   invoice: {
     id: string;
     number: string | null;
@@ -197,6 +199,7 @@ function adaptPayment(b: BackendPayment): PaymentDetail {
     calls: b.calls.map((c) => ({ ...c, contact_id: c.contact?.id ?? null, contact: c.contact && ({ ...c.contact, vendor_id: vendorId, first_seen: "", last_verified: null } as VendorContact) })),
     audit: b.audit.map(({ detail, ...a }) => ({ ...a, detail_json: detail })),
     actions: b.actions,
+    independent_contact: b.independent_contact,
     approve_pays: account(p.approve_pays),
   };
 }

@@ -311,7 +311,7 @@ def test_payment_detail_has_every_section_and_orders_the_audit_trail(env):
         s.add(AuditLog(id="aud_aaa", at=utcnow().replace(year=2020), entity="payment", entity_id=pid, actor=AuditActor.agent, action="early"))
         s.commit()
     d = client.get(f"/api/payments/{pid}").json()
-    assert set(d) == {"payment", "invoice", "vendor", "message", "risk", "injection_findings", "identity", "calls", "audit", "actions"}
+    assert set(d) == {"payment", "invoice", "vendor", "message", "risk", "injection_findings", "identity", "calls", "audit", "actions", "independent_contact"}
     assert d["vendor"]["id"] == "ven_northside" and d["identity"] is not None and d["message"]["body"].startswith("Maria")
     actions = [a["action"] for a in d["audit"]]
     assert actions[0] == "early" and actions[-1] == "late"

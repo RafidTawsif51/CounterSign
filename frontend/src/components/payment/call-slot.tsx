@@ -13,7 +13,9 @@ export function CallSlot({ detail }: { detail: PaymentDetail }) {
   const { allEvents: events } = useCurrentRun();
   const record = detail.calls.at(-1);
   const live = useMemo(() => foldCalls(events).find((c) => c.paymentId === detail.payment.id), [events, detail.payment.id]);
-  const call = live ?? callFromDetail(detail);
+  const stored = callFromDetail(detail);
+  // A live call card from before the number check existed has no finding; the stored record does.
+  const call = live ? { ...live, finding: live.finding ?? stored?.finding ?? null } : stored;
   const trust = useNumberTrust(detail.vendor.id, record?.contact ?? null, call?.contactSource ?? null);
   const source = useEvidenceSource([record?.id]);
 
