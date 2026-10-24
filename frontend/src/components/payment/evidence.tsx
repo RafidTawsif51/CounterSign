@@ -37,6 +37,7 @@ export function EvidenceRef({ id, className }: { id: string | null | undefined; 
       onMouseLeave={() => setActive(null)}
       onFocus={() => setActive(id)}
       onBlur={() => setActive(null)}
+      onClick={() => revealSource(id)}
       className={cn(
         "figure inline-flex h-[18px] shrink-0 items-center rounded-sm border px-1 align-middle text-[11px] leading-none transition-colors",
         on ? "border-accent bg-accent-tint text-accent" : "border-rule text-ink-faint hover:border-accent hover:text-accent",
@@ -46,6 +47,13 @@ export function EvidenceRef({ id, className }: { id: string | null | undefined; 
       {shortId(id)}
     </button>
   );
+}
+
+/** Scroll the first element backing this id into view, so a highlighted source is never off screen. */
+function revealSource(id: string) {
+  const el = [...document.querySelectorAll<HTMLElement>("[data-evidence]")].find((e) => e.dataset.evidence!.split(" ").includes(id));
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
 }
 
 /** Props for an element that is the source of one or more evidence ids. */

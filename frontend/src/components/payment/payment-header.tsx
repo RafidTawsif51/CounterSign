@@ -29,7 +29,11 @@ export function PaymentHeader({ detail }: { detail: PaymentDetail }) {
         <Money amount={payment.amount_usd} className="text-xl font-medium" />
         <div className="flex items-center gap-2.5 pb-1">
           <StatusBadge status={payment.status} />
-          {risk && <span className="text-sm text-ink-muted">{DECISIONS[risk.decision]}</span>}
+          {risk && (
+            <span className="text-sm text-ink-muted">
+              Risk decision: <span className="text-ink">{DECISIONS[risk.decision].toLowerCase()}</span>
+            </span>
+          )}
         </div>
       </div>
 

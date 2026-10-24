@@ -128,7 +128,8 @@ function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
 /** Invoice number and destination come from the payment record, not the event stream. */
 function DetailCells({ row }: { row: BoardRow }) {
   const { data } = useQuery({
-    queryKey: ["payment", row.paymentId],
+    // Its own key: the drawer's ["payment", id] refetches on every event, and a row only needs the static fields.
+    queryKey: ["payment-row", row.paymentId],
     queryFn: () => api.payment(row.paymentId),
     staleTime: Infinity,
     retry: 2,

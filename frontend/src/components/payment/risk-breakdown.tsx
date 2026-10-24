@@ -1,7 +1,7 @@
 import { EvidenceRef, useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
 import { formatScore } from "@/lib/format";
-import { DECISIONS, SIGNALS, THRESHOLDS, signalInfo } from "@/lib/risk-catalog";
+import { SIGNALS, THRESHOLDS, signalInfo } from "@/lib/risk-catalog";
 import type { RiskAssessment, Signal } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -30,14 +30,14 @@ export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
   });
   const passed = risk.signals_json.filter((s) => s.weight <= 0);
   const firedNames = new Set(risk.signals_json.map((s) => s.name));
-  const unchecked = Object.keys(SIGNALS).filter((name) => !firedNames.has(name));
+  // The CRS identity check only runs on a changed destination or a first payment, so it is listed only when it ran.
+  const unchecked = Object.keys(SIGNALS).filter((name) => !firedNames.has(name) && name !== "vendor_identity_check");
 
   return (
     <Section title="Risk score" aside={<EvidenceRef id={risk.id} />}>
       <div className="flex items-baseline gap-2">
         <span className="figure text-xl font-medium">{formatScore(risk.score)}</span>
         <span className="figure text-sm text-ink-muted">/ 100</span>
-        <span className="ml-auto text-sm text-ink-muted">{DECISIONS[risk.decision]}</span>
       </div>
 
       <ScoreTrack placed={placed} />
@@ -61,7 +61,7 @@ export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
             Checked, did not fire
             <span className="h-px flex-1 bg-rule" />
           </div>
-          <ul className="-mx-2">
+          <ul className="-mx-2 grid gap-x-6 sm:grid-cols-2">
             {passed.map((s) => (
               <QuietRow key={s.evidence_id} name={s.name} detail={s.detail} evidenceId={s.evidence_id} />
             ))}
@@ -77,7 +77,7 @@ export function RiskBreakdown({ risk }: { risk: RiskAssessment | null }) {
 
 function ScoreTrack({ placed }: { placed: Placed[] }) {
   return (
-    <div className="relative mt-3 mb-5">
+    <div className="relative mt-3 mb-8">
       <div className="relative h-2 overflow-hidden rounded-sm bg-sunken">
         {placed.map((s) => (
           <span
@@ -123,13 +123,16 @@ function SignalRow({ signal }: { signal: Placed }) {
 function QuietRow({ name, detail, evidenceId }: { name: string; detail: string; evidenceId?: string }) {
   const source = useEvidenceSource([evidenceId]);
   return (
-    <li {...source} className={cn(source.className, "grid grid-cols-[1fr_auto] gap-x-4 px-2 py-1 text-sm text-ink-faint")}>
-      <div className="min-w-0">
-        <span className="text-ink-muted">{signalInfo(name).label}</span>
-        {evidenceId && <EvidenceRef id={evidenceId} className="ml-2" />}
-        <span className="block truncate">{detail}</span>
-      </div>
-      <span className="figure w-[132px] text-right">{evidenceId ? "+0" : `up to +${signalInfo(name).weight}`}</span>
+    <li
+      {...source}
+      title={detail}
+      className={cn(source.className, "flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-ink-faint")}
+    >
+      <span className="truncate text-ink-muted">{signalInfo(name).label}</span>
+      <EvidenceRef id={evidenceId} />
+      <span className="ml-auto shrink-0">
+        {evidenceId ? <span className="figure">+0</span> : <span className="figure">+{signalInfo(name).weight}</span>}
+      </span>
     </li>
   );
 }

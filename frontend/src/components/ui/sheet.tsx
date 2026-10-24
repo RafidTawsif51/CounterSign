@@ -52,7 +52,7 @@ function SheetContent({
         {showCloseButton && (
           <SheetPrimitive.Close
             aria-label="Close"
-            className="absolute top-3 right-3 inline-flex size-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-sunken hover:text-ink"
+            className="absolute top-3 right-3 z-10 inline-flex size-8 items-center justify-center rounded-md bg-surface text-ink-muted transition-colors hover:bg-sunken hover:text-ink"
           >
             <XIcon {...iconProps} />
           </SheetPrimitive.Close>
