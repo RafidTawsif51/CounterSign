@@ -131,6 +131,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `Money` | `shared/money.tsx` | The only way to render a dollar amount. |
 | `PageHeader`, `EmptyState` | `shared/` | Every page starts with `PageHeader`; empty screens say what to do next. |
 | `iconProps` | `shared/icon.ts` | Spread onto every lucide icon. |
+| `VerificationCallPanel` | `call/verification-call-panel.tsx` | The drawer's call section. Leads with why the number is trusted (source, since when, independent match, never the email), then live state, 60-second limit line, transcript, and a full-width outcome bar in the payment status it caused. Type is a step larger than the rest of the drawer so it reads from across a table. |
+| `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
 
@@ -140,6 +142,7 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 - Overlays use the theme animations: `animate-fade-in` / `animate-fade-out` (scrims, tooltips), `animate-pop-in` / `animate-pop-out` (dialogs, menus: fade plus 2px rise), `animate-sheet-in` / `animate-sheet-out` (drawer). No zoom, no bounce.
 - framer-motion is only for the allowed state changes that CSS cannot do cleanly (a number ticking, a row reordering). `MotionConfig reducedMotion="user"` is set at the root.
 - Animate only state changes: a row turning held or blocked, a number ticking, a drawer opening, a toast arriving. Never animate on page load, on scroll, or on hover beyond a color change.
+- One exception loops: the mark of a verification call in progress pulses with `animate-call-pulse` (opacity, 2s). It stops when the call ends. Nothing else loops; no audio-wave graphics.
 - `prefers-reduced-motion` is respected globally in `globals.css`. Do not override it.
 
 ## Icons

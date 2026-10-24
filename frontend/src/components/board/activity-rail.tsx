@@ -1,23 +1,16 @@
-import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { CallStrips } from "@/components/call/call-strip";
+import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import type { ActivityEntry, ActivityTone } from "@/lib/board";
+import type { CallView } from "@/lib/calls";
 import { formatClock } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const mark: Partial<Record<ActivityTone, string>> = { held: "bg-held", blocked: "bg-blocked" };
 
 // What the agent did, oldest first, in plain words. Follows the newest line unless the reader has scrolled up.
-export function ActivityRail({ entries, hasRun }: { entries: ActivityEntry[]; hasRun: boolean }) {
-  const scroller = useRef<HTMLOListElement>(null);
-  const pinned = useRef(true);
-  const autoTop = useRef(0);
-
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el || !pinned.current) return;
-    el.scrollTop = el.scrollHeight;
-    autoTop.current = el.scrollTop;
-  }, [entries.length]);
+export function ActivityRail({ entries, calls, hasRun }: { entries: ActivityEntry[]; calls: CallView[]; hasRun: boolean }) {
+  const scroll = useStickToBottom<HTMLOListElement>(entries.length);
 
   return (
     <aside aria-label="Agent activity" className="flex min-h-0 flex-col border-t border-rule bg-paper lg:w-80 lg:shrink-0 lg:border-t-0 lg:border-l">
@@ -25,20 +18,16 @@ export function ActivityRail({ entries, hasRun }: { entries: ActivityEntry[]; ha
         <h2 className="text-sm font-medium">Agent activity</h2>
         {entries.length > 0 && <span className="figure text-xs text-ink-muted">{entries.length}</span>}
       </div>
+      <CallStrips calls={calls} />
       {entries.length === 0 ? (
         <p className="px-4 py-4 text-sm text-ink-muted">
           {hasRun ? "Reading invoices." : "Every payment the agent makes, holds or blocks is logged here as it happens."}
         </p>
       ) : (
         <ol
-          ref={scroller}
+          ref={scroll.ref}
+          onScroll={scroll.onScroll}
           aria-live="polite"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            // Our own scroll to the bottom can land after the next line arrived; only the reader unpins.
-            if (Math.abs(el.scrollTop - autoTop.current) < 2) return;
-            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-          }}
           className="max-h-96 min-h-0 flex-1 overflow-y-auto py-2 lg:max-h-none"
         >
           {entries.map((entry) => (

@@ -10,6 +10,7 @@ import { RunHeader } from "@/components/board/run-header";
 import { iconProps } from "@/components/shared/icon";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { foldBoard, type BoardRow } from "@/lib/board";
+import { foldCalls } from "@/lib/calls";
 
 type Filter = "all" | "attention" | "paid" | "blocked";
 
@@ -31,6 +32,7 @@ export function Board() {
   const [starting, setStarting] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const board = useMemo(() => foldBoard(events), [events]);
+  const calls = useMemo(() => foldCalls(events), [events]);
   const running = Boolean(runId) && !summary.completed;
   const loading = Boolean(runId) && board.rows.length === 0 && status !== "error";
 
@@ -78,7 +80,7 @@ export function Board() {
               <PaymentTable rows={rows} loading={loading} emptyText={active.empty} />
             </div>
           </section>
-          <ActivityRail entries={board.activity} hasRun />
+          <ActivityRail entries={board.activity} calls={calls} hasRun />
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-8 sm:px-6">

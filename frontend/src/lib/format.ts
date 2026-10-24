@@ -76,3 +76,28 @@ export function formatDate(value: string | null | undefined): string {
   const d = new Date(value.length === 10 ? `${value}T12:00:00Z` : value);
   return Number.isNaN(d.getTime()) ? EMPTY : dayYear.format(d);
 }
+
+/**
+ * `+14155550142` as `(415) •••-0142`. For screens others can see (the call panel on a demo laptop): the area code says
+ * where, the last four say which, the rest stays masked.
+ */
+export function formatPhoneMasked(phone: string | null | undefined): string {
+  if (!phone) return EMPTY;
+  const m = phone.match(/^\+1(\d{3})\d{3}(\d{4})$/);
+  return m ? `(${m[1]})${NBSP}${MASK.slice(0, 3)}-${m[2]}` : formatAccount(phone);
+}
+
+const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" });
+
+/** `Feb 2025`. */
+export function formatMonthYear(value: string | null | undefined): string {
+  if (!value) return EMPTY;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? EMPTY : monthYear.format(d);
+}
+
+/** Seconds as `0:07` or `1:00`. For call timers. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}

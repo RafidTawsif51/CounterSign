@@ -14,6 +14,9 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CallStrip } from "@/components/call/call-strip";
+import { VerificationCallPanel } from "@/components/call/verification-call-panel";
+import type { CallView, NumberTrust } from "@/lib/calls";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { formatUSD } from "@/lib/format";
@@ -109,6 +112,13 @@ export function DesignCheck() {
 
         <Section title="Panels and overlays" note="Panels use radius 8 and a hairline. Only overlays cast a shadow.">
           <PanelsAndOverlays />
+        </Section>
+
+        <Section
+          title="Verification call"
+          note="Fixtures for the two outcomes the mock run never produces. A confirmed call releases the payment; no answer keeps it held."
+        >
+          <CallFixtures />
         </Section>
 
         <Section title="Icons" note="lucide-react only, 16px, stroke 1.75. Never emoji.">
@@ -488,6 +498,71 @@ function PanelsAndOverlays() {
             </Button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Numbers and sources match the mock seed for these vendors.
+const FIXTURE_TRUST: Record<string, NumberTrust> = {
+  pay_fixture_confirmed: {
+    phone: "+14155550104",
+    source: "on_file",
+    since: "2025-01-06T17:00:00Z",
+    crossCheck: { source: "website", url: "https://www.alderlumber.com/contact", matches: true },
+  },
+  pay_fixture_no_answer: {
+    phone: "+14155550110",
+    source: "on_file",
+    since: "2025-01-06T17:00:00Z",
+    crossCheck: { source: "listing", url: "https://listings.example.com/pacific", matches: true },
+  },
+};
+
+const FIXTURE_CALLS: CallView[] = [
+  {
+    paymentId: "pay_fixture_confirmed",
+    vendor: "Alder Lumber Co",
+    phase: "ended",
+    contactSource: "on_file",
+    startedAt: "2026-10-22T17:04:10Z",
+    endedAt: "2026-10-22T17:04:31Z",
+    lines: [
+      {
+        speaker: "agent",
+        text: "Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is recorded. We received a request to change where we send Alder Lumber Co's payments, to an account ending 6630. Did your company make this change?",
+      },
+      { speaker: "vendor", text: "Yes, we moved to Sutter Federal last month. That's ours." },
+      { speaker: "agent", text: "Thank you. The change is confirmed and recorded. Goodbye." },
+    ],
+    outcome: "confirmed",
+  },
+  {
+    paymentId: "pay_fixture_no_answer",
+    vendor: "Pacific Rebar",
+    phase: "ended",
+    contactSource: "on_file",
+    startedAt: "2026-10-22T17:06:02Z",
+    endedAt: "2026-10-22T17:06:47Z",
+    lines: [],
+    outcome: "no_answer",
+  },
+];
+
+function CallFixtures() {
+  return (
+    <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
+      <div className="space-y-4">
+        {FIXTURE_CALLS.map((call) => (
+          <div key={call.paymentId} className="overflow-hidden rounded-lg border border-rule bg-surface px-5 py-4">
+            <VerificationCallPanel call={call} trust={FIXTURE_TRUST[call.paymentId]} />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2">
+        {FIXTURE_CALLS.map((call) => (
+          <CallStrip key={call.paymentId} call={call} />
+        ))}
       </div>
     </div>
   );
