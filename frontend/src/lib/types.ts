@@ -324,9 +324,36 @@ export interface InboxThread {
   messages: Message[];
 }
 
+/** One sentence of an /ask answer and the stored record that backs it. */
+export interface AskClaim {
+  text: string;
+  evidence_id: string;
+}
+
+/**
+ * A record an /ask claim cites. ids are the stored ids (evd_, cal_, inj_, aud_, bac_, ras_, pay_, inv_, msg_, ven_) or
+ * synthetic ones for derived facts: rule:<hard_rule>, identity:<vendor_id>, history:amounts:<vendor_id>.
+ */
+export interface AskEvidence {
+  id: string;
+  kind: string;
+  label: string;
+  text: string;
+  untrusted_text?: string; // untrusted
+}
+
+/** POST /api/payments/{id}/ask. Shape from backend/app/services/ask.py (not in docs/ yet). */
 export interface AskAnswer {
-  answer: string;
-  evidence_ids: string[];
+  payment_id: string;
+  question: string;
+  answer: string; // plain prose, no ids; masked
+  claims: AskClaim[];
+  evidence: AskEvidence[];
+  /** claude, or template when MOCK_CLAUDE is on or the model missed the 4.5 s deadline. */
+  source: "claude" | "template";
+  model: string | null;
+  cached: boolean;
+  elapsed_ms: number;
 }
 
 export interface StartRunResponse {

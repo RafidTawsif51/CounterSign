@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMatch, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, FileText } from "lucide-react";
+import { Building2, FileText, MessageSquareText } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,6 +11,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { ASK_PARAM } from "@/components/payment/ask-panel";
 import { iconProps } from "@/components/shared/icon";
 import { Kbd, modKey } from "@/components/shared/kbd";
 import { NAV } from "@/components/shared/nav";
@@ -30,6 +31,12 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const navigate = useNavigate();
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: api.vendors, enabled: open, staleTime: 60_000 });
   const payments = useRunPayments();
+  const openPayment = useMatch("/payments/:paymentId")?.params.paymentId ?? null;
+  // "Ask why…": the open payment first, then every payment the run held or blocked.
+  const askable = [
+    ...payments.filter((p) => p.id === openPayment),
+    ...payments.filter((p) => p.id !== openPayment && (p.status === "held" || p.status === "blocked")),
+  ];
 
   useGlobalShortcuts(onOpenChange, (to, newTab) => go(to, newTab));
 
@@ -44,6 +51,24 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
       <CommandInput placeholder="Search pages, vendors and payments" />
       <CommandList>
         <CommandEmpty>No page, vendor or payment matches that.</CommandEmpty>
+
+        {askable.length > 0 && (
+          <CommandGroup heading="Ask why…">
+            {askable.map((p) => (
+              <CommandItem
+                key={p.id}
+                value={`ask why ${p.vendor} ${p.status}`}
+                onSelect={() => go(`/payments/${p.id}?${ASK_PARAM}=1`)}
+              >
+                <MessageSquareText {...iconProps} />
+                <span className="truncate">
+                  Ask why… <span className="text-ink-muted">{p.vendor}</span>
+                </span>
+                {p.status && <StatusBadge status={p.status} className="ml-auto" />}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading="Pages">
           {NAV.map((item) => (

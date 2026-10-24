@@ -132,6 +132,7 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `PageHeader`, `EmptyState` | `shared/` | Every page starts with `PageHeader`; empty screens say what to do next. |
 | `iconProps` | `shared/icon.ts` | Spread onto every lucide icon. |
 | `VerificationCallPanel` | `call/verification-call-panel.tsx` | The drawer's call section. Leads with why the number is trusted (source, since when, independent match, never the email), then live state, 60-second limit line, transcript, and a full-width outcome bar in the payment status it caused. Type is a step larger than the rest of the drawer so it reads from across a table. |
+| `AskPanel` | `payment/ask-panel.tsx` | "Ask about this payment" in the drawer, under the header; also opened by the ⌘K "Ask why…" command. Suggested questions are link buttons, the first matching the payment's status. The answer is rendered from the response's claims in order, each claim's text followed by its evidence id as a chip (the prose answer only when there are no claims): hover highlights the drawer element that backs it, click scrolls to it. A thin line runs against the 5-second budget while waiting; the time taken shows in mono. No avatar, no typing dots, no sparkles. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.

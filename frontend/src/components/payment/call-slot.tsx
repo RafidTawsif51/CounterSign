@@ -33,7 +33,7 @@ export function CallSlot({ detail }: { detail: PaymentDetail }) {
   return (
     <Section title="Verification call" aside={<EvidenceRef id={record?.id} />}>
       <div {...source}>
-        <VerificationCallPanel call={call} trust={trust} />
+        <VerificationCallPanel call={call} trust={trust} evidenceId={record?.id} />
       </div>
     </Section>
   );

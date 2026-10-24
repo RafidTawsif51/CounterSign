@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ShieldCheck } from "lucide-react";
 import { CallMark, LimitLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, shortUrl, useElapsed } from "@/components/call/call-parts";
 import { iconProps } from "@/components/shared/icon";
+import { useEvidenceSource } from "@/components/payment/evidence";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { CALL_LIMIT_S, type CallView, type NumberTrust } from "@/lib/calls";
 import { formatDuration, formatMonthYear, formatPhoneMasked } from "@/lib/format";
@@ -16,7 +17,8 @@ import { cn } from "@/lib/utils";
 
 const SPEAKER = { agent: "Countersign", vendor: "Vendor" } as const;
 
-export function VerificationCallPanel({ call, trust }: { call: CallView; trust: NumberTrust }) {
+/** `evidenceId` (the stored call id) registers each transcript line as `<id>#<n>`, so an /ask citation can point at it. */
+export function VerificationCallPanel({ call, trust, evidenceId }: { call: CallView; trust: NumberTrust; evidenceId?: string }) {
   const elapsed = useElapsed(call.startedAt, call.endedAt);
   const root = useRef<HTMLDivElement>(null);
   const active = call.phase !== "ended";
@@ -32,7 +34,7 @@ export function VerificationCallPanel({ call, trust }: { call: CallView; trust: 
     <div ref={root} className="scroll-mt-4 space-y-4">
       <TrustedNumber call={call} trust={trust} />
       <CallState call={call} elapsed={elapsed} />
-      {call.phase !== "queued" && <Transcript call={call} />}
+      {call.phase !== "queued" && <Transcript call={call} evidenceId={evidenceId} />}
       {call.outcome && <OutcomeBar outcome={call.outcome} />}
     </div>
   );
@@ -106,7 +108,7 @@ function CallState({ call, elapsed }: { call: CallView; elapsed: number }) {
   );
 }
 
-function Transcript({ call }: { call: CallView }) {
+function Transcript({ call, evidenceId }: { call: CallView; evidenceId?: string }) {
   const scroll = useStickToBottom<HTMLOListElement>(call.lines.length);
   // Lines already there when the panel opened appear at once; only new ones fade in.
   const seen = useRef(call.lines.length);
@@ -124,19 +126,26 @@ function Transcript({ call }: { call: CallView }) {
       className="max-h-80 space-y-3 overflow-y-auto border-l border-rule pl-4"
     >
       {call.lines.map((line, i) => (
-        <motion.li
-          key={i}
-          initial={i >= seen.current ? { opacity: 0 } : false}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-          className="grid grid-cols-[88px_1fr] gap-3"
-        >
-          <span className="pt-0.5 text-sm font-medium text-ink-muted">{SPEAKER[line.speaker]}</span>
-          {/* Vendor speech is untrusted text: plain text only. */}
-          <span className={cn("text-md", line.speaker === "vendor" ? "font-medium text-ink" : "text-ink")}>{line.text}</span>
-        </motion.li>
+        <Line key={i} line={line} fadeIn={i >= seen.current} evidenceId={evidenceId ? `${evidenceId}#${i}` : undefined} />
       ))}
     </ol>
+  );
+}
+
+function Line({ line, fadeIn, evidenceId }: { line: CallView["lines"][number]; fadeIn: boolean; evidenceId?: string }) {
+  const source = useEvidenceSource([evidenceId]);
+  return (
+    <motion.li
+      initial={fadeIn ? { opacity: 0 } : false}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      {...source}
+      className={cn(source.className, "-mx-2 grid grid-cols-[88px_1fr] gap-3 px-2 py-0.5")}
+    >
+      <span className="pt-0.5 text-sm font-medium text-ink-muted">{SPEAKER[line.speaker]}</span>
+      {/* Vendor speech is untrusted text: plain text only. */}
+      <span className={cn("text-md", line.speaker === "vendor" ? "font-medium text-ink" : "text-ink")}>{line.text}</span>
+    </motion.li>
   );
 }
 

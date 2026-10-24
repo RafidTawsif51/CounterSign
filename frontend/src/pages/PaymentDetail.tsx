@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AskPanel } from "@/components/payment/ask-panel";
 import { AuditTrail } from "@/components/payment/audit-trail";
 import { CallSlot } from "@/components/payment/call-slot";
 import { DecisionFooter } from "@/components/payment/decision-footer";
@@ -31,6 +32,7 @@ export function PaymentDetail() {
           <EvidenceProvider>
             <div className="flex-1 overflow-y-auto">
               <PaymentHeader detail={detail} />
+              <AskPanel key={detail.payment.id} detail={detail} />
               <HardRules risk={detail.risk} />
               <RiskBreakdown risk={detail.risk} />
               <Destination detail={detail} />

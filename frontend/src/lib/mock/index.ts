@@ -10,6 +10,7 @@ import {
   subscribeMockLeaderboard,
   subscribeMockRun,
 } from "@/lib/mock/run";
+import { mockAsk } from "@/lib/mock/ask";
 import { bankAccounts, contacts, openInvoices, vendors } from "@/lib/mock/seed";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus, VendorHistory } from "@/lib/types";
@@ -47,6 +48,7 @@ const routes: [string, Handler][] = [
     },
   ],
   ["GET /api/payments/:paymentId", ({ paymentId }) => getMockPaymentDetail(paymentId) ?? notFound(`/api/payments/${paymentId}`)],
+  ["POST /api/payments/:paymentId/ask", ({ paymentId }, body) => mockAsk(paymentId, questionOf(body))],
   ["POST /api/payments/:paymentId/approve", ({ paymentId }, body) => decideMockPayment(paymentId, "approve", reasonOf(body))],
   ["POST /api/payments/:paymentId/reject", ({ paymentId }, body) => decideMockPayment(paymentId, "reject", reasonOf(body))],
   [
@@ -82,6 +84,10 @@ function vendorHistory(vendorId: string): VendorHistory | null {
   };
 }
 
+function questionOf(body: unknown): string {
+  return typeof body === "object" && body && "question" in body ? String((body as { question: unknown }).question) : "";
+}
+
 function reasonOf(body: unknown): string {
   return typeof body === "object" && body && "reason" in body ? String((body as { reason: unknown }).reason) : "";
 }
@@ -94,7 +100,7 @@ export async function mockRequest<T>(method: string, path: string, body?: unknow
   const bare = path.split("?")[0];
   for (const [pattern, handler] of routes) {
     const params = match(pattern, method, bare);
-    if (params) return structuredClone(handler(params, body)) as T;
+    if (params) return structuredClone(await handler(params, body)) as T;
   }
   throw new MockNotImplementedError(method, path);
 }
