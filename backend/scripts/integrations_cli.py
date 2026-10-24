@@ -107,6 +107,38 @@ def smoke_nessie(_args) -> int:
     return _result(True, "Nessie customers listed and a test account created")
 
 
+def smoke_crs(args) -> int:
+    """Log in to the CRS sandbox and run the three checks for the Summit (P19) and attacker (P13) test personas.
+    Prints PASS/FAIL per check from the summaries only: no tokens, passwords, response bodies or personal fields."""
+    import asyncio
+
+    from app.services import identity
+
+    async def go() -> int:
+        client = identity.set_transport(None)
+        try:
+            await client.login()
+        except identity.CrsUnavailable as exc:
+            return _result(False, f"CRS login failed: {exc}")
+        print("  logged in (token cached in memory)")
+        bad = 0
+        for label, code, expect in (("Summit Concrete owner", "P19", "pass"), ("attacker request", "P13", "fail")):
+            persona = identity.SANDBOX_PERSONAS[code]
+            print(f"  {label} -> sandbox persona {code}")
+            checks = [await identity.reverse_phone(persona, label), await identity.fraud_finder(persona), await identity.identity_verification(persona)]
+            for c in checks:
+                score = f" score {c['score']}" if "score" in c else ""
+                print(f"    {'PASS' if c['result'] == 'pass' else 'FAIL' if c['result'] == 'fail' else 'REVIEW'}: {c['name']}{score} ({'; '.join(c['reasons'])}) request id {c['crs_request_id']}")
+            results = {c["result"] for c in checks}
+            status = "fail" if "fail" in results else "review" if "review" in results else "pass"
+            ok = status == expect
+            bad += 0 if ok else 1
+            print(f"    overall {status} (expected {expect}): {'ok' if ok else 'UNEXPECTED'}")
+        return _result(bad == 0, f"CRS sandbox: {client.requests} requests; Summit passes and the attacker fails" if bad == 0 else "CRS sandbox results were not as expected")
+
+    return asyncio.run(go())
+
+
 def setup_nessie(_args) -> int:
     os.environ["MOCK_NESSIE"] = "false"
     from app.config import get_settings
@@ -160,8 +192,10 @@ def smoke_transfer(_args) -> int:
     return _result(True, f"transfer {transfer_id} status {got.get('status')}")
 
 
-def create_test_hold(_args=None) -> int:
-    """A held payment that asks for a new bank account, with the demo vendor phone as the vendor's on-file contact."""
+def create_test_hold(args=None) -> int:
+    """A held payment that asks for a new bank account, with the demo vendor phone as the vendor's on-file contact.
+    Default: the request comes from a lookalike domain (summit-concrete.co), so CRS uses the attacker persona and fails.
+    --legit: it comes from the vendor's real domain, so CRS uses the vendor persona and passes (a confirmed call is paid)."""
     from datetime import timedelta
 
     from sqlmodel import Session, select
@@ -194,7 +228,10 @@ def create_test_hold(_args=None) -> int:
         session.commit()
         new_account = verify.record_requested_destination(session, vendor.id, "hash_cli_requested", "7781", "Requested Bank")
         suffix = new_id("cli")[-6:]
-        msg = Message(thread_id=new_id("thr"), vendor_id=vendor.id, from_addr="ar@summit-concrete.co", subject="We changed banks", body="Please use our new account.", is_attack=True)
+        legit = bool(getattr(args, "legit", False))
+        sender_domain = vendor.email_domain if legit else "summit-concrete.co"
+        msg = Message(thread_id=new_id("thr"), vendor_id=vendor.id, from_addr=f"ar@{sender_domain}",
+                      subject="Updated remittance details" if legit else "We changed banks", body="Please use our new account.", is_attack=not legit)
         session.add(msg)
         session.flush()
         inv = Invoice(vendor_id=vendor.id, message_id=msg.id, number=f"CLI-{suffix}", amount_usd=18450.0, due_date=(utcnow() + timedelta(days=7)).date(),
@@ -207,7 +244,9 @@ def create_test_hold(_args=None) -> int:
         session.commit()
         print(f"payment_id={pay.id}")
         print(f"run_id={run.id}")
-    return _result(True, "held payment created; now run: call-test <payment_id>")
+    print(f"mode: {'legit' if legit else 'lookalike'} (request from {sender_domain})")
+    expect = "CRS pass, so 'Yes' is paid and 'No' is blocked" if legit else "CRS fail, so 'Yes' stays held with CRS reasons and 'No' is blocked"
+    return _result(True, f"held payment created ({expect}); now run: call-test <payment_id>")
 
 
 def call_test(args) -> int:
@@ -284,9 +323,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name, fn in {"smoke-twilio": smoke_twilio, "smoke-cartesia": smoke_cartesia,
-                     "smoke-nessie": smoke_nessie, "setup-nessie": setup_nessie, "smoke-transfer": smoke_transfer}.items():
+                     "smoke-nessie": smoke_nessie, "smoke-crs": smoke_crs, "setup-nessie": setup_nessie, "smoke-transfer": smoke_transfer}.items():
         sub.add_parser(name).set_defaults(fn=fn)
-    sub.add_parser("create-test-hold").set_defaults(fn=create_test_hold)
+    cth = sub.add_parser("create-test-hold")
+    cth.add_argument("--legit", action="store_true", help="the change request comes from the vendor's real email domain (CRS passes)")
+    cth.set_defaults(fn=create_test_hold)
     sub.add_parser("vendor-phone-url").set_defaults(fn=vendor_phone_url)
     ct = sub.add_parser("call-test")
     ct.add_argument("payment_id")

@@ -7,12 +7,12 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pathlib import Path
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import db, events as ev
 from app.config import get_settings
-from app.models import CallOutcome, Invoice, Payment, PaymentStatus, Vendor, VerificationCall
-from app.services import payments, verify, voice
+from app.models import AuditLog, CallOutcome, Invoice, Payment, PaymentStatus, Vendor, VerificationCall
+from app.services import identity, payments, verify, voice
 
 log = logging.getLogger("countersign.integrations")
 
@@ -35,7 +35,7 @@ def integration_status() -> dict:
         "cartesia": bool(s.cartesia_api_key and s.cartesia_voice_id),
         "nessie": bool(s.nessie_api_key),
         "apify": bool(s.apify_token),
-        "crs": bool(s.crs_api_key),
+        "crs": bool(identity._env("CRS_USERNAME") and identity._env("CRS_PASSWORD")),  # CRS login lives in the environment, not config.py
         "claude": bool(s.anthropic_api_key),
     }
     return {name: {"mode": "mock" if flags[name] else "real", "key_set": keys[name]} for name in keys}
@@ -312,6 +312,51 @@ async def web_answer(call_id: str, request: Request, background: BackgroundTasks
                          "text": res["text"], "clip": voice.clip_url(res["text"])}, headers=NO_STORE)
 
 
+
+# ---------------------------------------------------------------- vendor identity (CRS)
+
+vendor_identity_router = APIRouter(prefix="/vendors")
+
+
+_STATUS_WORD = {"verified": "pass", "unverified": "review", "flagged": "fail"}
+
+
+def _section(sec: dict, at, extra: Optional[dict] = None) -> dict:
+    """One section of the card: no PII, no raw response."""
+    return {"status": sec.get("status"), "summary": sec.get("summary"), "checks": sec.get("checks", []), "persona": sec.get("persona"),
+            "checked_at": sec.get("checked_at") or at.isoformat(), **(extra or {})}
+
+
+@vendor_identity_router.get("/{vendor_id}/identity")
+def vendor_identity(vendor_id: str) -> dict:
+    """The vendor card's CRS result, kept apart: `vendor` is the vendor's own standing (reverse phone and the owner's identity check),
+    `latest_request` is the newest check of a bank-change request (email risk and the requester's identity), or null. The top-level
+    `status` is the vendor's own, for older clients. {"status": null, "vendor": null, "latest_request": null} if no check has run."""
+    with Session(db.engine) as s:
+        if s.get(Vendor, vendor_id) is None:
+            raise HTTPException(404, "no such vendor")
+        pay_ids = list(s.exec(select(Payment.id).join(Invoice, Invoice.id == Payment.invoice_id).where(Invoice.vendor_id == vendor_id)))
+        wanted = (AuditLog.entity == "vendor") & (AuditLog.entity_id == vendor_id) & (AuditLog.action == "identity_check")
+        if pay_ids:
+            wanted = wanted | ((AuditLog.entity == "payment") & AuditLog.entity_id.in_(pay_ids) & (AuditLog.action == verify.CRS_ACTION))
+        rows = list(s.exec(select(AuditLog).where(wanted).order_by(AuditLog.at.desc(), AuditLog.id.desc())))
+    vendor = request = None
+    for row in rows:  # newest first
+        d = row.detail_json or {}
+        if vendor is None:
+            if d.get("vendor"):
+                vendor = _section(d["vendor"], row.at)
+            elif row.action == "identity_check":  # the vendor-level IdentityResult row
+                vendor = _section({"status": _STATUS_WORD.get(d.get("status"), d.get("status")), "summary": d.get("summary"),
+                                   "persona": d.get("test_identity_id"), "checked_at": d.get("checked_at")}, row.at)
+        if request is None and d.get("request"):
+            request = _section(d["request"], row.at, {"requested_by_domain": d["request"].get("requested_by_domain"), "payment_id": row.entity_id})
+        if vendor is not None and request is not None:
+            break
+    return {"status": vendor["status"] if vendor else None, "vendor": vendor, "latest_request": request}
+
+
 router.include_router(voice_router)
 router.include_router(webhook_router)
 router.include_router(verification_router)
+router.include_router(vendor_identity_router)

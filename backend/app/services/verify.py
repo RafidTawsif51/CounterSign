@@ -18,6 +18,10 @@
 #   digits of an account, accept no new contact details, never confirm on the vendor's behalf, hang
 #   up after CALL_TIMEOUT_SECONDS.
 # Flags: MOCK_TWILIO and MOCK_CARTESIA. The mock caller is used if either is true.
+# CRS gate (MOCK_CRS=false only): before dialing, identity.check_vendor runs three CRS sandbox checks and the summary goes to the
+#   audit log (crs_identity_check). A reverse-phone fail means that number is not dialed (the next independent number is tried, else the
+#   payment stays held for the controller). A confirmed call releases money only if the CRS status is pass; review, fail or unavailable
+#   keep the payment held with the CRS reasons. A denied call blocks as always. With MOCK_CRS=true none of this runs.
 
 import asyncio
 import contextvars
@@ -50,7 +54,7 @@ from app.models import (
     VerificationCall,
     utcnow,
 )
-from app.services import contacts, payments, voice
+from app.services import contacts, identity, payments, voice
 
 log = logging.getLogger("countersign.verify")
 
@@ -79,6 +83,37 @@ class VerificationResult(BaseModel):
     # Real mode: the call was placed and is still going. outcome is then a placeholder (unclear) and the payment is still held;
     # the real result arrives later through handle_outcome, the events and the database.
     in_progress: bool = False
+
+
+class NoDialableNumber(Exception):
+    """Every candidate number failed the CRS reverse lookup, so nothing was dialed. Carries the result to hand back."""
+
+    def __init__(self, result: "VerificationResult"):
+        self.result = result
+
+
+CRS_ACTION = "crs_identity_check"
+
+
+def crs_summary(session: Session, payment_id: str) -> Optional[dict]:
+    """The CRS summary stored for a payment's verification (latest), or None."""
+    row = session.exec(select(AuditLog).where(AuditLog.entity == "payment", AuditLog.entity_id == payment_id, AuditLog.action == CRS_ACTION)
+                       .order_by(AuditLog.at.desc(), AuditLog.id.desc())).first()
+    return row.detail_json if row else None
+
+
+def crs_release_blocker(session: Session, payment_id: str) -> Optional[str]:
+    """None if a confirmed call may release the payment. Otherwise the reason it must stay held: CRS said review or fail, was
+    unavailable, or (with real CRS on) left no result at all. Never a silent pass. MOCK_CRS=true never blocks."""
+    if get_settings().mock_crs:
+        return None
+    crs = crs_summary(session, payment_id)
+    if crs is None:
+        return "call confirmed the account, but no CRS identity result is on file; the controller decides"
+    if crs.get("status") == "pass":
+        return None
+    why = "; ".join(identity.hold_reasons(crs)[:3]) or str(crs.get("status"))
+    return f"call confirmed the account, but the CRS identity check is {crs.get('status')} ({why}); the controller decides"
 
 
 # ---------------------------------------------------------------- allow list
@@ -509,7 +544,12 @@ async def handle_outcome(
         payment.destination_account_id = acct.id
         payment.status = PaymentStatus.pending  # released
         write_audit("vendor", vendor.id, "agent", "bank_account_verified", {**proof, "account_last4": acct.account_last4}, session=session)
-        if pay:
+        crs_block = crs_release_blocker(session, payment.id)
+        if crs_block:  # the CRS gate holds in both paths (inline mock and webhooks): money never moves on a call alone
+            payment.status = PaymentStatus.held
+            held_reason = crs_block
+            write_audit("payment", payment.id, "agent", "held_after_verification", {**proof, "rules": ["crs_identity_check"]}, session=session)
+        elif pay:
             others = _unresolved_rules(session, payment.id)
             if others:
                 payment.status = PaymentStatus.held
@@ -603,6 +643,60 @@ def rearm_answer_watchdog(call_id: str) -> None:
 # ---------------------------------------------------------------- orchestration
 
 
+def _alternate_number(on_file: list[VendorContact], independent: Optional[contacts.IndependentContact], chosen: str):
+    """The other independent number, if there is one: (phone, source, existing_row_or_None), and it must be allowed to be called."""
+    best = max(on_file, key=lambda c: _when(c.last_verified, c.first_seen), default=None)
+    options = []
+    if best is not None:
+        options.append((best.phone, ContactSource.on_file, best))
+    if independent is not None:
+        options.append((independent.phone, ContactSource(independent.source), None))
+    for phone, src, row in options:
+        if _digits(phone) != _digits(chosen):
+            try:
+                assert_callable(phone)
+            except CallNotAllowed:
+                continue
+            return phone, src, row
+    return None
+
+
+async def _crs_gate(session: Session, payment: Payment, vendor: Vendor, message: Optional[Message], on_file, independent, picked):
+    """Run the CRS checks before anything is dialed. Returns the (phone, source, flagged, existing) to dial, or raises
+    NoDialableNumber after recording why nothing was dialed. A failed reverse lookup removes that number; the CRS summary goes
+    to the audit log whatever the outcome (the hold reasons carry the short CRS reasons, never PII)."""
+    phone, source, flagged, existing = picked
+    cands = [(phone, source, existing)]
+    alt = _alternate_number(on_file, independent, phone)
+    if alt is not None:
+        cands.append(alt)
+    ctx = {"request_email": message.from_addr if message else None, "reply_to": message.reply_to if message else None,
+           "phones": [c[0] for c in cands]}
+    crs = await identity.check_for(vendor, ctx)
+    write_audit("payment", payment.id, "agent", CRS_ACTION, crs, session=session)
+    session.commit()
+    reasons = identity.hold_reasons(crs)
+    if crs["status"] != "pass":
+        await ev.emit(ev.PaymentHeld(run_id=payment.run_id, payment_id=payment.id, reasons=reasons))  # the call still happens
+    idx = crs.get("dial_index")
+    if idx is None:
+        first = cands[0]
+        row = first[2] or _store_contact(session, vendor.id, independent)  # type: ignore[arg-type]
+        note = "CRS: the phone number does not belong to the vendor's known contact; not dialed"
+        call = VerificationCall(payment_id=payment.id, contact_id=row.id, outcome=CallOutcome.unclear)
+        session.add(call)
+        payment.status = PaymentStatus.held
+        session.add(payment)
+        write_audit("payment", payment.id, "agent", "verification_not_dialed", {"call_id": call.id, "reason": note, "crs_status": crs["status"]}, session=session)
+        session.commit()
+        await ev.emit(ev.PaymentHeld(run_id=payment.run_id, payment_id=payment.id, reasons=[note] + reasons))
+        raise NoDialableNumber(VerificationResult(
+            payment_id=payment.id, call_id=call.id, outcome=CallOutcome.unclear, payment_status=PaymentStatus.held, attempts=1, needs_controller=True,
+            contact_source=first[1], number_flagged=True, transcript=[]))
+    phone, source, row = cands[idx]
+    return phone, source, flagged or idx > 0, row
+
+
 async def _prepare(session: Session, payment_id: str):
     """Everything a call needs before it is placed. Raises before anything is stored or dialed if the number is not allowed."""
     payment = session.get(Payment, payment_id)
@@ -625,6 +719,9 @@ async def _prepare(session: Session, payment_id: str):
         independent = None
     phone, source, flagged, existing = select_number(on_file, independent)
     assert_callable(phone)  # raises before anything is stored or dialed
+
+    if not get_settings().mock_crs:
+        phone, source, flagged, existing = await _crs_gate(session, payment, vendor, message, on_file, independent, (phone, source, flagged, existing))
     if existing is None:
         existing = _store_contact(session, vendor.id, independent)  # type: ignore[arg-type]
     prior_no_answers = len(
@@ -641,7 +738,10 @@ async def begin_real_call(session: Session, payment_id: str) -> VerificationResu
     through the webhooks (twilio) or the softphone page (web) and is applied by handle_outcome.
     VOICE_MODE=web rings the browser softphone instead of the phone network. In twilio mode, if the call cannot be placed and a
     softphone page for this vendor polled in the last 60 s, the softphone rings instead."""
-    payment, vendor, rem, _msg, phone, source, flagged, call, prior = await _prepare(session, payment_id)
+    try:
+        payment, vendor, rem, _msg, phone, source, flagged, call, prior = await _prepare(session, payment_id)
+    except NoDialableNumber as nd:
+        return nd.result
     s = get_settings()
     base = s.public_base_url.rstrip("/")
     script = voice.call_script(vendor.name, rem["account_last4"])
@@ -768,7 +868,10 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
     if not (s.mock_twilio or s.mock_cartesia):
         return await begin_real_call(session, payment_id)  # real mode never blocks the payment run
 
-    payment, vendor, rem, message, phone, source, flagged, call, _prior = await _prepare(session, payment_id)
+    try:
+        payment, vendor, rem, message, phone, source, flagged, call, _prior = await _prepare(session, payment_id)
+    except NoDialableNumber as nd:
+        return nd.result
     run_id = payment.run_id
     await ev.emit(ev.CallStarted(run_id=run_id, payment_id=payment.id, contact_source=source))
 

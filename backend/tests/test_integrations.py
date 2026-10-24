@@ -1137,3 +1137,443 @@ def test_softphone_page_plays_every_clip_through_one_unlocked_player(web):
     html = client.get(f"/api/voice/vendor-phone/ven_t?k={KEY}").text
     assert html.count("<audio id=") == 1 and "unlockPlayer()" in html and "Tap to hear the question" in html
     assert "stopListening()" in html and 'id="yes"' in html and "new Audio(" not in html
+
+
+# ================================================================ CRS sandbox integration (all HTTP mocked)
+
+import json as _json  # noqa: E402
+import logging  # noqa: E402
+
+import httpx  # noqa: E402
+
+from app.services import identity  # noqa: E402
+
+CRS_SECRETS = ("tok-secret-1", "ref-secret-1", "pw-secret", "666701019", "666701013", "1976-09-16", "SOLANO", "KINGSTON")
+
+
+class Crs:
+    """A fake CRS sandbox behind httpx.MockTransport. Counts requests; `reverse_script` answers reverse lookups in order."""
+
+    def __init__(self, delay=0.0, fraud_p19=9, expire_first_token=False, fail_all=False, reverse_script=None):
+        self.delay, self.fraud_p19, self.fail_all = delay, fraud_p19, fail_all
+        self.expire_first_token, self.reverse_script = expire_first_token, list(reverse_script or [])
+        self.calls: list[str] = []
+        self.tokens = 0
+        self.refresh_ok = False
+
+    def transport(self):
+        return httpx.MockTransport(self.handle)
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix("/api")
+        self.calls.append(path)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.fail_all and path != "/users/login":
+            raise httpx.ReadTimeout("slow")
+        body = _json.loads(request.content or b"{}")
+        if path == "/users/login":
+            assert body == {"username": "crs-user", "password": "pw-secret"}
+            self.tokens += 1
+            return httpx.Response(200, json={"token": f"tok-secret-{self.tokens}", "refreshToken": "ref-secret-1", "expires": 3600})
+        if path == "/users/refresh-token":
+            if not self.refresh_ok:
+                return httpx.Response(400, json={"messages": ["Refresh Token Premature"]})
+            self.tokens += 1
+            return httpx.Response(200, json={"token": f"tok-secret-{self.tokens}", "refreshToken": "ref-secret-2", "expires": 3600})
+        if self.expire_first_token and request.headers.get("authorization") == "Bearer tok-secret-1":
+            return httpx.Response(401, json={"messages": ["Token Required"]})
+        head = {"requestid": f"req-{len(self.calls)}"}
+        if path == "/accurate-append/reverse":
+            if self.reverse_script:
+                recs = self.reverse_script.pop(0)
+            else:
+                recs = [{"firstName": "GRACE", "lastName": "NAKAMURA"}] if body["phoneNumber"] == "5550101019" else []
+            return httpx.Response(200, json={"success": True, "data": {"records": recs}}, headers=head)
+        if path == "/fraud-finder/fraud-finder":
+            score = self.fraud_p19 if body["email"] == "grace.nakamura@example.com" else 88
+            return httpx.Response(200, json={"risk": {"score": str(score), "phone": {"prepaid": "False", "owner": {"last_name_match": "match"}}}}, headers=head)
+        if path == "/transunion/identity-manager-verification/basic":
+            msgs = [] if body["ssn"] == "666701019" else [{"code": "2201", "text": "x"}, {"code": "2101", "text": "y"}]
+            return httpx.Response(200, json={
+                "addOnProducts": [{"idManagerVerification": {"messages": msgs}}],
+                "custom": {"idmanagerVerAnalysisV2": {"verificationAnalysises": [{"verificationStatus": "SUBJECT_FOUND", "firstNameVerification": "MATCH",
+                                                                                  "lastNameVerification": "MATCH", "ssnVerification": "MATCH"}]}}}, headers=head)
+        return httpx.Response(404)
+
+
+@pytest.fixture
+def crs(monkeypatch):
+    monkeypatch.setenv("CRS_USERNAME", "crs-user")
+    monkeypatch.setenv("CRS_PASSWORD", "pw-secret")
+    monkeypatch.setitem(identity.VENDOR_PERSONA_OVERRIDES, "ven_t", "P19")
+    fake = Crs()
+    identity.set_transport(fake.transport())
+    yield fake
+    identity.set_transport(None)
+
+
+def use_crs(monkeypatch, fake=None):
+    """Real CRS (mocked HTTP), mock phone: the call itself is simulated."""
+    if fake is not None:
+        identity.set_transport(fake.transport())
+    monkeypatch.setattr(get_settings(), "mock_crs", False)
+
+
+def vendor_t():
+    return Vendor(id="ven_t", name="Test Co", trade="x", email_domain="test.example")
+
+
+def settle_fixture_call(session):
+    session.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer  # so a new call may start
+    session.commit()
+
+
+def crs_audit(session):
+    return [a for a in session.exec(select(AuditLog).where(AuditLog.entity_id == "pay_t", AuditLog.action == verify.CRS_ACTION))]
+
+
+# ---------------------------------------------------------------- login, token cache, refresh
+
+
+def test_crs_login_once_and_the_token_is_cached(crs):
+    for _ in range(3):
+        run(identity.get_client().post("/fraud-finder/fraud-finder", {"email": "grace.nakamura@example.com"}))
+    assert crs.calls.count("/users/login") == 1 and crs.tokens == 1
+
+
+def test_crs_401_refreshes_the_token_or_logs_in_again(crs):
+    crs.expire_first_token = True
+    out, rid = run(identity.get_client().post("/fraud-finder/fraud-finder", {"email": "grace.nakamura@example.com"}))
+    assert out["risk"]["score"] == "9" and rid and crs.calls.count("/users/refresh-token") == 1 and crs.tokens == 2  # refresh refused (premature): re-login
+    identity.set_transport(None)
+    crs2 = Crs(expire_first_token=True)
+    crs2.refresh_ok = True
+    identity.set_transport(crs2.transport())
+    run(identity.get_client().post("/fraud-finder/fraud-finder", {"email": "grace.nakamura@example.com"}))
+    assert crs2.calls.count("/users/login") == 1 and crs2.calls.count("/users/refresh-token") == 1  # the refresh worked: no second login
+
+
+def test_crs_without_credentials_is_unavailable_not_a_pass(monkeypatch):
+    monkeypatch.setenv("CRS_USERNAME", "")
+    monkeypatch.setenv("CRS_PASSWORD", "")
+    identity.set_transport(Crs().transport())
+    out = run(identity.check_vendor_for(vendor_t()))
+    assert out["status"] == "review" and all(c["reasons"] == ["crs_unavailable"] for c in out["checks"])
+    identity.set_transport(None)
+
+
+# ---------------------------------------------------------------- the three checks
+
+
+def test_crs_three_checks_for_the_vendor_pass_and_keep_no_personal_data(crs):
+    out = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    assert out["status"] == "pass" and out["persona"] == "P19" and out["subject"] == "vendor" and out["dial_index"] == 0
+    assert [c["name"] for c in out["checks"]] == ["reverse_phone", "fraud_finder", "identity_verification"]
+    assert all(c["result"] == "pass" and c["crs_request_id"].startswith("req-") for c in out["checks"]) and out["checks"][1]["score"] == 9
+    dumped = _json.dumps(out)
+    assert not any(secret in dumped for secret in CRS_SECRETS) and "NAKAMURA" not in dumped and "GRACE" not in dumped
+
+
+def test_crs_lookalike_requester_uses_the_attacker_persona_and_fails(crs):
+    out = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test-co.example", "phones": ["+14155550142"]}))
+    assert out["status"] == "fail" and out["persona"] == "P13" and out["subject"] == "requester"
+    by = {c["name"]: c for c in out["checks"]}
+    assert by["reverse_phone"]["result"] == "pass" and by["fraud_finder"]["result"] == "fail" and by["fraud_finder"]["score"] == 88
+    assert by["identity_verification"]["result"] == "fail" and "SSN not associated with the name" in by["identity_verification"]["reasons"]
+    reasons = identity.hold_reasons(out)
+    assert any(r.startswith("CRS fraud finder fail") for r in reasons) and not any("KAYLA" in r or "666" in r for r in reasons)
+    alt = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test-co.example", "reply_to": "boss@elsewhere.example"}))
+    assert alt["persona"] == "P12"  # Reply-To differs from the sender: the second attacker case
+
+
+def test_crs_unexpected_answers_are_review_never_pass():
+    assert identity.parse_reverse({}, identity.SANDBOX_PERSONAS["P19"], None)["result"] == "review"
+    assert identity.parse_fraud_finder({"risk": {}}, None)["result"] == "review"
+    assert identity.parse_transunion({"addOnProducts": []}, None)["result"] == "review"
+    assert identity.parse_fraud_finder({"risk": {"score": "45"}}, None)["result"] == "review"
+
+
+def test_crs_timeout_is_review_and_never_pass(crs):
+    crs.fail_all = True
+    out = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    assert out["status"] == "review" and all(c["reasons"] == ["crs_unavailable"] for c in out["checks"]) and out["dial_index"] == 0  # still calls
+    assert identity.hold_reasons(out)[0] == "CRS reverse phone review: CRS unavailable"
+    res = run(identity.RealIdentityChecker().check(vendor_t()))
+    assert res.status == "unverified"  # the IdentityResult path used by the payment run and the vendor card
+
+
+def test_crs_results_are_cached_and_shared_between_concurrent_callers(crs):
+    async def go():
+        return await asyncio.gather(*(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}) for _ in range(5)))
+
+    run(go())
+    assert sorted(set(crs.calls)) == ["/accurate-append/reverse", "/fraud-finder/fraud-finder", "/transunion/identity-manager-verification/basic", "/users/login"]
+    assert len(crs.calls) == 4  # one login and one request per check for five callers
+    run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    assert len(crs.calls) == 4  # and a later caller hits the cache
+
+
+def test_crs_real_checker_maps_to_the_identity_result(crs):
+    res = run(identity.RealIdentityChecker().check(vendor_t()))
+    assert res.status == "verified" and res.source == "crs-sandbox" and res.test_identity_id == "P19" and res.summary.startswith("CRS identity check: pass")
+
+
+# ---------------------------------------------------------------- the call decision
+
+
+def call_world(session, monkeypatch, sender="ar@test-co.example", answer="Yes, we did"):
+    held_world(session)
+    settle_fixture_call(session)
+    session.get(Message, "msg_t").from_addr = sender
+    session.get(Message, "msg_t").is_attack = sender != "ar@test.example"
+    session.commit()
+    monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
+    verify.MOCK_ANSWERS["pay_t"] = answer
+
+
+@pytest.fixture
+def phones(monkeypatch, allowed):
+    monkeypatch.setattr(contacts, "MOCK_OVERRIDES", {"ven_t": "+14155550100"})
+    yield
+    verify.MOCK_ANSWERS.clear()
+
+
+def held_events(monkeypatch):
+    seen = []
+    orig = verify.ev.emit
+
+    async def spy(e):
+        seen.append(e)
+        return await orig(e)
+
+    monkeypatch.setattr(verify.ev, "emit", spy)
+    return seen
+
+
+def test_crs_pass_and_a_confirmed_call_releases_and_pays(session, crs, phones, monkeypatch):
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example")
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.confirmed and res.payment_status == PaymentStatus.pending  # released
+    assert crs_audit(session)[0].detail_json["status"] == "pass"
+    run(payments.pay_payment(session, "pay_t"))
+    assert status(session).status == PaymentStatus.paid
+
+
+@pytest.mark.parametrize("fraud_score,expected", [(88, "fail"), (45, "review")])
+def test_crs_review_or_fail_keeps_a_confirmed_call_held_with_the_crs_reasons(session, crs, phones, monkeypatch, fraud_score, expected):
+    crs.fraud_p19 = fraud_score
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example" if expected == "review" else "ar@test-co.example")
+    seen = held_events(monkeypatch)
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.confirmed and res.payment_status == PaymentStatus.held  # the call happened, money did not move
+    assert crs_audit(session)[0].detail_json["status"] == expected
+    reasons = " | ".join(r for e in seen if e.type == "payment.held" for r in e.reasons)
+    assert "CRS fraud finder" in reasons and f"the CRS identity check is {expected}" in reasons
+    with pytest.raises(payments.TransferRefused):
+        run(payments.pay_payment(session, "pay_t"))
+    assert "held_after_verification" in actions(session)
+
+
+def test_crs_denied_call_blocks_whatever_crs_said(session, crs, phones, monkeypatch):
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example", answer="No, we never changed banks")
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.denied and status(session).status == PaymentStatus.blocked
+
+
+def test_crs_timeout_still_calls_and_a_confirmed_call_stays_held(session, crs, phones, monkeypatch):
+    crs.fail_all = True
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example")
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.confirmed and res.payment_status == PaymentStatus.held
+    assert crs_audit(session)[0].detail_json["status"] == "review"
+
+
+class SpyCaller:
+    dialed: list[str] = []
+
+    async def call(self, phone, question_last4, vendor_name, is_attack, payment_id):
+        SpyCaller.dialed.append(phone)
+        return CallOutcome.confirmed, [{"speaker": "vendor", "text": "Yes"}]
+
+
+def test_crs_reverse_fail_means_that_number_is_not_dialed_and_the_next_one_is(session, crs, phones, monkeypatch):
+    crs.reverse_script = [[]]  # the first number is not listed to the contact; the second is (the default answer)
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example")
+    SpyCaller.dialed = []
+    monkeypatch.setattr(verify, "get_caller", lambda: SpyCaller())
+    res = run(verify.start_verification("pay_t", session))
+    assert SpyCaller.dialed == ["+14155550100"] and res.number_flagged  # the on-file +14155550142 was skipped
+    assert crs_audit(session)[0].detail_json["dial_index"] == 1
+
+
+def test_crs_reverse_fail_on_every_number_dials_nothing_and_holds_for_the_controller(session, crs, phones, monkeypatch):
+    crs.reverse_script = [[], []]
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test.example")
+    SpyCaller.dialed = []
+    monkeypatch.setattr(verify, "get_caller", lambda: SpyCaller())
+    seen = held_events(monkeypatch)
+    res = run(verify.start_verification("pay_t", session))
+    assert SpyCaller.dialed == [] and res.needs_controller and res.payment_status == PaymentStatus.held and not res.in_progress
+    assert "verification_not_dialed" in actions(session)
+    assert any("does not belong to the vendor's known contact" in r for e in seen if e.type == "payment.held" for r in e.reasons)
+    assert not [e for e in seen if e.type == "call.started"]
+
+
+def test_mock_crs_behaves_exactly_as_before(session, crs, phones, monkeypatch):
+    assert get_settings().mock_crs is True  # the default
+    call_world(session, monkeypatch, sender="ar@test-co.example")  # a lookalike sender: only a real CRS would object
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.confirmed and res.payment_status == PaymentStatus.pending
+    assert crs.calls == [] and crs_audit(session) == []
+
+
+def test_crs_logs_and_audit_never_hold_a_token_password_or_personal_field(session, crs, phones, monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    crs.expire_first_token = True
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test-co.example")
+    run(verify.start_verification("pay_t", session))
+    audit = " ".join(str(a.detail_json) for a in session.exec(select(AuditLog)))
+    for secret in CRS_SECRETS + ("KAYLA", "BRENNAN", "grace.nakamura", "kb.9921x"):
+        assert secret not in caplog.text and secret not in audit, secret
+
+
+def test_vendor_identity_endpoint_keeps_the_vendor_and_the_request_apart(fdb, crs, monkeypatch):
+    client, eng = fdb
+    assert client.get("/api/vendors/ven_nope/identity").status_code == 404
+    assert client.get("/api/vendors/ven_t/identity").json() == {"status": None, "vendor": None, "latest_request": None}
+    use_crs(monkeypatch)
+    monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
+    monkeypatch.setattr(contacts, "MOCK_OVERRIDES", {"ven_t": "+14155550100"})
+    monkeypatch.setattr(get_settings(), "allowed_call_numbers", "+14155550142")
+    with Session(eng) as s:
+        settle_fixture_call(s)
+        run(verify.start_verification("pay_t", s))  # the request comes from the lookalike ar@test-co.example
+    body = client.get("/api/vendors/ven_t/identity").json()
+    v, r = body["vendor"], body["latest_request"]
+    assert body["status"] == v["status"] == "pass" and v["persona"] == "P19"  # the vendor itself is fine
+    assert [c["name"] for c in v["checks"]] == ["reverse_phone", "owner_identity_verification"]
+    assert v["summary"].startswith("vendor Test Co clear")
+    assert r["status"] == "fail" and r["persona"] == "P13" and r["requested_by_domain"] == "test-co.example" and r["payment_id"] == "pay_t"
+    assert [c["name"] for c in r["checks"]] == ["fraud_finder", "identity_verification"]
+    assert r["summary"].startswith("request from test-co.example flagged: ") and "email risk score 88" in r["summary"]
+    assert not any(secret in _json.dumps(body) for secret in CRS_SECRETS + ("KAYLA", "BRENNAN"))
+
+
+def test_vendor_identity_endpoint_for_a_clean_request_shows_both_clear(fdb, crs, monkeypatch):
+    client, eng = fdb
+    use_crs(monkeypatch)
+    monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
+    monkeypatch.setattr(contacts, "MOCK_OVERRIDES", {"ven_t": "+14155550100"})
+    monkeypatch.setattr(get_settings(), "allowed_call_numbers", "+14155550142")
+    with Session(eng) as s:
+        settle_fixture_call(s)
+        s.get(Message, "msg_t").from_addr = "ar@test.example"
+        s.commit()
+        run(verify.start_verification("pay_t", s))
+    body = client.get("/api/vendors/ven_t/identity").json()
+    assert body["status"] == "pass" and body["vendor"]["status"] == "pass" and body["latest_request"]["status"] == "pass"
+    assert body["latest_request"]["summary"].startswith("request from test.example clear")
+
+
+def test_crs_summaries_say_which_subject_each_result_is_about(crs):
+    out = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test-co.example", "phones": ["+14155550142"]}))
+    assert out["vendor"]["status"] == "pass" and out["request"]["status"] == "fail"
+    assert out["request"]["summary"].startswith("request from test-co.example flagged: fraud finder: email risk score 88")
+    assert "vendor fraud finder" not in out["summary"] and "request fraud finder fail" in out["summary"]
+    assert any(r.endswith("(request from test-co.example)") for r in identity.hold_reasons(out))
+    assert not any(r.endswith(")") and "reverse phone" in r for r in identity.hold_reasons(out))  # vendor-side reasons carry no request tag
+    clean = run(identity.check_vendor_for(vendor_t()))  # no request: the vendor's own standing only
+    assert clean["request"] is None and clean["vendor"]["summary"] == "vendor Test Co clear (2/2 checks passed)"
+
+
+def test_the_old_crs_stub_message_is_gone():
+    assert "not built yet" not in Path(identity.__file__).read_text()
+
+
+# ---------------------------------------------------------------- the payment run is not slowed down by CRS
+
+
+def _timed_run(tmp_path, monkeypatch, seed_template, label: str, real: bool):
+    """One seeded payment run. Returns (seconds, run body, CRS requests made). CRS is mocked HTTP with 1 s of latency per request."""
+    from sqlalchemy import event as sa_event
+
+    from app.main import app
+    from tests.conftest import copy_seeded
+
+    eng = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path, label + '.sqlite')}", connect_args={"check_same_thread": False})
+
+    @sa_event.listens_for(eng, "connect")
+    def _wal(conn, _):
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+
+    use_engine(monkeypatch, eng)
+    monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
+    monkeypatch.setattr(get_settings(), "mock_crs", not real)
+    fake = Crs(delay=1.0)
+    identity.set_transport(fake.transport())
+    with TestClient(app) as client:
+        t0 = time.perf_counter()
+        r = client.post("/api/payment-runs")
+        assert r.status_code == 202, r.text
+        rid = r.json()["run_id"]
+        while time.perf_counter() - t0 < 60:
+            g = client.get(f"/api/payment-runs/{rid}").json()
+            if g["status"] != "running":
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("run did not finish")
+        return time.perf_counter() - t0, g, len(fake.calls)
+
+
+@pytest.mark.slow
+def test_a_full_run_with_real_crs_makes_few_requests_and_changes_no_outcome(tmp_path, monkeypatch, seed_template):
+    """Wall-clock times are printed for information only (they swing a lot on a shared machine); the assertions test the design."""
+    import statistics
+
+    monkeypatch.setenv("CRS_USERNAME", "crs-user")
+    monkeypatch.setenv("CRS_PASSWORD", "pw-secret")
+    mock = [_timed_run(tmp_path, monkeypatch, seed_template, f"mock{i}", real=False) for i in range(3)]
+    real = [_timed_run(tmp_path, monkeypatch, seed_template, f"real{i}", real=True) for i in range(3)]
+    m_s, r_s = [x[0] for x in mock], [x[0] for x in real]
+    print(f"\nrun timing (info only): MOCK_CRS=true {[round(x, 2) for x in m_s]} median {statistics.median(m_s):.2f}s; "
+          f"real CRS at 1 s/request {[round(x, 2) for x in r_s]} median {statistics.median(r_s):.2f}s; "
+          f"median difference {statistics.median(r_s) - statistics.median(m_s):+.2f}s; CRS requests per run {[x[2] for x in real]}")
+    for _, body, n in real:
+        assert n <= 8, n  # a whole seeded run makes at most 8 live CRS requests
+        assert body["totals"] == mock[0][1]["totals"]  # 37 paid, 1 held, 2 blocked, as with the mock
+    identity.set_transport(None)
+
+
+def test_the_three_checks_of_one_vendor_run_at_the_same_time(crs):
+    run(identity.get_client().post("/fraud-finder/fraud-finder", {"email": "x@example.com"}))  # log in first, so only the checks are timed
+    crs.delay = 1.0
+    t = time.perf_counter()
+    out = run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    took = time.perf_counter() - t
+    assert out["status"] == "pass" and took < 1.5, took  # three 1 s requests side by side, not 3 s one after another
+
+
+def test_a_second_identity_check_for_the_same_subject_makes_no_new_requests(crs):
+    run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    before = len(crs.calls)
+    run(identity.check_vendor_for(vendor_t(), {"request_email": "ar@test.example", "phones": ["+14155550142"]}))
+    assert len(crs.calls) == before
+    assert run(identity.RealIdentityChecker().check(vendor_t())).status == "verified" and len(crs.calls) == before  # the run's path shares the cache
+
+
+def test_the_runs_identity_step_gives_up_after_4_seconds_and_says_unverified(crs, monkeypatch):
+    crs.delay = 30.0  # CRS hangs
+    t = time.perf_counter()
+    res = run(identity.RealIdentityChecker().check(vendor_t()))
+    took = time.perf_counter() - t
+    assert res.status == "unverified" and "crs_unavailable" in res.flags and 3.5 <= took < 4.5, took
