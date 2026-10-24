@@ -6,10 +6,11 @@ import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
   Attack,
-  InboxThread,
+  InboxMessage,
+  InboxThreadDetail,
+  InboxThreadSummary,
   LaunchAttackRequest,
   LaunchAttackResponse,
-  Message,
   Invoice,
   PaymentDetail,
   PaymentRun,
@@ -57,9 +58,11 @@ export const api = {
   vendors: () => get<Vendor[]>("/api/vendors"),
   vendorHistory: (vendorId: string) => get<VendorHistory>(`/api/vendors/${vendorId}/history`),
 
-  threads: () => get<InboxThread[]>("/api/inbox/threads"),
-  addMessage: (msg: Pick<Message, "thread_id" | "from_addr" | "subject" | "body"> & { reply_to?: string }) =>
-    post<Message>("/api/inbox/messages", msg),
+  threads: () => get<InboxThreadSummary[]>("/api/inbox/threads"),
+  thread: (threadId: string) => get<InboxThreadDetail>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
+  /** Omit thread_id to start a new thread (it has no vendor). The vendor always comes from the thread, never the sender. */
+  addMessage: (msg: { thread_id?: string; from_addr: string; reply_to?: string; subject: string; body: string }) =>
+    post<InboxMessage>("/api/inbox/messages", msg),
   uploadInvoice: (file: File) => {
     const form = new FormData();
     form.append("file", file);

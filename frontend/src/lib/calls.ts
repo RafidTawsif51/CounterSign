@@ -3,6 +3,9 @@
 
 import type { CallOutcome, ContactSource, PaymentDetail, RunEvent, TranscriptLine, VendorContact } from "@/lib/types";
 
+/** A stored contact or a history contact (phone masked to the last four). Both carry what the trust line needs. */
+export type ContactLike = Pick<VendorContact, "id" | "phone" | "source" | "source_url" | "first_seen">;
+
 /** queued: held for a call that has not started. dialing: started, nobody has spoken. live: talking. ended: outcome in. */
 export type CallPhase = "queued" | "dialing" | "live" | "ended";
 
@@ -97,7 +100,7 @@ export interface NumberTrust {
   crossCheck: { source: ContactSource; url: string | null; matches: boolean } | null;
 }
 
-export function numberTrust(dialed: VendorContact | null, others: VendorContact[]): NumberTrust {
+export function numberTrust(dialed: ContactLike | null, others: ContactLike[]): NumberTrust {
   if (!dialed) return { phone: null, source: null, since: null, crossCheck: null };
   const independent = others.find((c) => c.id !== dialed.id && c.source !== dialed.source && c.source !== "on_file") ?? null;
   return {
@@ -105,9 +108,10 @@ export function numberTrust(dialed: VendorContact | null, others: VendorContact[
     source: dialed.source,
     since: dialed.first_seen,
     crossCheck: independent
-      ? { source: independent.source, url: independent.source_url, matches: digits(independent.phone) === digits(dialed.phone) }
+      ? { source: independent.source, url: independent.source_url, matches: last4(independent.phone) === last4(dialed.phone) }
       : null,
   };
 }
 
-const digits = (p: string) => p.replace(/\D/g, "");
+// The history route masks phones to the last four digits, so that is all two numbers can be compared on.
+const last4 = (p: string) => p.replace(/\D/g, "").slice(-4);

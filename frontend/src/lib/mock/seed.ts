@@ -293,6 +293,8 @@ openInvoices.sort((a, b) => (a.id < b.id ? -1 : 1));
 // ---------- Lookups ----------
 
 export const vendorById = new Map(vendors.map((v) => [v.id, v]));
+/** Typical invoice size and cadence per vendor, for the mock's 12 months of history. */
+export const vendorProfile = new Map(SPECS.map((v) => [`ven_${v.key}`, { base: v.base, kind: v.kind, rate: v.rate, terms: v.terms }]));
 export const accountByVendor = new Map(bankAccounts.map((a) => [a.vendor_id, a]));
 
 // ---------- helpers ----------

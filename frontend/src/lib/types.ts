@@ -310,18 +310,91 @@ export interface RemittanceDetails {
   account_last4: string;
 }
 
-export interface VendorHistory {
-  vendor: Vendor;
-  invoices: Invoice[];
-  bank_accounts: VendorBankAccount[];
-  contacts: VendorContact[];
-  calls: VerificationCall[];
+/** The stored CRS identity result for a vendor (backend services/identity.py IdentityResult). */
+export interface IdentityResult {
+  vendor_id: string;
+  status: "verified" | "unverified" | "flagged";
+  match_score: number;
+  test_identity_id: string;
+  flags: string[];
+  summary: string;
+  checked_at: ISODateTime;
+  source: "crs-sandbox" | "crs-sandbox-mock";
 }
 
-export interface InboxThread {
+/** A contact as the history route returns it: the phone is masked to `+1***0142` (last four only). */
+export interface HistoryContact {
+  id: string;
+  source: ContactSource;
+  source_url: string | null;
+  phone: string;
+  first_seen: ISODateTime;
+  last_verified: ISODateTime | null;
+}
+
+export interface HistoryInvoice {
+  id: string;
+  number: string | null;
+  amount_usd: number | null;
+  due_date: ISODate | null;
+  has_pdf: boolean;
+  remittance: Record<string, unknown> | null;
+  payment_id: string | null;
+  status: PaymentStatus | "open";
+  score: number | null;
+  decision: Decision | null;
+  hard_rules_fired: string[];
+}
+
+export interface HistoryBankAccount {
+  id: string;
+  bank_name: string;
+  account_last4: string;
+  valid_from: ISODateTime;
+  valid_to: ISODateTime | null;
+  /** The vendor's verified account: the one money may go to. */
+  trusted: boolean;
+  current: boolean;
+  verified_by_call_id: string | null;
+  /** "onboarding", "phone call: confirmed", "requested, not verified". */
+  verified_by: string;
+}
+
+/** GET /api/vendors/{id}/history. Shape from backend/app/services/vendors.py. */
+export interface VendorHistory {
+  vendor: Vendor;
+  /** Null only if the check could not run; the route runs it once for a vendor with no result on file. */
+  identity: IdentityResult | null;
+  summary: { invoices: number; paid: number; average_paid_usd: number | null; max_paid_usd: number | null };
+  /** Newest first. */
+  invoices: HistoryInvoice[];
+  bank_accounts: HistoryBankAccount[];
+  contacts: HistoryContact[];
+  calls: (Omit<VerificationCall, "contact_id"> & { contact: Omit<HistoryContact, "first_seen" | "last_verified"> | null })[];
+}
+
+/** GET /api/inbox/threads, newest activity first. Shape from backend/app/services/ingest.py. */
+export interface InboxThreadSummary {
   thread_id: string;
-  vendor_id: string | null;
-  messages: Message[];
+  vendor: { id: string; name: string } | null;
+  subject: string; // untrusted
+  preview: string; // untrusted
+  count: number;
+  /** The seed's ground truth, not a detection. The inbox never shows it; attack markers come from what the run caught. */
+  has_attack: boolean;
+  last_received_at: ISODateTime;
+  /** Invoice PDFs in the thread. Proposed: not returned by the backend yet, so the marker hides when it is missing. */
+  attachment_count?: number;
+}
+
+export interface InboxMessage extends Message {
+  is_html: boolean;
+  invoice_ids: string[];
+}
+
+/** GET /api/inbox/threads/{thread_id}: the summary plus every message, oldest first. */
+export interface InboxThreadDetail extends InboxThreadSummary {
+  messages: InboxMessage[];
 }
 
 /** One sentence of an /ask answer and the stored record that backs it. */

@@ -11,9 +11,10 @@ import {
   subscribeMockRun,
 } from "@/lib/mock/run";
 import { mockAsk } from "@/lib/mock/ask";
-import { bankAccounts, contacts, openInvoices, vendors } from "@/lib/mock/seed";
+import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, resetMockInbox } from "@/lib/mock/inbox";
+import { vendors } from "@/lib/mock/seed";
 import { ApiError } from "@/lib/api-error";
-import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus, VendorHistory } from "@/lib/types";
+import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
 
 export class MockNotImplementedError extends Error {
   constructor(method: string, path: string) {
@@ -38,8 +39,17 @@ type Handler = (params: Record<string, string>, body: unknown) => unknown;
 const routes: [string, Handler][] = [
   ["GET /api/system/status", () => systemStatus],
   ["GET /api/vendors", () => vendors],
-  ["GET /api/vendors/:vendorId/history", ({ vendorId }) => vendorHistory(vendorId) ?? notFound(`/api/vendors/${vendorId}/history`)],
-  ["POST /api/demo/reset", () => resetMockRuns()],
+  ["GET /api/vendors/:vendorId/history", ({ vendorId }) => mockVendorHistory(vendorId)],
+  ["GET /api/inbox/threads", () => mockThreads()],
+  ["GET /api/inbox/threads/:threadId", ({ threadId }) => mockThread(threadId)],
+  ["POST /api/inbox/messages", (_, body) => mockAddMessage(body)],
+  [
+    "POST /api/demo/reset",
+    () => {
+      resetMockRuns();
+      resetMockInbox();
+    },
+  ],
   [
     "POST /api/payment-runs",
     (): StartRunResponse => {
@@ -69,19 +79,6 @@ function match(pattern: string, method: string, path: string): Record<string, st
     else if (want[i] !== got[i]) return null;
   }
   return params;
-}
-
-/** The mock world has no past invoices or calls; this week's open invoices stand in for history. */
-function vendorHistory(vendorId: string): VendorHistory | null {
-  const vendor = vendors.find((v) => v.id === vendorId);
-  if (!vendor) return null;
-  return {
-    vendor,
-    invoices: openInvoices.filter((i) => i.vendor_id === vendorId).map(({ planted: _planted, ...invoice }) => invoice),
-    bank_accounts: bankAccounts.filter((a) => a.vendor_id === vendorId),
-    contacts: contacts.filter((c) => c.vendor_id === vendorId),
-    calls: [],
-  };
 }
 
 function questionOf(body: unknown): string {

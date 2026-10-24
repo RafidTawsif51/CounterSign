@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { CALL_LIMIT_S, numberTrust, type CallPhase, type NumberTrust } from "@/lib/calls";
-import type { CallOutcome, ContactSource, PaymentStatus, VendorContact } from "@/lib/types";
+import { CALL_LIMIT_S, numberTrust, type CallPhase, type ContactLike, type NumberTrust } from "@/lib/calls";
+import type { CallOutcome, ContactSource, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // Pieces shared by the drawer's call panel and the board's call strip.
@@ -102,7 +102,7 @@ export function LimitLine({ elapsed, className }: { elapsed: number; className?:
  * Where the dialed number came from and who else vouches for it. Before the call starts the record has no dialed
  * contact yet, so it falls back to the vendor's contact with the call's source (on file, which verify.py prefers).
  */
-export function useNumberTrust(vendorId: string | null, dialed: VendorContact | null, source: ContactSource | null): NumberTrust {
+export function useNumberTrust(vendorId: string | null, dialed: ContactLike | null, source: ContactSource | null): NumberTrust {
   const { data } = useQuery({
     queryKey: ["vendor-history", vendorId],
     queryFn: () => api.vendorHistory(vendorId!),

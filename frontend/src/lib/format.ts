@@ -84,7 +84,10 @@ export function formatDate(value: string | null | undefined): string {
 export function formatPhoneMasked(phone: string | null | undefined): string {
   if (!phone) return EMPTY;
   const m = phone.match(/^\+1(\d{3})\d{3}(\d{4})$/);
-  return m ? `(${m[1]})${NBSP}${MASK.slice(0, 3)}-${m[2]}` : formatAccount(phone);
+  if (m) return `(${m[1]})${NBSP}${MASK.slice(0, 3)}-${m[2]}`;
+  // Already masked by the API (`+1***0142`): only the last four are known.
+  const masked = phone.match(/^\+\d\*+(\d{4})$/);
+  return masked ? `(${MASK.slice(0, 3)})${NBSP}${MASK.slice(0, 3)}-${masked[1]}` : formatAccount(phone);
 }
 
 const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" });

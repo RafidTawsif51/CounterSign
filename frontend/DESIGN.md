@@ -23,7 +23,7 @@ These are hard rules. A screen that breaks one is not done.
 - No "Welcome back!" or similar fluff. No lorem ipsum. No generic placeholders ("Item 1", "John Doe", "Acme"). All copy is specific to AP work and uses the demo data (Ridgeline Builders, its vendors, Maria, Dev).
 - No centered-everything layouts. Content is left-aligned on a grid. Numbers are right-aligned.
 - Do not make every number a giant KPI card. A run has at most one headline figure; the rest live in the table.
-- No status color used for decoration. Green, amber and brick mean paid, held and blocked. Nothing else.
+- No status color used for decoration. Green, amber and brick mean paid, held and blocked. Nothing else, except that brick also marks attack evidence (a lookalike sender, a Reply-To mismatch, revealed hidden text, a detected attack), because that evidence is what blocks a payment.
 - No shadows on panels, rows or buttons. Shadows are for overlays only.
 - No pill-shaped controls or badges.
 - No ALL CAPS labels, no labels joined with middle dots ("A · B · C"), no arrows appended to button text.
@@ -133,6 +133,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `iconProps` | `shared/icon.ts` | Spread onto every lucide icon. |
 | `VerificationCallPanel` | `call/verification-call-panel.tsx` | The drawer's call section. Leads with why the number is trusted (source, since when, independent match, never the email), then live state, 60-second limit line, transcript, and a full-width outcome bar in the payment status it caused. Type is a step larger than the rest of the drawer so it reads from across a table. |
 | `AskPanel` | `payment/ask-panel.tsx` | "Ask about this payment" in the drawer, under the header; also opened by the ⌘K "Ask why…" command. Suggested questions are link buttons, the first matching the payment's status. The answer is rendered from the response's claims in order, each claim's text followed by its evidence id as a chip (the prose answer only when there are no claims): hover highlights the drawer element that backs it, click scrolls to it. A thin line runs against the 5-second budget while waiting; the time taken shows in mono. No avatar, no typing dots, no sparkles. |
+| Inbox | `inbox/` | Three panes: threads 320px, thread, vendor context 300px (below xl the context follows the thread). Headers collapse to one line; a lookalike domain or a Reply-To that differs from the sender is marked inline in brick with a short reason, the differing characters underlined. The attack marker appears only once the run has caught something, never from seed data. A new message gets an accent-tint highlight that fades over 1s. |
+| `InvoicePreview` | `inbox/invoice-preview.tsx` | The invoice page at US Letter proportions with "Reveal hidden content": hidden text is outlined in brick in place, legible, with its technique and confidence on a brick tab. 150ms, no zoom. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
@@ -143,6 +145,7 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 - Overlays use the theme animations: `animate-fade-in` / `animate-fade-out` (scrims, tooltips), `animate-pop-in` / `animate-pop-out` (dialogs, menus: fade plus 2px rise), `animate-sheet-in` / `animate-sheet-out` (drawer). No zoom, no bounce.
 - framer-motion is only for the allowed state changes that CSS cannot do cleanly (a number ticking, a row reordering). `MotionConfig reducedMotion="user"` is set at the root.
 - Animate only state changes: a row turning held or blocked, a number ticking, a drawer opening, a toast arriving. Never animate on page load, on scroll, or on hover beyond a color change.
+- Arrivals: a new message or thread gets the accent tint at once and fades it over 1s (the one transition longer than 200ms; it fades, it never moves).
 - One exception loops: the mark of a verification call in progress pulses with `animate-call-pulse` (opacity, 2s). It stops when the call ends. Nothing else loops; no audio-wave graphics.
 - `prefers-reduced-motion` is respected globally in `globals.css`. Do not override it.
 
