@@ -50,6 +50,7 @@ from app.models import (
     Attack,
     AttackResult,
     AttackSource,
+    payment_id_for_invoice,
     AuditActor,
     Invoice,
     Message,
@@ -238,7 +239,7 @@ def _build(
         attacker_name=attacker_name, source=source, card=card, payload_ref=msg.id,
         moderation_status=ModerationStatus.pending if source == AttackSource.bounty_email else ModerationStatus.approved)
     attack.detail_json = {"subject": subject, "from_addr": from_addr, "body": body[:4000], "has_pdf": pdf is not None, "amount_usd": inv.amount_usd,
-                          "outcome": "processing", "reasons": [], "paid_usd": 0.0}
+                          "outcome": "processing", "reasons": [], "paid_usd": 0.0, "invoice_id": inv.id, "payment_id": payment_id_for_invoice(inv.id)}
     run_id = new_id("run")
     s.add_all([msg, inv, attack, PaymentRun(id=run_id, totals_json={"invoice_count": 1, "kind": "attack", "attack_id": attack.id})])
     actor = AuditActor.system if source == AttackSource.bounty_email else AuditActor.human
@@ -262,7 +263,7 @@ async def _launch(attack: Attack, msg: Message, inv: Invoice, run_id: str) -> di
         if queued:
             await ev.emit(ev.AttackQueued(run_id=run_id, attack_id=attack.id, position=position, waiting_for=waiting_for))
         _queue.put_nowait(Job(attack.id, run_id, inv.id))  # only now can the worker start it, so the events above come first
-    return {"attack_id": attack.id, "message_id": msg.id, "invoice_id": inv.id, "run_id": run_id, "queued": queued, "position": position, "waiting_for": waiting_for}
+    return {"attack_id": attack.id, "message_id": msg.id, "invoice_id": inv.id, "payment_id": payment_id_for_invoice(inv.id), "run_id": run_id, "queued": queued, "position": position, "waiting_for": waiting_for}
 
 
 # ---------------------------------------------------------------- POST /api/attacks
@@ -348,12 +349,12 @@ def leaderboard_row(a: Attack) -> dict:
     row = {
         "id": a.id, "handle": mask_handle(a.attacker_name) if bounty else a.attacker_name, "source": a.source.value, "card": a.card,
         "result": a.result.value if a.result else None, "outcome": d.get("outcome", "processing"), "top_reasons": d.get("reasons", [])[:3],
-        "amount_usd": d.get("amount_usd"), "paid_usd": d.get("paid_usd", 0.0), "created_at": a.created_at, "moderation_status": a.moderation_status.value,
+        "amount_usd": d.get("amount_usd"), "paid_usd": d.get("paid_usd", 0.0), "payment_id": d.get("payment_id"), "created_at": a.created_at, "moderation_status": a.moderation_status.value,
         "text": None,
     }
     if bounty and a.moderation_status != ModerationStatus.approved:
         # Until a moderator approves it a bounty row shows only the handle and the result: no reasons, outcome or amounts.
-        row.update(outcome=None, top_reasons=[], amount_usd=None, paid_usd=None)
+        row.update(outcome=None, top_reasons=[], amount_usd=None, paid_usd=None, payment_id=None)
     if a.moderation_status == ModerationStatus.approved:  # the attack text is shown only once a person approved it
         row["text"] = {"subject": d.get("subject"), "from_addr": _mask_addr(d["from_addr"]) if bounty and d.get("from_addr") else d.get("from_addr"),
                        "body": (d.get("body") or "")[:2000], "has_pdf": d.get("has_pdf", False)}

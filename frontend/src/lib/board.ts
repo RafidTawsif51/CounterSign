@@ -44,8 +44,6 @@ export interface BoardState {
   invoiceCount: number | null;
 }
 
-const paymentIdFor = (invoiceId: string) => "pay_" + invoiceId.slice("inv_".length);
-
 /** The short, evidence-first reason a payment was held: its two heaviest signals in plain words. */
 function heldBecause(row: BoardRow, signals: { name: string; weight: number }[]) {
   const top = [...signals]
@@ -90,7 +88,7 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
       continue;
     }
     if (e.type === "invoice.parsed") {
-      const pid = paymentIdFor(e.invoice_id);
+      const pid = e.payment_id;
       if (!rows.has(pid)) order.push(pid);
       rows.set(pid, {
         paymentId: pid,
@@ -109,7 +107,7 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
       continue;
     }
     if (e.type === "injection.detected") {
-      const row = e.invoice_id ? rows.get(paymentIdFor(e.invoice_id)) : undefined;
+      const row = e.payment_id ? rows.get(e.payment_id) : undefined;
       if (!row) continue;
       row.technique = e.technique;
       row.updatedAt = e.at;

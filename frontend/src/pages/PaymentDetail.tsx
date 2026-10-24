@@ -15,7 +15,6 @@ import { PaymentHeader } from "@/components/payment/payment-header";
 import { RiskBreakdown } from "@/components/payment/risk-breakdown";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { ApiError, api } from "@/lib/api";
-import { invoiceIdFor } from "@/lib/run-summary";
 
 export function PaymentDetail() {
   const { paymentId = "" } = useParams<{ paymentId: string }>();
@@ -64,9 +63,7 @@ function useLiveRefresh(paymentId: string) {
   const { allEvents: events } = useCurrentRun();
   const queryClient = useQueryClient();
   const last = events.at(-1);
-  const invoiceId = invoiceIdFor(paymentId);
-  const relevant =
-    last && (("payment_id" in last && last.payment_id === paymentId) || ("invoice_id" in last && last.invoice_id === invoiceId));
+  const relevant = last && "payment_id" in last && last.payment_id === paymentId;
 
   useEffect(() => {
     if (relevant) void queryClient.invalidateQueries({ queryKey: ["payment", paymentId] });

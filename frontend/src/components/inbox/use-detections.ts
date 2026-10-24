@@ -4,8 +4,6 @@ import { useCurrentRun } from "@/components/shared/run-context";
 import { api } from "@/lib/api";
 import { detectionFor, type Detection } from "@/lib/inbox";
 
-const paymentIdFor = (invoiceId: string) => "pay_" + invoiceId.slice("inv_".length);
-
 /**
  * Threads the current run caught an attack in, by thread id. Only payments the run held or blocked (or whose invoice
  * had hidden instructions) are looked up, so this stays a handful of requests; each payment record names its email,
@@ -17,7 +15,7 @@ export function useDetections(): Map<string, Detection & { threadId: string }> {
     const ids = new Set<string>();
     for (const e of events) {
       if (e.type === "payment.held" || e.type === "payment.blocked") ids.add(e.payment_id);
-      if (e.type === "injection.detected" && e.invoice_id) ids.add(paymentIdFor(e.invoice_id));
+      if (e.type === "injection.detected" && e.payment_id) ids.add(e.payment_id);
     }
     return [...ids].sort();
   }, [events]);

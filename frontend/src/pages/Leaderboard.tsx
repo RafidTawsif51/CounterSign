@@ -108,6 +108,7 @@ function merge(rows: LeaderboardRow[], live: Map<string, AttackLoggedEvent>): Le
       card: e.card,
       result: e.result,
       outcome: "processing",
+      payment_id: null,
       top_reasons: [],
       amount_usd: null,
       paid_usd: 0,

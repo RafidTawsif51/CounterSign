@@ -131,7 +131,7 @@ const CLEAN_PLAN: PaymentPlan = {
 function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
   const vendor = vendorById.get(inv.vendor_id)!;
   const pid = paymentId(inv.id);
-  const parsed: Draft = { type: "invoice.parsed", invoice_id: inv.id, vendor: vendor.name, amount_usd: inv.amount_usd };
+  const parsed: Draft = { type: "invoice.parsed", invoice_id: inv.id, payment_id: pid, vendor: vendor.name, amount_usd: inv.amount_usd };
   const extract = rng.between(700, 1500);
 
   if (inv.attack) return attackScript(inv, inv.attack, rng, transferNo, parsed, extract);
@@ -158,7 +158,7 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
       { gap: extract, event: parsed },
       {
         gap: rng.between(500, 900),
-        event: { type: "injection.detected", invoice_id: inv.id, message_id: null, technique: "white_text", snippet: POISONED_HIDDEN_TEXT },
+        event: { type: "injection.detected", invoice_id: inv.id, payment_id: pid, message_id: null, technique: "white_text", snippet: POISONED_HIDDEN_TEXT },
       },
       { gap: rng.between(150, 300), event: { type: "risk.scored", payment_id: pid, score: 0, decision: "hold", top_signals: [] } },
       { gap: 40, event: { type: "payment.blocked", payment_id: pid, reason: QUARANTINE_REASON } },
@@ -262,7 +262,7 @@ function attackScript(inv: OpenInvoice, a: AttackPlan, rng: Rng, transferNo: () 
       plan,
       steps: [
         { gap: extract, event: parsed },
-        { gap: rng.between(500, 900), event: { type: "injection.detected", invoice_id: inv.id, message_id: null, technique, snippet: a.snippet ?? "" } },
+        { gap: rng.between(500, 900), event: { type: "injection.detected", invoice_id: inv.id, payment_id: pid, message_id: null, technique, snippet: a.snippet ?? "" } },
         { gap: rng.between(150, 300), event: { type: "risk.scored", payment_id: pid, score, decision: "hold", top_signals: top } },
         { gap: 40, event: { type: "payment.blocked", payment_id: pid, reason: QUARANTINE_REASON } },
         { gap: 20, event: who("caught") },

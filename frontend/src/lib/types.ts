@@ -90,6 +90,7 @@ export interface Invoice {
 /** 201 from POST /api/invoices/upload. */
 export interface UploadInvoiceResponse {
   invoice_id: string;
+  payment_id: string;
   message_id: string | null;
   vendor_id: string | null;
   size_bytes: number;
@@ -147,6 +148,12 @@ export interface InjectionFinding {
   technique: InjectionTechnique;
   snippet: string; // untrusted
   confidence: number;
+  /** PDF findings only: 1-based page, box [x0, top, x1, bottom] in PDF points from the top left, and the page size.
+   *  Off-page text keeps its real coordinates, so the box can lie outside the page. Null for email findings. */
+  page?: number | null;
+  bbox?: [number, number, number, number] | null;
+  page_width?: number | null;
+  page_height?: number | null;
 }
 
 export interface TranscriptLine {
@@ -200,12 +207,16 @@ export interface RunStartedEvent extends EventBase {
 export interface InvoiceParsedEvent extends EventBase {
   type: "invoice.parsed";
   invoice_id: string;
+  /** The id its payment has (or will have). Never derive it from invoice_id. */
+  payment_id: string;
   vendor: string;
   amount_usd: number;
 }
 export interface InjectionDetectedEvent extends EventBase {
   type: "injection.detected";
   invoice_id: string | null;
+  /** Set when the finding is in an invoice. */
+  payment_id: string | null;
   message_id: string | null;
   technique: InjectionTechnique;
   snippet: string; // untrusted
@@ -442,13 +453,15 @@ export interface InboxThreadSummary {
   /** The seed's ground truth, not a detection. The inbox never shows it; attack markers come from what the run caught. */
   has_attack: boolean;
   last_received_at: ISODateTime;
-  /** Invoice PDFs in the thread. Proposed: not returned by the backend yet, so the marker hides when it is missing. */
-  attachment_count?: number;
+  /** Invoice PDFs in the thread. */
+  attachment_count: number;
 }
 
 export interface InboxMessage extends Message {
   is_html: boolean;
   invoice_ids: string[];
+  /** The invoices attached to this message, with the payment id each has (or will have). */
+  invoices: { id: string; payment_id: string; has_pdf: boolean }[];
 }
 
 /** GET /api/inbox/threads/{thread_id}: the summary plus every message, oldest first. */
@@ -519,6 +532,8 @@ export interface LaunchAttackResponse {
   attack_id: string;
   message_id: string;
   invoice_id: string;
+  /** The id the attack's payment has once the mini-run reads the invoice. */
+  payment_id: string;
   run_id: string;
   queued: boolean;
   position: number;
@@ -540,6 +555,8 @@ export interface LeaderboardRow {
   amount_usd: number | null;
   /** Sandbox dollars the attack got paid out. */
   paid_usd: number;
+  /** Null for a bounty email that is not approved yet. */
+  payment_id: string | null;
   created_at: ISODateTime;
   moderation_status: ModerationStatus;
   /** The attack text, only once moderation approved it. Untrusted. */

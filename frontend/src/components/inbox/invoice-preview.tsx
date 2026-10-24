@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PdfView } from "@/components/inbox/pdf-view";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { iconProps } from "@/components/shared/icon";
 import { formatAccount, formatDate, formatUSD } from "@/lib/format";
@@ -8,10 +9,11 @@ import { TECHNIQUES } from "@/lib/risk-catalog";
 import type { HistoryInvoice, InjectionFinding, Vendor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-// Invoice preview with "Reveal hidden content". The API does not serve the original PDF yet, so the page is rebuilt
-// from the stored invoice at US Letter size (612 x 792 pt). Hidden text is drawn where the seed's PDF generator puts it
-// for each technique (backend/seed/invoice_pdf.py): white text at the left margin 70 pt from the bottom, tiny font at
-// 62 pt, off-page text starting past the right edge. Unrevealed, white text is white on white, as in the PDF.
+// Invoice preview with "Reveal hidden content". The original stored PDF is drawn with pdf.js and each finding's box is laid
+// over it (components/inbox/pdf-view.tsx). Only when the invoice has no PDF, or it fails to load, is the page rebuilt from
+// the stored invoice at US Letter size (612 x 792 pt), with hidden text drawn where the seed's PDF generator puts it for
+// each technique (backend/seed/invoice_pdf.py): white text at the left margin 70 pt from the bottom, tiny font at 62 pt,
+// off-page text starting past the right edge. Unrevealed, white text is white on white, as in the PDF.
 
 // The document's own colors, not UI tokens: a PDF page is white paper with near-black type in any theme.
 const PAPER = "#ffffff";
@@ -27,18 +29,35 @@ export function InvoicePreview({
   invoice,
   vendor,
   findings,
+  pdfUrl,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The stored PDF, or null when the invoice has none (or the mock is on). */
+  pdfUrl: string | null;
   name: string;
   invoice: HistoryInvoice;
   vendor: Vendor;
   findings: InjectionFinding[];
 }) {
   const [reveal, setReveal] = useState(false);
+  const [pdfFailed, setPdfFailed] = useState(false);
+  const [width, setWidth] = useState(560);
+  const observer = useRef<ResizeObserver | null>(null);
   useEffect(() => {
     if (!open) setReveal(false);
   }, [open]);
+  const showPdf = Boolean(pdfUrl) && !pdfFailed;
+  // The dialog mounts its content after open, so watch the area through a ref callback.
+  const watch = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    const fit = () => setWidth(Math.max(280, el.clientWidth - 40));
+    observer.current = new ResizeObserver(fit);
+    observer.current.observe(el);
+    fit();
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -60,12 +79,18 @@ export function InvoicePreview({
           )}
         </div>
 
-        <div className="min-h-0 overflow-auto bg-sunken px-5 py-5">
-          <Page invoice={invoice} vendor={vendor} findings={findings} reveal={reveal} />
+        <div ref={watch} className="min-h-0 overflow-auto bg-sunken px-5 py-5">
+          {showPdf ? (
+            <PdfView url={pdfUrl!} findings={findings} reveal={reveal} width={width} onError={() => setPdfFailed(true)} />
+          ) : (
+            <Page invoice={invoice} vendor={vendor} findings={findings} reveal={reveal} />
+          )}
         </div>
 
         <p className="border-t border-rule px-5 py-2.5 text-xs text-ink-muted">
-          Rebuilt from the stored invoice; the API does not serve the original PDF yet. Hidden text sits where the PDF draws it.
+          {showPdf
+            ? "The original PDF as received. Boxes mark the text the scanner found, at the position it has in the file."
+            : "No original PDF is available for this invoice, so the page is rebuilt from the stored invoice. Hidden text sits where the PDF draws it."}
         </p>
       </DialogContent>
     </Dialog>

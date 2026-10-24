@@ -57,6 +57,7 @@ class InvoiceParsed(EventBase):
     type: Literal["invoice.parsed"] = "invoice.parsed"
     run_id: str
     invoice_id: str
+    payment_id: Optional[str] = None  # the id its payment has (or will have), so clients never derive it
     vendor: str
     amount_usd: float
 
@@ -65,6 +66,7 @@ class InjectionDetected(EventBase):
     type: Literal["injection.detected"] = "injection.detected"
     run_id: str
     invoice_id: Optional[str] = None
+    payment_id: Optional[str] = None  # set when the finding is in an invoice
     message_id: Optional[str] = None
     technique: str
     snippet: str

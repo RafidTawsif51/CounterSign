@@ -153,7 +153,7 @@ export function mockLaunchAttack(raw: unknown): LaunchAttackResponse {
 
   const runId = `run_${hex(12)}`;
   const { queued, position, waitingFor } = startMockMiniRun(runId, invoiceId);
-  return { attack_id: attackId, message_id: msg.id, invoice_id: invoiceId, run_id: runId, queued, position, waiting_for: waitingFor };
+  return { attack_id: attackId, message_id: msg.id, invoice_id: invoiceId, payment_id: "pay_" + invoiceId.split("_").slice(1).join("_"), run_id: runId, queued, position, waiting_for: waitingFor };
 }
 
 /** The instruction an HTML email hides: the comment, or the hidden element's text. */
@@ -192,6 +192,7 @@ export function mockLeaderboard(): LeaderboardResponse {
         top_reasons: a.signals.slice(0, 3).map((s) => `${s.name}: ${s.detail}`),
         amount_usd: i.amount_usd,
         paid_usd: status === "paid" ? i.amount_usd : 0,
+        payment_id: "pay_" + i.id.split("_").slice(1).join("_"),
         created_at: msg?.received_at ?? new Date().toISOString(),
         moderation_status: "approved",
         text: msg ? { subject: msg.subject, from_addr: msg.from_addr, body: msg.body.slice(0, 2000), has_pdf: Boolean(i.pdf_path) } : null,

@@ -194,3 +194,8 @@ function adaptPayment(b: BackendPayment): PaymentDetail {
     audit: b.audit.map(({ detail, ...a }) => ({ ...a, detail_json: detail })),
   };
 }
+
+/** The original stored PDF of an invoice (GET /api/invoices/{id}/pdf). */
+export function invoicePdfUrl(invoiceId: string) {
+  return `${API_URL}/api/invoices/${encodeURIComponent(invoiceId)}/pdf`;
+}

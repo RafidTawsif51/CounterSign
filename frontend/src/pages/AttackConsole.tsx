@@ -51,7 +51,7 @@ export function AttackConsole() {
       }
       pinAttack({
         runId: res.run_id,
-        paymentId: "pay_" + res.invoice_id.slice("inv_".length), // run.py: inv_x pays as pay_x
+        paymentId: res.payment_id,
         attackId: res.attack_id,
         attackerName: req.attacker_name,
         card: req.card,
