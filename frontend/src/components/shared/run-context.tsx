@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { errorMessage } from "@/lib/api-error";
+import { ApiError, errorMessage } from "@/lib/api-error";
 import { getDataMode, isMock, useDataMode, type DataMode } from "@/lib/data-mode";
 import { mergeEvents, useGlobalEvents, useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
@@ -115,15 +115,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const attackDone = pinnedEvents.some((e) => e.type === "run.completed");
 
   // A server that restarts mid-run marks the run failed without an event. Each time the stream (re)connects, ask.
+  // A run the server no longer has (reset or re-seeded while this tab was closed) is forgotten below.
   const [failedRun, setFailedRun] = useState<string | null>(null);
+  const [goneRun, setGoneRun] = useState<string | null>(null);
   useEffect(() => {
     if (!runId || status !== "live" || summary.completed) return;
     let stale = false;
     api
       .run(runId)
       .then((r) => !stale && setFailedRun(r.status === "failed" ? runId : null))
-      .catch(() => {
-        // The stream is live, so the server is up; a failed lookup is not worth surfacing.
+      .catch((err) => {
+        // The stream is live, so the server is up; any other failed lookup is not worth surfacing.
+        if (!stale && err instanceof ApiError && err.status === 404) setGoneRun(runId);
       });
     return () => {
       stale = true;
@@ -190,6 +193,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setRunId(null);
     unpin();
   }, [unpin, setRunId]);
+
+  useEffect(() => {
+    if (goneRun !== null && goneRun === runId) clearRun();
+  }, [goneRun, runId, clearRun]);
 
   // After a reset the run and every cached record are gone. Payment records (the drawer's and the board rows') are
   // dropped, not refetched: the rows are still mounted at this point and would each ask for a deleted payment.

@@ -1,6 +1,7 @@
 // Folds a run's event stream into board rows and the activity log. Pure, so the board re-derives everything from the
 // events it has and a late connection (replay) lands on the same screen as a live one.
 
+import { callFailedReason } from "@/lib/calls";
 import { CONTACT_SOURCES, TECHNIQUES, signalInfo } from "@/lib/risk-catalog";
 import type { CallOutcome, Decision, InjectionTechnique, PaymentStatus, RunEvent } from "@/lib/types";
 
@@ -164,11 +165,22 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         if (row.reviewed?.decision === "approved") row.changedTo = null;
         if (!row.reviewed) log(e, `Paid ${row.vendor}`, "paid", row.paymentId, { amount: row.amount });
         break;
-      case "payment.held":
+      case "payment.held": {
+        // A real call holds a payment twice: when it is scored, and again when the call starts ("verification call in
+        // progress") or cannot be placed. Only the first is a new hold.
+        const failed = callFailedReason(e.reasons);
+        if (row.status === "held") {
+          if (failed) {
+            row.stage = "decided";
+            log(e, `Could not call ${row.vendor}; kept on hold for Dev`, "held", row.paymentId, { detail: `the call was not placed (${failed})` });
+          }
+          break;
+        }
         row.status = "held";
         row.reason = heldBecause(row, signalsBy.get(row.paymentId) ?? []);
         log(e, `Held ${row.vendor}`, "held", row.paymentId, { amount: row.amount, detail: row.reason });
         break;
+      }
       case "call.started":
         row.stage = "calling";
         log(e, `Calling ${row.vendor} at the ${CONTACT_SOURCES[e.contact_source]}, not the number in the email`, "neutral", row.paymentId);

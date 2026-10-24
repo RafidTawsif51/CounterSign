@@ -1,6 +1,7 @@
 import { Bot, Server, UserRound } from "lucide-react";
 import { useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
+import { callFailedReason } from "@/lib/calls";
 import { formatClock, formatScore } from "@/lib/format";
 import { ACTORS, AUDIT_ACTIONS, CONTACT_SOURCES, DECISIONS, SIGNALS, hardRuleInfo } from "@/lib/risk-catalog";
 import type { ContactSource } from "@/lib/types";
@@ -63,6 +64,16 @@ function describe(action: string, d: Record<string, unknown>): string | null {
       return d.transfer_id ? `Nessie transfer ${d.transfer_id}` : null;
     case "verification_call":
       return `${OUTCOME[d.outcome as string] ?? d.outcome}. Called the ${CONTACT_SOURCES[d.contact_source as ContactSource] ?? "vendor"}.`;
+    case "verification_call_placed":
+      return d.channel === "web"
+        ? "Rang the vendor's browser softphone instead of the phone network."
+        : `Called the ${CONTACT_SOURCES[d.contact_source as ContactSource] ?? "vendor"}.`;
+    case "voice_failover_to_web":
+      return `The phone call could not be placed${d.reason ? ` (${d.reason})` : ""}, so the vendor's open softphone rang instead.`;
+    case "verification_in_progress":
+      return null; // the reason only repeats the label
+    case "verification_unavailable":
+      return `The call could not be placed (${callFailedReason([String(d.reason ?? "")]) ?? "no reason given"}). The payment stays held.`;
     case "approved":
     case "rejected":
       return `${d.by ?? "Controller"}: ${d.reason ?? ""}`;

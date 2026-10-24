@@ -19,6 +19,7 @@ import type {
   HealthResponse,
   PaymentDetail,
   RunStatusResponse,
+  StartCallResult,
   StartRunResponse,
   UploadResult,
   SystemComponentStatus,
@@ -96,7 +97,7 @@ export const api = {
   reject: (paymentId: string, reason: string, approver: string) => post<ReviewResult>(`/api/payments/${paymentId}/reject`, { reason, approver }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
   /** 202; 409 unless the payment is held. Calls at an independent number, never one from the email. Live server only. */
-  startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
+  startCall: (paymentId: string) => post<StartCallResult>(`/api/verifications/${paymentId}/call`),
 
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
   leaderboard: () => get<LeaderboardResponse>("/api/attacks/leaderboard"),

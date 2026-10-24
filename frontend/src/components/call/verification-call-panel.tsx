@@ -116,7 +116,7 @@ function Transcript({ call, evidenceId }: { call: CallView; evidenceId?: string 
 
   if (call.lines.length === 0)
     return call.phase === "ended" ? null : (
-      <p className="text-base text-ink-muted">Ringing. The agent speaks first and says the call is automated and recorded.</p>
+      <p className="text-base text-ink-muted">Ringing. The agent speaks first and says the call is automated and transcribed.</p>
     );
 
   return (

@@ -36,6 +36,22 @@ export interface CallView {
 /** verify.py hangs up at 60 seconds. */
 export const CALL_LIMIT_S = 60;
 
+/**
+ * Why a verification call could not be placed, from the reason run.py holds the payment with
+ * ("verification_unavailable: FileNotFoundError"), or null. The payment stays held for the controller.
+ */
+export function callFailedReason(reasons: string[]): string | null {
+  const r = reasons.find((x) => x.startsWith("verification_unavailable"));
+  return r === undefined ? null : r.slice(r.indexOf(":") + 1).trim() || "no reason given";
+}
+
+/** The same, from the stored record: the payment has no call and its last call-related audit entry says it failed. */
+export function callFailedFromDetail(d: PaymentDetail): string | null {
+  if (d.calls.length > 0 || d.payment.status !== "held") return null;
+  const failed = [...d.audit].reverse().find((a) => a.action === "verification_unavailable");
+  return failed ? (callFailedReason([String(failed.detail?.reason ?? "verification_unavailable")]) ?? null) : null;
+}
+
 /** Every call in a run, in the order the agent queued them. */
 export function foldCalls(events: RunEvent[]): CallView[] {
   const vendorOf = new Map<string, string>();
@@ -49,8 +65,10 @@ export function foldCalls(events: RunEvent[]): CallView[] {
     const pid = e.payment_id;
     let call = calls.get(pid);
 
-    if (e.type === "payment.held" && verify.has(pid) && !call) {
-      calls.set(pid, blank(pid, vendorOf.get(pid) ?? ""));
+    if (e.type === "payment.held") {
+      // Held again because the call could not be placed: nothing is coming, so it is no longer queued.
+      if (call?.phase === "queued" && callFailedReason(e.reasons)) calls.delete(pid);
+      else if (verify.has(pid) && !call) calls.set(pid, blank(pid, vendorOf.get(pid) ?? ""));
       continue;
     }
     if (e.type === "call.started") {
@@ -109,7 +127,7 @@ function findingFromDetail(d: PaymentDetail): NumberFinding | null {
 export function callFromDetail(d: PaymentDetail): CallView | null {
   const call = d.calls.at(-1);
   if (!call) {
-    const waiting = d.payment.status === "held" && d.risk?.decision === "hold_and_verify";
+    const waiting = d.payment.status === "held" && d.risk?.decision === "hold_and_verify" && !callFailedFromDetail(d);
     return waiting ? blank(d.payment.id, d.vendor?.name ?? "the vendor") : null;
   }
   const lines = call.transcript ?? [];

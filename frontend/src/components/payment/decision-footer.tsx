@@ -41,15 +41,19 @@ export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
   const vendor = detail.vendor?.name ?? "this vendor";
   const { can_approve, approve_blocked_reason, can_reject } = detail.actions;
   if (payment.status !== "held") return null;
-  // The mock plays one call per run and has no manual call route, so the offline demo does not offer another.
+  // The mock plays one call per run and has no manual call route, so the offline demo does not offer another. One call per
+  // payment at a time: while one is ringing or talking, the backend would only hand back that call.
+  const callOpen = detail.calls.some((c) => c.outcome === null);
   const canCall = dataMode === "live" && destinationChanged(detail);
   const sentence = can_approve ? approveSentence(detail) : null;
 
   async function callAgain() {
     setCalling(true);
     try {
-      await api.startCall(payment.id);
-      toast.success("Calling the vendor", { description: `${vendor}, at an independent number, not the one in the email.` });
+      const res = await api.startCall(payment.id);
+      toast.success(res.mode === "web" ? "Ringing the vendor's softphone" : "Calling the vendor", {
+        description: `${vendor}, at an independent number, not the one in the email.`,
+      });
       void queryClient.invalidateQueries({ queryKey: ["payment", payment.id] });
     } catch (err) {
       toast.error("Call not started", { description: errorMessage(err) });
@@ -67,9 +71,9 @@ export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
         {sentence && <span className="mt-0.5 block font-medium text-ink">Approve: {sentence}</span>}
       </p>
       {canCall && (
-        <Button onClick={() => void callAgain()} disabled={calling}>
+        <Button onClick={() => void callAgain()} disabled={calling || callOpen} title={callOpen ? "A call is in progress" : undefined}>
           <Phone {...iconProps} />
-          Call vendor again
+          {callOpen ? "Call in progress" : "Call vendor again"}
         </Button>
       )}
       <Button variant="danger" onClick={() => setMode("reject")} disabled={!can_reject}>

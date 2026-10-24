@@ -90,7 +90,7 @@ function verificationCall(
     {
       speaker: "agent" as const,
       text:
-        "Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is recorded. " +
+        "Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is being transcribed. " +
         `We received a request to change where we send ${vendorName}'s payments, to an account ending ${last4}. Did your company make this change?`,
     },
     ...reply,

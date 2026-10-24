@@ -606,6 +606,19 @@ export interface RunStatusResponse {
   timings_ms: Record<string, number> | null;
 }
 
+/**
+ * 202 from POST /api/verifications/{payment_id}/call (integrations.py). mode: "mock" simulates the call, "real" dials through
+ * Twilio, "web" rings the vendor's browser softphone (VOICE_MODE=web, or Twilio failed and the softphone page is open).
+ * A start while a call is already open returns that call.
+ */
+export interface StartCallResult {
+  payment_id: string;
+  run_id: string;
+  mode: "mock" | "real" | "web";
+  status: "started" | "calling";
+  call_id?: string;
+}
+
 /** 201 from POST /api/invoices/upload (ingest.py). */
 export interface UploadResult {
   invoice_id: string;

@@ -4,7 +4,7 @@ import { VerificationCallPanel } from "@/components/call/verification-call-panel
 import { EvidenceRef, useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
 import { useCurrentRun } from "@/components/shared/run-context";
-import { callFromDetail, foldCalls } from "@/lib/calls";
+import { callFailedFromDetail, callFromDetail, foldCalls } from "@/lib/calls";
 import type { PaymentDetail } from "@/lib/types";
 
 // The verification call. While the run is live the panel follows the event stream line by line; otherwise (or before
@@ -21,12 +21,15 @@ export function CallSlot({ detail }: { detail: PaymentDetail }) {
 
   if (!call) {
     const quarantined = detail.injection_findings.length > 0;
+    const failed = callFailedFromDetail(detail);
     return (
       <Section title="Verification call">
         <p className="text-sm text-ink-muted">
-          {quarantined
-            ? "No call: the document was quarantined before any call, and a call cannot clear hidden instructions."
-            : "No call needed: this payment goes to the last verified account."}
+          {failed
+            ? `The call could not be placed (${failed}). The payment stays held for Dev; call the vendor again or decide without a call.`
+            : quarantined
+              ? "No call: the document was quarantined before any call, and a call cannot clear hidden instructions."
+              : "No call needed: this payment goes to the last verified account."}
         </p>
       </Section>
     );
