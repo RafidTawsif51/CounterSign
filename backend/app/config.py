@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Where uploaded invoice PDFs are saved (generated filenames only).
     upload_dir: str = "./uploads"
 
+    # Extraction results keyed by SHA-256 of the document. Survives demo resets; rebuild with
+    # `python -m scripts.warm_cache` after a fresh deploy.
+    extract_cache_dir: str = "./.cache/extractions"
+
     frontend_url: str = ""
 
     @property
