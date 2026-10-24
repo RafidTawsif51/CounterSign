@@ -4,10 +4,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/shared/page-header";
 import { api } from "@/lib/api";
+import { formatRelativeTime } from "@/lib/format";
 import type { ComponentMode } from "@/lib/types";
 
 const MODE: Record<ComponentMode, { label: string; variant: "accent" | "neutral" }> = {
   real: { label: "Real", variant: "accent" },
+  sandbox: { label: "Sandbox", variant: "accent" },
   simulated: { label: "Simulated", variant: "neutral" },
   mock: { label: "Mock", variant: "neutral" },
   degraded: { label: "Degraded", variant: "neutral" },
@@ -34,6 +36,7 @@ export function SystemStatus() {
               <TableRow>
                 <TableHead>Component</TableHead>
                 <TableHead>State</TableHead>
+                <TableHead>Last success</TableHead>
                 <TableHead>Detail</TableHead>
               </TableRow>
             </TableHeader>
@@ -44,6 +47,7 @@ export function SystemStatus() {
                   <TableCell>
                     <Badge variant={MODE[c.mode].variant}>{MODE[c.mode].label}</Badge>
                   </TableCell>
+                  <TableCell className="text-ink-muted">{c.last_success_at ? formatRelativeTime(c.last_success_at) : "None yet"}</TableCell>
                   <TableCell className="text-ink-muted">{c.detail}</TableCell>
                 </TableRow>
               ))}

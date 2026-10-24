@@ -652,10 +652,12 @@ export interface RedTeamResults {
   median_run_seconds: { baseline: number; countersign: number };
 }
 
-export type ComponentMode = "real" | "simulated" | "mock" | "degraded" | "down";
+export type ComponentMode = "real" | "sandbox" | "simulated" | "mock" | "degraded" | "down";
 
 export interface SystemComponentStatus {
   name: string;
   mode: ComponentMode;
   detail?: string;
+  /** ISO time of the last successful call, when the component reports one. */
+  last_success_at?: string | null;
 }
