@@ -2,7 +2,7 @@
 
     cd backend && python -m scripts.warm_cache [DIR]      # DIR defaults to seed/invoices
 
-Needs MOCK_CLAUDE=false and a real key to fill the cache; with mocks on it only previews the
+Needs MOCK_CLAUDE=false and a real key to fill the caches (extraction, and the injection classifier when MOCK_INJECTION=false); with mocks on it only previews the
 mock output and writes nothing. Live runs spend API credits, once per new document.
 """
 
@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings  # noqa: E402
 from app.services.extract import ExtractionFailed, extract_pdf  # noqa: E402
+from app.services import injection  # noqa: E402
+from app.services.injection import ScanItem  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
@@ -38,6 +40,8 @@ def main(argv: list[str]) -> int:
             print(f"{pdf.name:<28} {'-':<7} {'EXTRACTION FAILED':<28} {'':>11}  {exc.reason}")
             continue
         ok += 1
+        if not settings.mock_claude and not settings.mock_injection:
+            injection.scan(ScanItem(kind="pdf", pdf_bytes=pdf.read_bytes()))  # also fills the classifier cache
         rem = f"{ex.remittance.bank_name} ****{ex.remittance.account_last4}" if ex.remittance else "none"
         print(f"{pdf.name:<28} {ex.source:<7} {ex.vendor_name[:27]:<28} {ex.amount_usd:>11,.2f}  {rem}")
     print(f"\n{ok} extracted, {failed} failed, {len(pdfs)} total")

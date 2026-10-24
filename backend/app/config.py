@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     mock_twilio: bool = True
     mock_cartesia: bool = True
     mock_claude: bool = True  # extraction only
-    mock_injection: bool = True
+    mock_injection: bool = False  # the real scanner needs no external service: layer 1 is local, the Claude classifier follows mock_claude
     mock_risk: bool = True
 
     anthropic_api_key: str = ""
@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Extraction results keyed by SHA-256 of the document. Survives demo resets; rebuild with
     # `python -m scripts.warm_cache` after a fresh deploy.
     extract_cache_dir: str = "./.cache/extractions"
+
+    # Injection classifier verdicts keyed by content hash.
+    injection_cache_dir: str = "./.cache/injection"
 
     frontend_url: str = ""
 
