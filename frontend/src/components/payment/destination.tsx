@@ -72,7 +72,7 @@ function SameAccount({ detail }: { detail: PaymentDetail }) {
       <span className="text-ink-muted">
         {last.bank_name}, {last.verified_by_call_id ? "verified by call" : "verified at onboarding"} {formatDate(last.valid_from)}
       </span>
-      <EvidenceRef id={last.id} className="ml-auto" />
+      <EvidenceRef id={last.id} />
     </div>
   );
 }

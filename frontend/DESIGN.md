@@ -103,6 +103,7 @@ Line lengths stay under 80 characters for prose. Headings use sentence case.
 - 4px grid. Tailwind's spacing scale is already 4px per step (`p-1` = 4px). Do not use arbitrary pixel spacing.
 - Table rows are 36 to 40px (`h-9` header, `h-10` body). Cell padding: `px-4` on the first and last columns, `px-3` between.
 - Cells do not wrap (`whitespace-nowrap`). Long reasons truncate with a max width; the full text lives in the payment detail.
+- The board's payment table chooses columns by its own width (a container query), not the viewport: below 672px it shows status, vendor and amount; invoice, destination, risk and decision join from 672px; time and the risk bar from 896px; from 1024px a held or blocked row's decision is followed by its reason in muted ink. Decision is the last column and takes the leftover width, so a wide screen fills with evidence instead of a gap. The amount is never the column that scrolls off.
 - Page content max width is 1120px with 16px side gutters on phones (`px-4`) and 24px from `sm` up. The live board may go full width.
 - Radius: `rounded-md` (6px) on controls, `rounded-lg` (8px) on panels and overlays, `rounded-sm` (4px) on badges. No other radii exist in the theme. One exception: a radio mark is a circle (`rounded-full`), because a square reads as a checkbox.
 - Borders over shadows. Content is separated by 1px `border-rule` hairlines. `shadow-overlay` is the only shadow and is used only on drawers, popovers and dialogs, over a `bg-scrim` backdrop.

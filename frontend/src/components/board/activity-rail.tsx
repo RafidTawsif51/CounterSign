@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { CallStrips } from "@/components/call/call-strip";
+import { Money } from "@/components/shared/money";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import type { ActivityEntry, ActivityTone } from "@/lib/board";
 import type { CallView } from "@/lib/calls";
@@ -13,7 +14,7 @@ export function ActivityRail({ entries, calls, hasRun }: { entries: ActivityEntr
   const scroll = useStickToBottom<HTMLOListElement>(entries.length);
 
   return (
-    <aside aria-label="Agent activity" className="flex min-h-0 flex-col border-t border-rule bg-paper lg:w-80 lg:shrink-0 lg:border-t-0 lg:border-l">
+    <aside aria-label="Agent activity" className="flex min-h-0 flex-col border-t border-rule bg-paper lg:w-72 lg:shrink-0 2xl:w-80 lg:border-t-0 lg:border-l">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-rule px-4">
         <h2 className="text-sm font-medium">Agent activity</h2>
         {entries.length > 0 && <span className="figure text-xs text-ink-muted">{entries.length}</span>}
@@ -47,7 +48,24 @@ function Entry({ entry }: { entry: ActivityEntry }) {
       <span className="min-w-0 flex-1">
         <span className={cn("flex min-w-0 items-start gap-1.5 text-sm", quiet ? "text-ink-muted" : "text-ink")}>
           {mark[entry.tone] && <span aria-hidden className={cn("mt-1.5 size-1.5 shrink-0", mark[entry.tone])} />}
-          <span className={cn(quiet && "truncate", !quiet && entry.tone !== "neutral" && "font-medium")}>{entry.text}</span>
+          {quiet ? (
+            // A paid line stays on one line: the vendor truncates, the amount never does.
+            <>
+              <span className="min-w-0 flex-1 truncate">{entry.text}</span>
+              {entry.amount != null && <Money amount={entry.amount} className="shrink-0 text-right" />}
+            </>
+          ) : (
+            <span className={cn(entry.tone !== "neutral" && "font-medium")}>
+              {entry.text}
+              {entry.amount != null && (
+                <>
+                  {" "}
+                  <Money amount={entry.amount} className="whitespace-nowrap" />
+                </>
+              )}
+              {entry.detail && <>: {entry.detail}</>}
+            </span>
+          )}
         </span>
         {entry.quote && <span className="mt-0.5 block border-l-2 border-rule-strong pl-2 text-sm text-ink-muted">“{entry.quote}”</span>}
       </span>

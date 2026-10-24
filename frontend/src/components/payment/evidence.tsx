@@ -70,8 +70,8 @@ export function EvidenceRef({
         revealSource(goal);
       }}
       className={cn(
-        "figure inline-flex h-[18px] shrink-0 items-center rounded-sm border px-1 align-middle text-[11px] leading-none transition-colors",
-        on ? "border-accent bg-accent-tint text-accent" : "border-rule text-ink-faint hover:border-accent hover:text-accent",
+        "figure inline-flex h-[18px] shrink-0 items-center rounded-sm border px-1 align-middle text-xs leading-none transition-colors",
+        on ? "border-accent bg-accent-tint text-accent" : "border-rule text-ink-muted hover:border-accent hover:text-accent",
         className,
       )}
     >

@@ -71,7 +71,7 @@ export function Leaderboard() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">Rob Countersign</h1>
           <p className="mt-1 text-md text-ink-muted">Try to get our AI to pay the wrong account. Every attempt runs live, in sandbox money.</p>
-          <dl className="mt-6 flex flex-wrap items-end gap-x-10 gap-y-4">
+          <dl className="mt-6 flex flex-wrap items-stretch gap-x-10 gap-y-4">
             <Stat label="Money moved to attackers">
               <NumberTicker value={totals?.sandbox_usd_moved ?? 0} format={formatUSD} className="text-2xl font-medium" />
             </Stat>
@@ -131,7 +131,8 @@ function merge(rows: LeaderboardRow[], live: Map<string, AttackLoggedEvent>): Le
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
+    // Labels share the top line and figures share the bottom, whatever size each figure is set in.
+    <div className="flex flex-col justify-between">
       <dt className="text-sm text-ink-muted">{label}</dt>
       <dd className="mt-0.5">{children}</dd>
     </div>

@@ -24,7 +24,7 @@ export function SystemStatus() {
   return (
     <>
       <PageHeader title="System status" description="What is real, what runs in a sandbox, what is simulated, and how we know." />
-      <div className="mx-auto max-w-[1120px] px-4 py-6 sm:px-6">
+      <div className="max-w-[1120px] px-4 py-6 sm:px-6">
         <ServerLine health={health.data} error={health.error} onRetry={() => void health.refetch()} retrying={health.isFetching} updatedAt={health.dataUpdatedAt} />
 
         {rows ? (

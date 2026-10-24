@@ -126,7 +126,7 @@ function QuietRow({ name, detail, evidenceId }: { name: string; detail: string; 
     <li
       {...source}
       title={detail}
-      className={cn(source.className, "flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-ink-faint")}
+      className={cn(source.className, "flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-ink-muted")}
     >
       <span className="truncate text-ink-muted">{signalInfo(name).label}</span>
       <EvidenceRef id={evidenceId} />

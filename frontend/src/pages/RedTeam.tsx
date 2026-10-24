@@ -30,7 +30,7 @@ export function RedTeam() {
         title="Red team"
         description="Generated attacks mixed with clean invoices, run against a plain AI agent told to pay valid invoices, and against Countersign."
       />
-      <div className="mx-auto max-w-[1120px] space-y-8 px-4 py-6 sm:px-6">
+      <div className="max-w-[1120px] space-y-8 px-4 py-6 sm:px-6">
         {isLoading ? (
           <Loading />
         ) : isError && notBuilt ? (

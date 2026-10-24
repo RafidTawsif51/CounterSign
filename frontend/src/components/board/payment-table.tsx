@@ -31,6 +31,10 @@ const statusMark: Record<PaymentStatus, string> = {
   blocked: "bg-blocked",
 };
 
+// Which columns a narrow table keeps: on a phone the ledger is status, vendor and amount; the rest lives in the drawer.
+const wide = "hidden @2xl:table-cell";
+const amountEdge = "@max-2xl:pr-4";
+
 // Rows that were already there when the board mounted (a replay, or coming back from another page) do not slide in.
 const SETTLE_MS = 400;
 
@@ -48,20 +52,22 @@ export function PaymentTable({
   const mountedAt = useRef(Date.now());
 
   return (
-    <div className="h-full [&>[data-slot=table-container]]:h-full [&>[data-slot=table-container]]:overflow-auto">
-      <Table className="min-w-[860px]">
+    // A container, not the viewport, decides which columns fit: the activity rail and sidebar take a varying share.
+    <div className="@container h-full [&>[data-slot=table-container]]:h-full [&>[data-slot=table-container]]:overflow-auto">
+      <Table className="@2xl:min-w-[720px]">
         {/* Sticky as a whole: per-cell sticky backgrounds leave hairline seams at fractional column widths. */}
         <TableHeader className="sticky top-0 z-10 bg-surface shadow-[inset_0_-1px_0_var(--rule)]">
           <TableRow className="hover:bg-transparent">
             <Head>Status</Head>
             <Head>Vendor</Head>
-            <Head>Invoice</Head>
-            <Head className="text-right">Amount</Head>
-            <Head>Destination</Head>
-            <Head>Risk</Head>
-            {/* Takes whatever width is left and truncates, so the table never scrolls sideways on a laptop. */}
-            <Head className="w-full">Decision</Head>
-            <Head className="text-right">Time</Head>
+            <Head className={wide}>Invoice</Head>
+            <Head className={cn("text-right", amountEdge)}>Amount</Head>
+            <Head className={wide}>Destination</Head>
+            <Head className={wide}>Risk</Head>
+            <Head className="hidden text-right @4xl:table-cell">Time</Head>
+            {/* Last and takes whatever width is left: on a laptop it truncates so the table never scrolls sideways, and on
+                a wide screen the reason fills it instead of a gap stranding the time at the far edge. */}
+            <Head className={cn("w-full", wide)}>Decision</Head>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -103,7 +109,9 @@ function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15, ease: [0.2, 0, 0, 1] }}
       data-status={row.status}
-      className={cn("cursor-pointer", flagged && "row-flag")}
+      data-payment-id={row.paymentId}
+      // Inset: an outset ring on a row is clipped by the table's scroll container on three sides.
+      className={cn("cursor-pointer focus-visible:-outline-offset-2", flagged && "row-flag")}
       tabIndex={0}
       aria-label={`${row.vendor}, ${statusLabel[row.status]}. Open payment detail`}
       onClick={open}
@@ -120,17 +128,17 @@ function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
           {statusLabel[row.status]}
         </span>
       </TableCell>
-      <TableCell className="max-w-56 truncate font-medium" title={row.vendor}>
+      <TableCell className="max-w-32 truncate font-medium @2xl:max-w-44 @5xl:max-w-56 @7xl:max-w-72" title={row.vendor}>
         {row.vendor}
       </TableCell>
       <DetailCells row={row} />
-      <TableCell>
+      <TableCell className={wide}>
         <RiskScore score={row.score} />
       </TableCell>
-      <TableCell className="max-w-0">
+      <TableCell className="figure hidden text-right text-sm text-ink-muted @4xl:table-cell">{formatClock(row.updatedAt)}</TableCell>
+      <TableCell className={cn("max-w-0", wide)}>
         <Decision row={row} />
       </TableCell>
-      <TableCell className="figure text-right text-sm text-ink-muted">{formatClock(row.updatedAt)}</TableCell>
     </MotionRow>
   );
 }
@@ -156,11 +164,11 @@ function DetailCells({ row }: { row: BoardRow }) {
 
   return (
     <>
-      <TableCell className="figure text-sm text-ink-muted">{data?.invoice?.number ?? missing}</TableCell>
-      <TableCell className="text-right">
+      <TableCell className={cn("figure text-sm text-ink-muted", wide)}>{data?.invoice?.number ?? missing}</TableCell>
+      <TableCell className={cn("text-right", amountEdge)}>
         <Money amount={row.amount} />
       </TableCell>
-      <TableCell>
+      <TableCell className={wide}>
         <span className="inline-flex items-center gap-2">
           {last4 ? <span className="figure text-sm">{formatAccount(last4)}</span> : missing}
           {row.changedTo && (
@@ -181,7 +189,7 @@ function RiskScore({ score }: { score: number | null }) {
     <span className="inline-flex items-center gap-2.5">
       <span className={cn("figure w-6 text-right text-sm", high ? "text-ink" : "text-ink-muted")}>{formatScore(score)}</span>
       {/* A zero score keeps the track's space but hides it, so a clean run reads quiet. */}
-      <span aria-hidden className={cn("h-1 w-10 bg-sunken transition-opacity duration-200", score === 0 && "opacity-0")}>
+      <span aria-hidden className={cn("hidden h-1 w-10 bg-sunken transition-opacity duration-200 @4xl:block", score === 0 && "opacity-0")}>
         <span
           className={cn("block h-full transition-[width] duration-200", high ? "bg-ink" : "bg-ink-faint")}
           style={{ width: `${Math.max(score, 0)}%` }}
@@ -193,17 +201,17 @@ function RiskScore({ score }: { score: number | null }) {
 
 function Decision({ row }: { row: BoardRow }) {
   const label = decisionLabel(row);
-  if (row.stage === "calling")
-    return (
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
-        <Phone {...iconProps} />
-        {label}
-      </span>
-    );
-  const working = row.status === "pending";
+  const calling = row.stage === "calling";
+  const quiet = row.status === "pending" || row.status === "paid";
   return (
-    <span title={label} className={cn("block truncate text-sm", working ? "text-ink-faint" : row.status === "paid" ? "text-ink-muted" : "text-ink")}>
-      {label}
+    <span
+      title={row.reason ? `${label}: ${row.reason}` : label}
+      className={cn("flex min-w-0 items-center gap-1.5 text-sm", calling ? "font-medium text-ink" : quiet ? "text-ink-muted" : "text-ink")}
+    >
+      {calling && <Phone {...iconProps} className="shrink-0" />}
+      <span className="min-w-0 truncate @5xl:shrink-0">{label}</span>
+      {/* The evidence in a few words, on a wide table only; the full reasoning lives in the drawer. */}
+      {row.reason && <span className="ml-1.5 hidden min-w-0 shrink-[100] truncate font-normal text-ink-muted @5xl:inline">{row.reason}</span>}
     </span>
   );
 }
@@ -215,8 +223,8 @@ function Placeholder({ w }: { w: string }) {
 function SkeletonRows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, i) => (
     <TableRow key={i} className="hover:bg-transparent">
-      {["w-14", "w-36", "w-16", "w-20 ml-auto", "w-16", "w-14", "w-28", "w-14 ml-auto"].map((w, j) => (
-        <TableCell key={j}>
+      {["w-14", "w-36", "w-16", "w-20 ml-auto", "w-16", "w-14", "w-14 ml-auto", "w-28"].map((w, j) => (
+        <TableCell key={j} className={cn([2, 4, 5, 7].includes(j) && wide, j === 3 && amountEdge, j === 6 && "hidden @4xl:table-cell")}>
           <Skeleton className={cn("h-3", w)} />
         </TableCell>
       ))}

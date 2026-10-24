@@ -23,6 +23,17 @@ export function PaymentDetail() {
   const navigate = useNavigate();
   const query = useQuery({ queryKey: ["payment", paymentId], queryFn: () => api.payment(paymentId), retry: false });
   useLiveRefresh(paymentId);
+  // Closing navigates away and unmounts the drawer before Radix can restore focus, so a keyboard user would land on
+  // the page body. Put them back on the row they opened, unless focus already went somewhere on purpose.
+  useEffect(
+    () => () => {
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        document.querySelector<HTMLElement>(`[data-payment-id="${CSS.escape(paymentId)}"]`)?.focus();
+      });
+    },
+    [paymentId],
+  );
 
   const detail = query.data;
 

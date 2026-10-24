@@ -1,7 +1,6 @@
 // Folds a run's event stream into board rows and the activity log. Pure, so the board re-derives everything from the
 // events it has and a late connection (replay) lands on the same screen as a live one.
 
-import { formatUSD } from "@/lib/format";
 import { CONTACT_SOURCES, TECHNIQUES, signalInfo } from "@/lib/risk-catalog";
 import type { CallOutcome, Decision, InjectionTechnique, PaymentStatus, RunEvent } from "@/lib/types";
 
@@ -21,6 +20,8 @@ export interface BoardRow {
   changedTo: string | null;
   technique: InjectionTechnique | null;
   callOutcome: CallOutcome | null;
+  /** Why it was held or blocked, in the activity log's words. Null for a clean payment. */
+  reason: string | null;
   /** The controller's decision on a held payment, from payment.reviewed. */
   reviewed: { decision: "approved" | "rejected"; by: string } | null;
   updatedAt: string;
@@ -36,6 +37,10 @@ export interface ActivityEntry {
   paymentId: string | null;
   /** A vendor's words on the call. Untrusted text: render as plain text. */
   quote?: string;
+  /** Printed after `text` in mono, so money in the log lines up with the ledger. */
+  amount?: number;
+  /** Follows the amount after a colon: the reason for a hold or block. */
+  detail?: string;
 }
 
 export interface BoardState {
@@ -68,9 +73,13 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
   let startedAt: string | null = null;
   let invoiceCount: number | null = null;
 
-  const log = (e: RunEvent, text: string, tone: ActivityTone, paymentId: string | null, quote?: string) =>
-    activity.push({ id: e.id, at: e.at, text, tone, paymentId, quote });
-  const money = (row: BoardRow) => `${row.vendor} ${formatUSD(row.amount)}`;
+  const log = (
+    e: RunEvent,
+    text: string,
+    tone: ActivityTone,
+    paymentId: string | null,
+    extra: Pick<ActivityEntry, "quote" | "amount" | "detail"> = {},
+  ) => activity.push({ id: e.id, at: e.at, text, tone, paymentId, ...extra });
 
   for (const e of events) {
     if (e.type === "run.started") {
@@ -88,7 +97,10 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
       continue;
     }
     if (e.type === "run.completed") {
-      if (!opts.attack) log(e, `Run complete: ${e.paid} paid (${formatUSD(e.total_usd)}), ${e.held} held, ${e.blocked} blocked`, "neutral", null);
+      if (!opts.attack) log(e, "Run complete, paid out", "neutral", null, {
+          amount: e.total_usd,
+          detail: `${e.paid} paid, ${e.held} held, ${e.blocked} blocked`,
+        });
       continue;
     }
     if (e.type === "invoice.parsed") {
@@ -106,6 +118,7 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         changedTo: null,
         technique: null,
         callOutcome: null,
+        reason: null,
         reviewed: null,
         updatedAt: e.at,
       });
@@ -139,10 +152,11 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         log(
           e,
           e.decision === "approved"
-            ? `${e.approver} approved ${money(row)}; it pays the verified account, not the one requested`
-            : `${e.approver} rejected ${money(row)}`,
+            ? `${e.approver} approved ${row.vendor}`
+            : `${e.approver} rejected ${row.vendor}`,
           "neutral",
           row.paymentId,
+          { amount: row.amount, detail: e.decision === "approved" ? "it pays the verified account, not the one requested" : undefined },
         );
         break;
       case "payment.paid":
@@ -150,18 +164,19 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         row.stage = "decided";
         // An approved hold pays the verified account (review.py), so the requested change no longer describes the payment.
         if (row.reviewed?.decision === "approved") row.changedTo = null;
-        if (!row.reviewed) log(e, `Paid ${money(row)}`, "paid", row.paymentId);
+        if (!row.reviewed) log(e, `Paid ${row.vendor}`, "paid", row.paymentId, { amount: row.amount });
         break;
       case "payment.held":
         row.status = "held";
-        log(e, `Held ${money(row)}: ${heldBecause(row, signalsBy.get(row.paymentId) ?? [])}`, "held", row.paymentId);
+        row.reason = heldBecause(row, signalsBy.get(row.paymentId) ?? []);
+        log(e, `Held ${row.vendor}`, "held", row.paymentId, { amount: row.amount, detail: row.reason });
         break;
       case "call.started":
         row.stage = "calling";
         log(e, `Calling ${row.vendor} at the ${CONTACT_SOURCES[e.contact_source]}, not the number in the email`, "neutral", row.paymentId);
         break;
       case "call.transcript":
-        if (e.speaker === "vendor") log(e, `${row.vendor} on the call`, "neutral", row.paymentId, e.text);
+        if (e.speaker === "vendor") log(e, `${row.vendor} on the call`, "neutral", row.paymentId, { quote: e.text });
         break;
       case "call.outcome":
         row.callOutcome = e.outcome;
@@ -174,7 +189,8 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
       case "payment.blocked":
         row.status = "blocked";
         row.stage = "decided";
-        log(e, `Blocked ${money(row)}: ${blockedBecause(row, e.reason)}`, "blocked", row.paymentId);
+        row.reason = blockedBecause(row, e.reason);
+        log(e, `Blocked ${row.vendor}`, "blocked", row.paymentId, { amount: row.amount, detail: row.reason });
         break;
     }
   }

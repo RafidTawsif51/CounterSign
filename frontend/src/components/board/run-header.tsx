@@ -35,9 +35,9 @@ export function RunHeader({
   return (
     <div className="border-b border-rule bg-paper">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 pt-5 pb-4 sm:px-6">
-        <div className="flex min-w-0 items-baseline gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
           <h1 className="text-lg font-semibold">Thursday payment run</h1>
-          <span className="figure text-sm text-ink-muted">{formatDate(startedAt ?? new Date().toISOString())}</span>
+          <span className="figure text-sm whitespace-nowrap text-ink-muted">{formatDate(startedAt ?? new Date().toISOString())}</span>
         </div>
         {hasRun && (
           <Button variant="primary" onClick={onStart} disabled={starting || running}>

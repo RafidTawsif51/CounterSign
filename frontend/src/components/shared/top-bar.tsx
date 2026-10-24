@@ -11,8 +11,9 @@ import { cn } from "@/lib/utils";
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   return (
     <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-4 border-b border-rule bg-paper px-4 sm:px-6">
-      <span className="shrink-0 font-medium">Ridgeline Builders</span>
-      <span aria-hidden className="h-4 w-px shrink-0 bg-rule-strong" />
+      {/* On a phone the live run line matters more than the company name, which the board already shows. */}
+      <span className="hidden shrink-0 font-medium sm:inline">Ridgeline Builders</span>
+      <span aria-hidden className="hidden h-4 w-px shrink-0 bg-rule-strong sm:block" />
       <RunStatus />
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
