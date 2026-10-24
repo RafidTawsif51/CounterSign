@@ -86,7 +86,7 @@ def test_run_returns_at_once_and_finishes_fast(env):
         time.sleep(0.02)
     g = client.get(f"/api/payment-runs/{body['run_id']}").json()
     assert g["status"] == "completed" and g["wall_seconds"] < 20
-    assert g["totals"]["paid"] == 37 and g["totals"]["held"] == 0 and g["totals"]["blocked"] == 3 and g["totals"]["pending"] == 0
+    assert g["totals"]["paid"] == 37 and g["totals"]["held"] == 1 and g["totals"]["blocked"] == 2 and g["totals"]["pending"] == 0
     assert g["invoice_count"] == 40 and set(g["timings_ms"]) >= {"extract", "scan", "risk", "commit", "transfer", "verify", "total"}
     with Session(eng) as s:
         paid = s.exec(select(func.sum(Payment.amount_usd)).where(Payment.run_id == body["run_id"], Payment.status == PaymentStatus.paid)).one()
@@ -99,7 +99,8 @@ def test_the_three_attacks_and_why(env):
     body, g = go(client)
     with Session(eng) as s:
         for pid in (BANK, POISON, CEO):
-            assert s.get(Payment, pid).status == PaymentStatus.blocked and s.get(Payment, pid).nessie_transfer_id is None
+            assert s.get(Payment, pid).nessie_transfer_id is None  # none of the three moved money
+        assert [s.get(Payment, pid).status for pid in (BANK, POISON, CEO)] == [PaymentStatus.blocked, PaymentStatus.blocked, PaymentStatus.held]
         bank = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == BANK)).one()
         assert bank.decision == Decision.hold_and_verify and bank.hard_rules_fired == ["destination_changed"]
         assert {x["name"] for x in bank.signals_json} >= {"bank_details_changed", "lookalike_domain", "vendor_identity_check"}
@@ -107,7 +108,7 @@ def test_the_three_attacks_and_why(env):
         poison = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == POISON)).one()
         assert poison.hard_rules_fired == ["hidden_instructions"]
         calls = s.exec(select(VerificationCall).where(VerificationCall.payment_id.in_([BANK, CEO, POISON]))).all()
-        assert {c.payment_id for c in calls} == {BANK, CEO} and all(c.outcome == CallOutcome.denied for c in calls)  # no call for the quarantined one
+        assert {c.payment_id: c.outcome for c in calls} == {BANK: CallOutcome.denied, CEO: CallOutcome.unclear}  # no call for the quarantined one
         findings = s.exec(select(InjectionFinding)).all()
         assert [f.technique for f in findings] == ["white_text"] and findings[0].invoice_id == "inv_atk_poisoned_pdf"
         inv = s.get(Invoice, "inv_atk_poisoned_pdf")
@@ -142,13 +143,14 @@ def test_event_stream_order_for_the_bank_change(env):
     types = [e.type for e in evs]
     assert types[0] == "run.started" and types[-2:] == ["run.completed", "run.report"]
     assert types.count("invoice.parsed") == 40 and types.count("risk.scored") == 40 and types.count("payment.paid") == 37
-    assert types.count("payment.blocked") == 3 and types.count("payment.held") == 2  # the two calls each held first
+    assert types.count("payment.blocked") == 2 and types.count("payment.held") == 2  # bank change held then blocked; CEO held
     mine = [e.type for e in evs if (e.payload or {}).get("payment_id") == BANK]
     assert mine == ["risk.scored", "payment.held", "call.started", "call.transcript", "call.transcript", "call.transcript", "call.outcome", "payment.blocked"]
     poisoned = [e.type for e in evs if (e.payload or {}).get("payment_id") == POISON or (e.payload or {}).get("invoice_id") == "inv_atk_poisoned_pdf"]
     assert poisoned == ["invoice.parsed", "injection.detected", "risk.scored", "payment.blocked"]
     report = next(e for e in evs if e.type == "run.report").payload
-    assert report["paid"] == 37 and report["blocked"] == 3 and report["blocked_usd"] > 0 and len(report["findings"]) == 3
+    assert report["paid"] == 37 and report["held"] == 1 and report["blocked"] == 2 and report["blocked_usd"] > 0 and len(report["findings"]) == 3
+    assert any("waiting for the controller" in f for f in report["findings"])
     assert [e for e in evs if e.type == "run.completed"][0].payload["total_usd"] == g["totals"]["total_usd"]
 
 
@@ -201,7 +203,7 @@ def test_verification_confirmed_releases_to_the_new_verified_account(env):
     client, eng = env
     verify.MOCK_OUTCOMES[BANK] = CallOutcome.confirmed
     body, g = go(client)
-    assert g["totals"]["paid"] == 38 and g["totals"]["blocked"] == 2
+    assert g["totals"]["paid"] == 38 and g["totals"]["blocked"] == 1 and g["totals"]["held"] == 1
     with Session(eng) as s:
         p = s.get(Payment, BANK)
         acct = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == "ven_summit", VendorBankAccount.valid_to.is_(None))).one()
@@ -335,7 +337,7 @@ def test_extraction_failure_holds_the_invoice(env, monkeypatch):
         assert len(inv) == 1
         p = s.exec(select(Payment).where(Payment.invoice_id == inv[0].id)).one()
         assert p.status == PaymentStatus.held and s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == p.id)).all() == []
-    assert g["totals"]["paid"] == 36 and g["totals"]["held"] == 1
+    assert g["totals"]["paid"] == 36 and g["totals"]["held"] == 2
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -361,3 +363,39 @@ def test_contacts_differ():
     assert run.contacts_differ("call me on +1 415 555 0177", known) is True
     assert run.contacts_differ("our line is (415) 555-0100", known) is False
     assert run.contacts_differ("no phone here", known) is False
+
+
+# ---------------------------------------------------------------- scripted vs live outcomes
+
+
+def test_a_denied_override_still_blocks_the_seeded_ceo_attack(env):
+    client, eng = env
+    verify.MOCK_OUTCOMES[CEO] = CallOutcome.denied  # explicit overrides beat the scripted default
+    body, g = go(client)
+    assert g["totals"]["held"] == 0 and g["totals"]["blocked"] == 3 and pay_status(eng, CEO) == PaymentStatus.blocked
+
+
+def test_a_judges_ceo_attack_still_gets_a_denied_call(env):
+    """Same attack as the seeded CEO one, launched live: new ids, so the scripted 'unclear' does not apply."""
+    client, eng = env
+    go(client)  # the seeded run: CEO attack held
+    with Session(eng) as s:
+        seeded = s.get(Invoice, "inv_atk_ceo_pressure")
+        thread = s.get(Message, seeded.message_id).thread_id
+        s.add(Message(id="msg_judge_ceo", thread_id=thread, vendor_id="ven_northside", from_addr="dana.whitfield@ridgeline-builders.co",
+                      subject="pay today", body="The CEO approved this, please pay today and keep it quiet.", received_at=ev_mod.utcnow(), is_attack=True))
+        s.add(Invoice(id="inv_judge_ceo", vendor_id="ven_northside", message_id="msg_judge_ceo", number="NOR-JUDGE", amount_usd=2400.0,
+                      due_date=seeded.due_date, remittance_json=seeded.remittance_json, pdf_path=seeded.pdf_path))
+        s.commit()
+    body, g = go(client)
+    assert body["invoice_count"] == 1
+    assert g["totals"]["blocked"] == 1 and g["totals"]["held"] == 0
+    with Session(eng) as s:
+        call = s.exec(select(VerificationCall).where(VerificationCall.payment_id == "pay_judge_ceo")).one()
+        assert call.outcome == CallOutcome.denied and s.get(Payment, "pay_judge_ceo").status == PaymentStatus.blocked
+        assert s.get(Payment, CEO).status == PaymentStatus.held  # the seeded one is untouched
+
+
+def test_scripted_outcomes_apply_only_to_the_seeded_payment_id():
+    assert set(verify.SEEDED_OUTCOMES) == {"pay_atk_ceo_pressure"}
+    assert verify.SEEDED_OUTCOMES[CEO] == CallOutcome.unclear

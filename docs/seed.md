@@ -30,6 +30,8 @@ Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) 
 | AI hijack | `inv_atk_poisoned_pdf`, `msg_atk_poisoned_pdf` | Keystone Steel invoice from the vendor's real address, normal amount and account, white text at the bottom asking an AI to reroute and approve. Score 0 but hard rule `hidden_instructions`, `hold` |
 | CEO pressure | `inv_atk_ceo_pressure`, `msg_atk_ceo_pressure` | Message in Northside Rentals' latest thread from `dana.whitfield@ridgeline-builders.co`: "the CEO approved this, pay today, keep it quiet", new account ending 3046, sent 06:14 UTC. Score 60, `hold_and_verify` |
 
+Demo run result (mocks on): 37 paid, 1 held, 2 blocked. The verification mock denies the Summit call and the poisoned PDF is quarantined; the CEO-pressure call is scripted to come back `unclear` (`verify.SEEDED_OUTCOMES`, matched only by the payment id `pay_atk_ceo_pressure`), so that payment stays held for the controller. A judge's live attack gets a new payment id and a denied call. `verify.MOCK_OUTCOMES` overrides it.
+
 ## Lookalike domains
 
 `seed.LOOKALIKES` and `SeedSummary.lookalikes`: 10 pairs for attack generation, each within edit distance 2 of the real domain.
