@@ -21,19 +21,28 @@ import type {
 const PREVIEW_CHARS = 140; // ingest.PREVIEW_CHARS
 const EMAIL = /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/;
 
-/** Messages posted during this session. demo reset empties it. */
-const posted: Message[] = [];
+/** Ids of messages posted during this session (the console, attacks). They join the seed's list so payment records find
+ * them; demo reset takes them out again. */
+const posted = new Set<string>();
 
 export function resetMockInbox() {
-  posted.length = 0;
+  for (let i = messages.length - 1; i >= 0; i--) if (posted.has(messages[i].id)) messages.splice(i, 1);
+  posted.clear();
+}
+
+/** Add a message to the AP inbox (POST /api/inbox/messages, or an attack). */
+export function postMessage(msg: Message) {
+  messages.push(msg);
+  posted.add(msg.id);
 }
 
 function allMessages(): Message[] {
-  return [...messages, ...posted].sort((a, b) => (a.received_at < b.received_at ? -1 : a.received_at > b.received_at ? 1 : a.id < b.id ? -1 : 1));
+  return [...messages].sort((a, b) => (a.received_at < b.received_at ? -1 : a.received_at > b.received_at ? 1 : a.id < b.id ? -1 : 1));
 }
 
 function invoicesOf(messageId: string) {
-  return openInvoices.filter((i) => i.message_id === messageId).map((i) => i.id);
+  // Only real PDFs are attachments; an email attack's invoice is synthetic and has none.
+  return openInvoices.filter((i) => i.message_id === messageId && i.pdf_path).map((i) => i.id);
 }
 
 function preview(body: string) {
@@ -93,7 +102,7 @@ export function mockAddMessage(body: unknown): InboxMessage {
     received_at: new Date().toISOString(),
     is_attack: false,
   };
-  posted.push(msg);
+  postMessage(msg);
   return { ...msg, is_html: false, invoice_ids: [] };
 }
 

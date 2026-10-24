@@ -12,7 +12,7 @@ const paymentIdFor = (invoiceId: string) => "pay_" + invoiceId.slice("inv_".leng
  * and the email names its thread. Before a run there is nothing here: the inbox never shows the seed's is_attack flag.
  */
 export function useDetections(): Map<string, Detection & { threadId: string }> {
-  const { events } = useCurrentRun();
+  const { allEvents: events } = useCurrentRun();
   const flagged = useMemo(() => {
     const ids = new Set<string>();
     for (const e of events) {

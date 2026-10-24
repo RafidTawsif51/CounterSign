@@ -265,6 +265,13 @@ export interface AttackLoggedEvent extends EventBase {
   moderation_status: ModerationStatus;
 }
 
+export interface AttackQueuedEvent extends EventBase {
+  type: "attack.queued";
+  attack_id: string;
+  position: number;
+  waiting_for: string | null;
+}
+
 export type RunEvent =
   | RunStartedEvent
   | InvoiceParsedEvent
@@ -278,7 +285,8 @@ export type RunEvent =
   | PaymentBlockedEvent
   | RunCompletedEvent
   | RunReportEvent
-  | AttackLoggedEvent;
+  | AttackLoggedEvent
+  | AttackQueuedEvent;
 
 export type RunEventType = RunEvent["type"];
 
@@ -443,16 +451,36 @@ export interface StartRunResponse {
   events_url?: string;
 }
 
+/** POST /api/attacks body (backend services/attacks.py AttackIn). The vendor always comes from thread_id. */
 export interface LaunchAttackRequest {
   attacker_name: string;
   card: AttackCard;
-  payload: Record<string, unknown>;
+  source?: "console" | "judge";
+  payload: {
+    thread_id?: string;
+    from_addr: string;
+    reply_to?: string;
+    subject: string;
+    body: string;
+    /** A file name in backend/seed/invoices (poisoned_invoice and freestyle only). */
+    pdf?: string;
+    /** Or the PDF itself, base64, up to 5 MB. Not both. */
+    pdf_base64?: string;
+  };
 }
 
+/**
+ * 201 from POST /api/attacks. Every attack runs as its own mini-run (run_id); while a full run is on it waits its turn
+ * (queued, position 1 = next). Its payment id follows run.py: inv_x pays as pay_x.
+ */
 export interface LaunchAttackResponse {
   attack_id: string;
-  message_id?: string;
-  run_id?: string;
+  message_id: string;
+  invoice_id: string;
+  run_id: string;
+  queued: boolean;
+  position: number;
+  waiting_for: string | null;
 }
 
 export type ComponentMode = "real" | "simulated" | "mock" | "down";

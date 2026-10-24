@@ -57,7 +57,8 @@ function heldBecause(row: BoardRow, signals: { name: string; weight: number }[])
   return top.join(", ");
 }
 
-export function foldBoard(events: RunEvent[]): BoardState {
+/** `attack`: the events are an attack's mini-run, whose run.started and run.completed lines would read as a second run. */
+export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): BoardState {
   const rows = new Map<string, BoardRow>();
   const order: string[] = [];
   const activity: ActivityEntry[] = [];
@@ -73,11 +74,19 @@ export function foldBoard(events: RunEvent[]): BoardState {
     if (e.type === "run.started") {
       startedAt = e.at;
       invoiceCount = e.invoice_count;
-      log(e, `Started the payment run over ${e.invoice_count} open invoices`, "neutral", null);
+      if (!opts.attack) log(e, `Started the payment run over ${e.invoice_count} open invoices`, "neutral", null);
+      continue;
+    }
+    if (e.type === "attack.logged" && e.result === null) {
+      log(e, `Received an attack from ${e.attacker_name}; it goes through the same checks as every invoice`, "neutral", null);
+      continue;
+    }
+    if (e.type === "attack.queued") {
+      log(e, `Queued the attack behind the run in progress (position ${e.position})`, "neutral", null);
       continue;
     }
     if (e.type === "run.completed") {
-      log(e, `Run complete: ${e.paid} paid (${formatUSD(e.total_usd)}), ${e.held} held, ${e.blocked} blocked`, "neutral", null);
+      if (!opts.attack) log(e, `Run complete: ${e.paid} paid (${formatUSD(e.total_usd)}), ${e.held} held, ${e.blocked} blocked`, "neutral", null);
       continue;
     }
     if (e.type === "invoice.parsed") {

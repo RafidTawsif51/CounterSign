@@ -104,7 +104,7 @@ Line lengths stay under 80 characters for prose. Headings use sentence case.
 - Table rows are 36 to 40px (`h-9` header, `h-10` body). Cell padding: `px-4` on the first and last columns, `px-3` between.
 - Cells do not wrap (`whitespace-nowrap`). Long reasons truncate with a max width; the full text lives in the payment detail.
 - Page content max width is 1120px with 16px side gutters on phones (`px-4`) and 24px from `sm` up. The live board may go full width.
-- Radius: `rounded-md` (6px) on controls, `rounded-lg` (8px) on panels and overlays, `rounded-sm` (4px) on badges. No other radii exist in the theme.
+- Radius: `rounded-md` (6px) on controls, `rounded-lg` (8px) on panels and overlays, `rounded-sm` (4px) on badges. No other radii exist in the theme. One exception: a radio mark is a circle (`rounded-full`), because a square reads as a checkbox.
 - Borders over shadows. Content is separated by 1px `border-rule` hairlines. `shadow-overlay` is the only shadow and is used only on drawers, popovers and dialogs, over a `bg-scrim` backdrop.
 
 ## Ledger conventions
@@ -135,6 +135,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `AskPanel` | `payment/ask-panel.tsx` | "Ask about this payment" in the drawer, under the header; also opened by the ⌘K "Ask why…" command. Suggested questions are link buttons, the first matching the payment's status. The answer is rendered from the response's claims in order, each claim's text followed by its evidence id as a chip (the prose answer only when there are no claims): hover highlights the drawer element that backs it, click scrolls to it. A thin line runs against the 5-second budget while waiting; the time taken shows in mono. No avatar, no typing dots, no sparkles. |
 | Inbox | `inbox/` | Three panes: threads 320px, thread, vendor context 300px (below xl the context follows the thread). Headers collapse to one line; a lookalike domain or a Reply-To that differs from the sender is marked inline in brick with a short reason, the differing characters underlined. The attack marker appears only once the run has caught something, never from seed data. A new message gets an accent-tint highlight that fades over 1s. |
 | `InvoicePreview` | `inbox/invoice-preview.tsx` | The invoice page at US Letter proportions with "Reveal hidden content": hidden text is outlined in brick in place, legible, with its technique and confidence on a brick tab. 150ms, no zoom. |
+| `AttackCardPicker` | `attack/attack-card-picker.tsx` | Selectable cards over native radios (arrow keys, focus ring). The label selects; "What we'll check" is outside it, so expanding never selects. Selected: accent edge and tint. |
+| `PinnedAttack` | `board/pinned-attack.tsx` | A judge's attack pinned above the ledger in an accent outline, with its own row that reveals the result. The attack console never shows the result. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.

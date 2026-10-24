@@ -11,6 +11,7 @@ import {
   subscribeMockRun,
 } from "@/lib/mock/run";
 import { mockAsk } from "@/lib/mock/ask";
+import { mockLaunchAttack, resetMockAttacks } from "@/lib/mock/attacks";
 import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, mockVendors, resetMockInbox } from "@/lib/mock/inbox";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
@@ -42,11 +43,13 @@ const routes: [string, Handler][] = [
   ["GET /api/inbox/threads", () => mockThreads()],
   ["GET /api/inbox/threads/:threadId", ({ threadId }) => mockThread(threadId)],
   ["POST /api/inbox/messages", (_, body) => mockAddMessage(body)],
+  ["POST /api/attacks", (_, body) => mockLaunchAttack(body)],
   [
     "POST /api/demo/reset",
     () => {
       resetMockRuns();
       resetMockInbox();
+      resetMockAttacks();
     },
   ],
   [

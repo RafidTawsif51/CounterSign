@@ -61,7 +61,7 @@ export function PaymentDetail() {
 
 /** While a run is live, refetch whenever an event about this payment arrives (call lines, outcome, decision). */
 function useLiveRefresh(paymentId: string) {
-  const { events } = useCurrentRun();
+  const { allEvents: events } = useCurrentRun();
   const queryClient = useQueryClient();
   const last = events.at(-1);
   const invoiceId = invoiceIdFor(paymentId);

@@ -16,6 +16,7 @@ import {
   messages,
   openInvoices,
   vendorById,
+  type AttackPlan,
   type OpenInvoice,
 } from "@/lib/mock/seed";
 import type {
@@ -133,6 +134,8 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
   const parsed: Draft = { type: "invoice.parsed", invoice_id: inv.id, vendor: vendor.name, amount_usd: inv.amount_usd };
   const extract = rng.between(700, 1500);
 
+  if (inv.attack) return attackScript(inv, inv.attack, rng, transferNo, parsed, extract);
+
   if (inv.planted === null) {
     return {
       plan: CLEAN_PLAN,
@@ -215,15 +218,94 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
   ] };
 }
 
-function attackLogged(rng: Rng, card: string): Draft {
+function attackLogged(rng: Rng, card: string, who?: { attackId: string; name: string; result: "caught" | "missed" | null }): Draft {
   return {
     type: "attack.logged",
-    attack_id: `atk_${rng.hex(12)}`,
-    attacker_name: "Seeded attack",
+    attack_id: who?.attackId ?? `atk_${rng.hex(12)}`,
+    attacker_name: who?.name ?? "Seeded attack",
     source: "console",
     card,
-    result: "caught",
+    result: who ? who.result : "caught",
     moderation_status: "approved",
+  };
+}
+
+/** An attack from POST /api/attacks, through the same steps as the planted ones. Calls on attacks are denied (verify.MockCaller). */
+function attackScript(inv: OpenInvoice, a: AttackPlan, rng: Rng, transferNo: () => string, parsed: Draft, extract: number): Script {
+  const vendor = vendorById.get(inv.vendor_id)!;
+  const pid = paymentId(inv.id);
+  const who = (result: "caught" | "missed") => attackLogged(rng, a.card, { attackId: a.attackId, name: a.attackerName, result });
+  const signals = a.signals.map((x) => signal(rng, x.name, x.weight, x.detail));
+  const score = Math.min(100, signals.reduce((t, x) => t + x.weight, 0));
+  const top = signals.slice().sort((x, y) => y.weight - x.weight).slice(0, 4);
+
+  if (a.kind === "clean") {
+    return {
+      plan: { ...CLEAN_PLAN, signals, score },
+      steps: [
+        { gap: extract, event: parsed },
+        { gap: rng.between(300, 600), event: { type: "risk.scored", payment_id: pid, score, decision: "auto_pay", top_signals: top } },
+        { gap: rng.between(400, 800), event: { type: "payment.paid", payment_id: pid, nessie_transfer_id: transferNo() } },
+        { gap: 30, event: who("missed") },
+      ],
+    };
+  }
+
+  if (a.kind === "hidden") {
+    const technique = a.technique ?? "instruction_classifier";
+    const plan: PaymentPlan = { ...CLEAN_PLAN, signals, score, decision: "hold", hardRules: ["hidden_instructions"], finding: { technique, snippet: a.snippet ?? "", confidence: 0.96 } };
+    return {
+      plan,
+      steps: [
+        { gap: extract, event: parsed },
+        { gap: rng.between(500, 900), event: { type: "injection.detected", invoice_id: inv.id, message_id: null, technique, snippet: a.snippet ?? "" } },
+        { gap: rng.between(150, 300), event: { type: "risk.scored", payment_id: pid, score, decision: "hold", top_signals: top } },
+        { gap: 40, event: { type: "payment.blocked", payment_id: pid, reason: QUARANTINE_REASON } },
+        { gap: 20, event: who("caught") },
+      ],
+    };
+  }
+
+  if (a.kind === "amount") {
+    const plan: PaymentPlan = { ...CLEAN_PLAN, signals, score, decision: "hold", hardRules: ["amount_over_max"] };
+    return {
+      plan,
+      steps: [
+        { gap: extract, event: parsed },
+        { gap: rng.between(500, 900), event: { type: "risk.scored", payment_id: pid, score, decision: "hold", top_signals: top } },
+        {
+          gap: 40,
+          event: { type: "payment.held", payment_id: pid, reasons: ["amount_over_max: Hold for controller review", ...top.map((x) => `${x.name}: ${x.detail}`)] },
+        },
+        { gap: 20, event: who("caught") },
+      ],
+    };
+  }
+
+  // new_bank: hold, call the vendor at the number on file, the vendor denies, blocked.
+  const requested = (inv.remittance_json as { account_last4?: string } | null)?.account_last4 ?? "";
+  const identity = `CRS identity check: verified (match ${rng.between(0.9, 0.98).toFixed(2)})`;
+  const plan: PaymentPlan = {
+    score,
+    decision: "hold_and_verify",
+    hardRules: a.hardRules.includes("destination_changed") ? a.hardRules : ["destination_changed", ...a.hardRules],
+    signals: [...signals, signal(rng, "vendor_identity_check", 0, identity)],
+    identity,
+    finding: null,
+    callOutcome: "denied",
+  };
+  return {
+    plan,
+    steps: [
+      { gap: extract, event: parsed },
+      { gap: rng.between(600, 1000), event: { type: "risk.scored", payment_id: pid, score, decision: "hold_and_verify", top_signals: top } },
+      { gap: 40, event: { type: "payment.held", payment_id: pid, reasons: holdReasons("destination_changed", signals, identity) } },
+      { gap: rng.between(300, 600), event: { type: "call.started", payment_id: pid, contact_source: "on_file" } },
+      ...verificationCall(rng, pid, vendor.name, requested, "denied"),
+      { gap: rng.between(900, 1300), event: { type: "call.outcome", payment_id: pid, outcome: "denied" } },
+      { gap: rng.between(120, 250), event: { type: "payment.blocked", payment_id: pid, reason: DENIED_REASON } },
+      { gap: 20, event: who("caught") },
+    ],
   };
 }
 
@@ -234,12 +316,13 @@ function buildSchedule(runId: string, durationMs: number): { steps: Step[]; plan
   let transfers = 0;
   const transferNo = () => `nes_mock_${String(++transfers).padStart(4, "0")}`;
 
-  const steps: Step[] = [{ t: 0, event: { type: "run.started", invoice_count: openInvoices.length } }];
+  const week = openInvoices.filter((i) => !i.attack); // attack invoices go through their own mini-run
+  const steps: Step[] = [{ t: 0, event: { type: "run.started", invoice_count: week.length } }];
   const workers = Array.from({ length: CONCURRENCY }, () => rng.between(200, 500));
   const outcome = new Map<string, PaymentStatus>();
   const plans = new Map<string, PaymentPlan>();
 
-  for (const inv of openInvoices) {
+  for (const inv of week) {
     const w = workers.indexOf(Math.min(...workers));
     let t = workers[w];
     const { plan, steps: invoiceSteps } = script(inv, rng, transferNo);
@@ -260,12 +343,12 @@ function buildSchedule(runId: string, durationMs: number): { steps: Step[]; plan
 
   // Totals and report, worded as run.py writes them.
   const noteFor = { bank_change: DENIED_REASON, ceo_pressure: UNCLEAR_NOTE, poisoned_pdf: QUARANTINE_REASON };
-  const amountOf = (id: string) => openInvoices.find((i) => i.id === id)!.amount_usd;
-  const ids = openInvoices.map((i) => i.id);
+  const amountOf = (id: string) => week.find((i) => i.id === id)!.amount_usd;
+  const ids = week.map((i) => i.id);
   const by = (st: PaymentStatus) => ids.filter((id) => outcome.get(id) === st);
   const paidUsd = round2(by("paid").reduce((sum, id) => sum + amountOf(id), 0));
   const blockedUsd = round2(by("blocked").reduce((sum, id) => sum + amountOf(id), 0));
-  const notes = openInvoices
+  const notes = week
     .filter((i) => outcome.get(i.id) !== "paid")
     .sort((a, b) => (paymentId(a.id) < paymentId(b.id) ? -1 : 1))
     .map((i) => `${vendorById.get(i.vendor_id)!.name}: ${noteFor[i.planted ?? "bank_change"]}`);
@@ -322,6 +405,14 @@ export function startMockRun(opts: { runId?: string; durationMs?: number } = {})
   if (active) throw new ApiError(409, "/api/payment-runs", `A payment run is already in progress (${active})`);
   const id = opts.runId ?? `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const { steps, plans } = buildSchedule(id, opts.durationMs ?? DEFAULT_DURATION_MS);
+  const run = newRun(id, plans);
+  active = id;
+
+  for (const step of steps) run.timers.push(setTimeout(() => emit(run, step.event), step.t));
+  return id;
+}
+
+function newRun(id: string, plans = new Map<string, PaymentPlan>()): MockRun {
   const run: MockRun = {
     id,
     startedAt: new Date().toISOString(),
@@ -334,11 +425,71 @@ export function startMockRun(opts: { runId?: string; durationMs?: number } = {})
     rng: createRng(hashSeed(`${id}:ids`)),
   };
   runs.set(id, run);
-  active = id;
-
-  for (const step of steps) run.timers.push(setTimeout(() => emit(run, step.event), step.t));
-  return id;
+  return run;
 }
+
+// ---------- Mini-runs: one attack each, queued behind a full run (attacks.py) ----------
+
+const miniQueue: string[] = [];
+let miniBusy: string | null = null;
+let miniTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * POST /api/attacks in mock mode. The attack's run exists at once (so the console can subscribe), logs the attack, and
+ * waits its turn while a full run or an earlier attack is running. Returns what the 201 response reports.
+ */
+export function startMockMiniRun(runId: string, invoiceId: string): { queued: boolean; position: number; waitingFor: string | null } {
+  const inv = openInvoices.find((i) => i.id === invoiceId)!;
+  runOf.set(invoiceId, runId);
+  const a = inv.attack!;
+  const run = newRun(runId);
+  const ahead = (active ? 1 : 0) + (miniBusy ? 1 : 0) + miniQueue.length;
+  const waitingFor = active ?? miniBusy ?? miniQueue.at(-1) ?? null;
+  emit(run, attackLogged(run.rng, a.card, { attackId: a.attackId, name: a.attackerName, result: null }));
+  if (ahead > 0) emit(run, { type: "attack.queued", attack_id: a.attackId, position: miniQueue.length + 1, waiting_for: waitingFor });
+  miniQueue.push(runId);
+  miniTimer ??= setInterval(pumpMini, 200);
+  pumpMini();
+  return { queued: ahead > 0, position: ahead > 0 ? miniQueue.length : 0, waitingFor: ahead > 0 ? waitingFor : null };
+}
+
+function pumpMini() {
+  if (active || miniBusy || miniQueue.length === 0) return;
+  const runId = miniQueue.shift()!;
+  const run = runs.get(runId);
+  const inv = openInvoices.find((i) => runOf.get(i.id) === runId);
+  if (!run || !inv) return;
+  miniBusy = runId;
+  const rng = createRng(hashSeed(runId));
+  const { plan, steps } = script(inv, rng, () => `nes_mock_a${rng.hex(4)}`);
+  run.plans.set(paymentId(inv.id), plan);
+  let t = 300;
+  const timeline: Step[] = [{ t: 0, event: { type: "run.started", invoice_count: 1 } }];
+  for (const { gap, event } of steps) timeline.push({ t: (t += gap), event });
+  const status = steps.some((x) => x.event.type === "payment.blocked") ? "blocked" : steps.some((x) => x.event.type === "payment.held") ? "held" : "paid";
+  const n = (s: string) => (status === s ? 1 : 0);
+  timeline.push(
+    { t: t + 300, event: { type: "run.completed", paid: n("paid"), held: n("held"), blocked: n("blocked"), total_usd: status === "paid" ? inv.amount_usd : 0 } },
+    {
+      t: t + 450,
+      event: {
+        type: "run.report",
+        summary: `1 invoice processed: ${status}.`,
+        paid: n("paid"),
+        held: n("held"),
+        blocked: n("blocked"),
+        paid_usd: status === "paid" ? inv.amount_usd : 0,
+        blocked_usd: status === "blocked" ? inv.amount_usd : 0,
+        findings: [],
+      },
+    },
+  );
+  for (const step of timeline) run.timers.push(setTimeout(() => emit(run, step.event), step.t));
+  run.timers.push(setTimeout(() => (miniBusy = null), t + 500));
+}
+
+/** Which mini-run owns an attack invoice. */
+export const runOf = new Map<string, string>();
 
 function emit(run: MockRun, draft: Draft) {
   const event = { ...draft, id: `evt_${run.rng.hex(12)}`, run_id: run.id, at: new Date().toISOString() } as RunEvent;
@@ -349,6 +500,7 @@ function emit(run: MockRun, draft: Draft) {
   if (event.type === "run.completed") {
     run.completedAt = event.at;
     if (active === run.id) active = null;
+    pumpMini(); // an attack waiting behind this run goes next
   }
 }
 
@@ -500,6 +652,10 @@ export function resetMockRuns() {
   }
   runs.clear();
   active = null;
+  miniQueue.length = 0;
+  miniBusy = null;
+  if (miniTimer) clearInterval(miniTimer);
+  miniTimer = null;
 }
 
 /** Stored events replay first, then live ones. An unknown run id starts a run under that id (deep links keep working). */

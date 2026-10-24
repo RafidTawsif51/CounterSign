@@ -139,6 +139,20 @@ export interface OpenInvoice extends Invoice {
   amount_usd: number;
   due_date: string;
   planted: PlantedKind | null;
+  /** Set on invoices created by POST /api/attacks: processed by their own mini-run, never by a full run. */
+  attack?: AttackPlan;
+}
+
+/** What the mock pipeline finds in an attack, decided when the attack is built (lib/mock/attacks.ts). */
+export interface AttackPlan {
+  attackId: string;
+  attackerName: string;
+  card: string;
+  kind: "new_bank" | "hidden" | "amount" | "clean";
+  signals: { name: string; weight: number; detail: string }[];
+  hardRules: ("destination_changed" | "hidden_instructions" | "amount_over_max" | "contacts_differ")[];
+  technique?: "white_text" | "tiny_font" | "off_page" | "zero_width" | "html_comment" | "instruction_classifier";
+  snippet?: string;
 }
 
 const byKey = Object.fromEntries(SPECS.map((v) => [v.key, v]));

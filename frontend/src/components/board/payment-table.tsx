@@ -34,7 +34,17 @@ const statusMark: Record<PaymentStatus, string> = {
 // Rows that were already there when the board mounted (a replay, or coming back from another page) do not slide in.
 const SETTLE_MS = 400;
 
-export function PaymentTable({ rows, loading, emptyText }: { rows: BoardRow[]; loading: boolean; emptyText: string }) {
+export function PaymentTable({
+  rows,
+  loading,
+  emptyText,
+  skeletonRows = 8,
+}: {
+  rows: BoardRow[];
+  loading: boolean;
+  emptyText: string;
+  skeletonRows?: number;
+}) {
   const mountedAt = useRef(Date.now());
 
   return (
@@ -56,7 +66,7 @@ export function PaymentTable({ rows, loading, emptyText }: { rows: BoardRow[]; l
         </TableHeader>
         <TableBody>
           {loading ? (
-            <SkeletonRows />
+            <SkeletonRows count={skeletonRows} />
           ) : rows.length === 0 ? (
             <TableRow className="hover:bg-transparent">
               <TableCell colSpan={8} className="h-16 text-sm text-ink-muted">
@@ -195,8 +205,8 @@ function Placeholder({ w }: { w: string }) {
   return <Skeleton className={cn("inline-block h-3 align-middle", w)} />;
 }
 
-function SkeletonRows() {
-  return Array.from({ length: 8 }, (_, i) => (
+function SkeletonRows({ count }: { count: number }) {
+  return Array.from({ length: count }, (_, i) => (
     <TableRow key={i} className="hover:bg-transparent">
       {["w-14", "w-36", "w-16", "w-20 ml-auto", "w-16", "w-14", "w-28", "w-14 ml-auto"].map((w, j) => (
         <TableCell key={j}>

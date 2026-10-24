@@ -10,7 +10,7 @@ import type { PaymentDetail } from "@/lib/types";
 // The verification call. While the run is live the panel follows the event stream line by line; otherwise (or before
 // the stream has this payment) it shows the stored call record.
 export function CallSlot({ detail }: { detail: PaymentDetail }) {
-  const { events } = useCurrentRun();
+  const { allEvents: events } = useCurrentRun();
   const record = detail.calls.at(-1);
   const live = useMemo(() => foldCalls(events).find((c) => c.paymentId === detail.payment.id), [events, detail.payment.id]);
   const call = live ?? callFromDetail(detail);
