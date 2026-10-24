@@ -509,3 +509,63 @@ def test_held_counts_as_caught_and_the_leaderboard_row_survives_in_the_attack_ro
         d = s.get(Attack, a["attack_id"]).detail_json
         assert d["outcome"] == "blocked" and d["paid_usd"] == 0.0 and d["body"].startswith("Maria") and d["reasons"]
         assert s.get(Attack, a["attack_id"]).result.value == "caught"
+
+
+# ================================================================ the seeded attacks stay off the leaderboard
+
+
+def test_seeded_attacks_are_not_listed_or_counted(env):
+    client, eng = env
+    go(client)  # the seeded run logs the 3 planted attacks
+    with Session(eng) as s:
+        rows = s.exec(select(Attack)).all()
+        assert len(rows) == 3 and {r.source.value for r in rows} == {"seeded"} and {r.result.value for r in rows} == {"caught"}
+    for url in ("/api/attacks/leaderboard", "/api/attacks/leaderboard?include_hidden=true"):
+        board = client.get(url).json()
+        assert board["attempts"] == []
+        assert board["totals"] == {"attempts": 0, "unique_attackers": 0, "sandbox_usd_moved": 0.0, "caught": 0, "missed": 0, "pending_result": 0, "by_card": {}}
+    a = client.post("/api/attacks", json=CLASSIC).json()
+    wait(client, a["run_id"])
+    board = client.get("/api/attacks/leaderboard").json()
+    assert [x["id"] for x in board["attempts"]] == [a["attack_id"]]
+    assert board["totals"] == {"attempts": 1, "unique_attackers": 1, "sandbox_usd_moved": 0.0, "caught": 1, "missed": 0, "pending_result": 0,
+                               "by_card": {"classic_bank_change": 1}}
+    assert "Seeded attack" not in str(board)
+
+
+def test_all_three_real_sources_count(env, bounty):
+    client, eng = env
+    go(client)
+    j = client.post("/api/attacks", json={**CLASSIC, "attacker_name": "Judge J", "source": "judge"}).json()
+    c = client.post("/api/attacks", json={**ceo("Console C"), "source": "console"}).json()
+    b = client.post("/api/bounty/inbound", json=mail(), headers=bounty).json()
+    for x in (j, c, b):
+        wait(client, x["run_id"])
+    board = client.get("/api/attacks/leaderboard").json()
+    assert {r["source"] for r in board["attempts"]} == {"judge", "console", "bounty_email"} and board["totals"]["attempts"] == 3 and board["totals"]["unique_attackers"] == 3
+    assert board["totals"]["by_card"] == {"bounty": 1, "ceo_pressure": 1, "classic_bank_change": 1}
+
+
+def test_seeded_attack_events_never_reach_the_leaderboard_channel(env, monkeypatch):
+    from app import events as ev
+
+    client, eng = env
+    published = []
+    real = ev.broadcaster._publish
+
+    def spy(key, msg):
+        published.append((key, msg["type"], msg.get("attack_id")))
+        return real(key, msg)
+
+    monkeypatch.setattr(ev.broadcaster, "_publish", spy)
+    go(client)
+    with Session(eng) as s:
+        seeded_ids = {a.id for a in s.exec(select(Attack))}
+    assert len(seeded_ids) == 3
+    board = [p for p in published if p[0] == ev.LEADERBOARD]
+    assert board == []  # three attack.logged events were sent on the run channel only
+    assert sum(1 for p in published if p[1] == "attack.logged") == 3
+    a = client.post("/api/attacks", json=CLASSIC).json()
+    wait(client, a["run_id"])
+    board = [p for p in published if p[0] == ev.LEADERBOARD]
+    assert board and {p[2] for p in board} == {a["attack_id"]}  # a real attack does reach it

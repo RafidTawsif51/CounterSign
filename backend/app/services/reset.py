@@ -24,7 +24,7 @@ from sqlmodel import Session, select
 from app import events as ev
 from app.config import get_settings
 from app.db import engine
-from app.models import Attack
+from app.models import Attack, AttackSource
 from app.services import attacks, run
 
 log = logging.getLogger("countersign.reset")
@@ -47,6 +47,9 @@ def _seed_module():
 def _reseed(keep: bool):
     with Session(engine) as session:
         summary = _seed_module().seed_database(session, keep_attacks=keep)
+        for a in session.exec(select(Attack).where(Attack.source == AttackSource.seeded)).all():  # planted attacks are not part of the leaderboard
+            session.delete(a)
+        session.commit()
         kept = session.exec(select(func.count()).select_from(Attack)).one()
     return summary, kept
 

@@ -170,7 +170,7 @@ Signal object inside `signals_json` (Pydantic `Signal` in models.py):
 |---|---|---|
 | id | str PK | |
 | attacker_name | str | |
-| source | AttackSource | console, judge, bounty_email |
+| source | AttackSource | console, judge, bounty_email, and `seeded` (not in the spec): the seed's 3 planted attacks, stored when a run logs them, never listed or counted on the leaderboard |
 | card | str | e.g. classic_bank_change, ai_hijack, ceo_pressure, freestyle |
 | payload_ref | str, null | usually a messages.id or invoices.id |
 | result | AttackResult, null | null until scored |

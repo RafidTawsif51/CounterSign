@@ -69,6 +69,7 @@ class AttackSource(str, enum.Enum):
     console = "console"
     judge = "judge"
     bounty_email = "bounty_email"
+    seeded = "seeded"  # the planted attacks in the seed; never shown on the leaderboard or counted in its totals
 
 
 class AttackResult(str, enum.Enum):

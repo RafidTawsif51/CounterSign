@@ -205,7 +205,7 @@ def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Ass
     if atk is None:
         names = {x.name for x in a.signals} if a else set()
         card = "poisoned_invoice" if fired else "classic_bank_change" if "lookalike_domain" in names else "ceo_pressure" if "urgency_language" in names else "freestyle"
-        atk = Attack(attacker_name="Seeded attack", source=AttackSource.console, card=card, payload_ref=msg.id, moderation_status=ModerationStatus.approved)
+        atk = Attack(attacker_name="Seeded attack", source=AttackSource.seeded, card=card, payload_ref=msg.id, moderation_status=ModerationStatus.approved)
     atk.result = result
     snap = dict(atk.detail_json or {})
     if "body" not in snap:

@@ -271,8 +271,8 @@ class Broadcaster:
             log.exception("could not persist event %s", event.type)
         if event.run_id:
             self._publish(event.run_id, msg)
-        if isinstance(event, (AttackLogged, AttackQueued, DemoReset)):
-            self._publish(LEADERBOARD, msg)
+        if isinstance(event, (AttackLogged, AttackQueued, DemoReset)) and getattr(event, "source", None) != AttackSource.seeded:
+            self._publish(LEADERBOARD, msg)  # (a seeded attack's events stay on its run channel)
         return msg
 
 

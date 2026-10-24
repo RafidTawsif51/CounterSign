@@ -44,6 +44,7 @@ def test_reset_restores_the_seeded_state_in_under_5_seconds(env):
     for a in [client.post("/api/attacks", json=ceo(f"P{i}")).json() for i in range(3)]:
         wait(client, a["run_id"])
     assert count(eng, Payment) > 1159 and count(eng, Attack) == 6 and open_invoices(eng) == 0  # 3 attacks + the 3 planted ones the full run logged
+    assert len(client.get("/api/attacks/leaderboard").json()["attempts"]) == 3  # the leaderboard shows only the 3 real ones
 
     t = time.perf_counter()
     r = client.post("/api/demo/reset")
@@ -168,3 +169,17 @@ def test_reset_is_deterministic(env):
     go(client)
     client.post("/api/demo/reset")
     assert snapshot() == first
+
+
+def test_keep_leaderboard_drops_the_seeded_rows(env):
+    client, eng = env
+    go(client)  # logs the 3 planted attacks as source "seeded"
+    a = client.post("/api/attacks", json=CLASSIC).json()
+    wait(client, a["run_id"])
+    assert count(eng, Attack) == 4 and count(eng, Attack, Attack.source == "seeded") == 3
+    r = client.post("/api/demo/reset?keep_leaderboard=true").json()
+    assert r["kept_attacks"] == 1 and count(eng, Attack) == 1 and count(eng, Attack, Attack.source == "seeded") == 0
+    assert [x["id"] for x in client.get("/api/attacks/leaderboard").json()["attempts"]] == [a["attack_id"]]
+    _, g = go(client)  # a new full run logs the planted ones again, without duplicates and still off the board
+    assert (g["totals"]["paid"], g["totals"]["held"], g["totals"]["blocked"]) == (37, 1, 2)
+    assert count(eng, Attack) == 4 and client.get("/api/attacks/leaderboard").json()["totals"]["attempts"] == 1

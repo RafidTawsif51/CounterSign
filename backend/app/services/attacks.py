@@ -8,7 +8,8 @@
 #   GET  /api/attacks/leaderboard        newest first: handle, source, attack type, result, top reasons, and totals (attempts, unique
 #                                        attackers, sandbox dollars moved). The attack text (subject, sender, body) is included ONLY when
 #                                        moderation_status is approved; hidden rows are left out unless include_hidden. Bounty handles and
-#                                        sender addresses are masked on the screen.
+#                                        sender addresses are masked on the screen. Only console, judge and bounty_email attacks count:
+#                                        the planted attacks of the seed (source "seeded") are never listed or totalled.
 #   POST /api/attacks/{id}/moderation    approve or hide a row on the leaderboard screen
 #
 # An attack or a bounty email NEVER fails because a payment run is active. Each one gets a mini-run: its own run_id
@@ -301,6 +302,7 @@ class AttackPayload(BaseModel):
 
 
 PDF_CARDS = ("poisoned_invoice", "freestyle")
+LEADERBOARD_SOURCES = (AttackSource.console, AttackSource.judge, AttackSource.bounty_email)
 
 
 class AttackIn(BaseModel):
@@ -431,7 +433,7 @@ def leaderboard_row(a: Attack) -> dict:
 
 @router.get("/attacks/leaderboard")
 def leaderboard(limit: int = Query(100, ge=1, le=500), include_hidden: bool = False, session: Session = Depends(get_session)) -> dict:
-    q = select(Attack).order_by(Attack.created_at.desc(), Attack.id.desc())
+    q = select(Attack).where(Attack.source.in_(LEADERBOARD_SOURCES)).order_by(Attack.created_at.desc(), Attack.id.desc())  # never the seeded ones
     if not include_hidden:
         q = q.where(Attack.moderation_status != ModerationStatus.hidden)
     attacks = session.exec(q.limit(limit)).all()

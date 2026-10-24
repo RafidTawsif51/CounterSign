@@ -118,6 +118,7 @@ def test_the_three_attacks_and_why(env):
         atks = s.exec(select(Attack)).all()
         assert len(atks) == 3 and all(a.result.value == "caught" for a in atks)
         assert {a.card for a in atks} == {"classic_bank_change", "poisoned_invoice", "ceo_pressure"}
+        assert {a.source.value for a in atks} == {"seeded"}  # stored for the record, but never on the leaderboard
         assert s.get(Message, "msg_atk_poisoned_pdf").is_attack
 
 
