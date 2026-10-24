@@ -39,7 +39,7 @@ export function PaymentDetail() {
               <CallSlot detail={detail} />
               <AuditTrail entries={detail.audit} />
             </div>
-            {detail.payment.status === "held" && <DecisionFooter paymentId={detail.payment.id} vendor={detail.vendor.name} />}
+            <DecisionFooter detail={detail} />
           </EvidenceProvider>
         ) : query.isError ? (
           <div className="px-5 pt-4">

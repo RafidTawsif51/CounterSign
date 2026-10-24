@@ -26,6 +26,7 @@ import type {
   VerificationCall,
   VendorContact,
   AuditLogEntry,
+  PaymentActions,
   StartRunResponse,
   SystemComponentStatus,
   VendorSummary,
@@ -58,7 +59,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     } catch {
       // Non-JSON error body; keep the status text.
     }
-    throw new ApiError(res.status, path, `${method} ${path} failed (${res.status}): ${detail}`);
+    throw new ApiError(res.status, path, `${method} ${path} failed (${res.status}): ${detail}`, detail);
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
@@ -93,8 +94,8 @@ export const api = {
 
   payment: async (paymentId: string): Promise<PaymentDetail> =>
     USE_MOCKS ? get<PaymentDetail>(`/api/payments/${paymentId}`) : adaptPayment(await get<BackendPayment>(`/api/payments/${paymentId}`)),
-  approve: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/approve`, { reason }),
-  reject: (paymentId: string, reason: string) => post<void>(`/api/payments/${paymentId}/reject`, { reason }),
+  approve: (paymentId: string, reason: string, approver: string) => post<void>(`/api/payments/${paymentId}/approve`, { reason, approver }),
+  reject: (paymentId: string, reason: string, approver: string) => post<void>(`/api/payments/${paymentId}/reject`, { reason, approver }),
   ask: (paymentId: string, question: string) => post<AskAnswer>(`/api/payments/${paymentId}/ask`, { question }),
   startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
 
@@ -138,7 +139,10 @@ interface BackendPayment {
   payment: Pick<Payment, "id" | "run_id" | "status" | "amount_usd" | "nessie_transfer_id"> & {
     destination: BackendAccount | null;
     last_verified_account: BackendAccount | null;
+    /** Approving always pays this account: the vendor's verified one, never the one a request asked for. */
+    approve_pays: BackendAccount | null;
   };
+  actions: PaymentActions;
   invoice: {
     id: string;
     number: string | null;
@@ -192,6 +196,8 @@ function adaptPayment(b: BackendPayment): PaymentDetail {
     findings: b.injection_findings,
     calls: b.calls.map((c) => ({ ...c, contact_id: c.contact?.id ?? null, contact: c.contact && ({ ...c.contact, vendor_id: vendorId, first_seen: "", last_verified: null } as VendorContact) })),
     audit: b.audit.map(({ detail, ...a }) => ({ ...a, detail_json: detail })),
+    actions: b.actions,
+    approve_pays: account(p.approve_pays),
   };
 }
 

@@ -363,6 +363,16 @@ export interface PaymentDetail {
   findings: InjectionFinding[];
   calls: (VerificationCall & { contact: VendorContact | null })[];
   audit: AuditLogEntry[];
+  /** What the controller may do now, decided by the API. Absent in mock mode. */
+  actions?: PaymentActions;
+  /** The account Approve would pay. Never the account the invoice asked for. */
+  approve_pays?: VendorBankAccount | null;
+}
+
+export interface PaymentActions {
+  can_approve: boolean;
+  approve_blocked_reason: string | null;
+  can_reject: boolean;
 }
 
 export interface RemittanceDetails {

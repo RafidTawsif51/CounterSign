@@ -129,6 +129,9 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         row.changedTo = bank?.detail.match(/ending (\d{4})/)?.[1] ?? null;
         break;
       }
+      case "payment.reviewed":
+        log(e, `${e.approver} ${e.decision} ${money(row)}`, e.decision === "approved" ? "paid" : "blocked", row.paymentId);
+        break;
       case "payment.paid":
         row.status = "paid";
         row.stage = "decided";

@@ -63,3 +63,19 @@ def test_signal_carries_evidence_id():
         top_signals=[Signal(name="n", weight=30, detail="d")],
     )
     assert e.payload()["top_signals"][0]["evidence_id"].startswith("evd_")
+
+
+def test_a_controller_decision_reaches_the_global_channel_with_its_payment_event():
+    """A board that only watches the global channel must see an approve or reject, even for a payment that never had a call."""
+    create_all()
+
+    async def go():
+        b = ev.Broadcaster()
+        board = b.subscribe(ev.LEADERBOARD)
+        await b.emit(ev.PaymentHeld(run_id="run_a", payment_id="pay_nocall", reasons=["x"]))
+        assert board.qsize() == 0  # a held payment with no call stays off the channel
+        await b.emit(ev.PaymentReviewed(run_id="run_a", payment_id="pay_nocall", decision="rejected", approver="Dev", reason="no"))
+        await b.emit(ev.PaymentBlocked(run_id="run_a", payment_id="pay_nocall", reason="Rejected by Dev: no"))
+        assert [board.get_nowait()["type"] for _ in range(board.qsize())] == ["payment.reviewed", "payment.blocked"]
+
+    asyncio.run(go())

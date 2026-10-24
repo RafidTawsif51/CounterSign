@@ -302,7 +302,7 @@ class Broadcaster:
         # global channel (the one the leaderboard reads). So does run.updated.
         if isinstance(event, DemoReset):
             self._call_payments.clear()
-        if isinstance(event, GLOBAL_CALL_EVENTS):
+        if isinstance(event, (*GLOBAL_CALL_EVENTS, PaymentReviewed)):  # a controller's decision is as late as a call outcome
             if len(self._call_payments) >= CALL_PAYMENTS_MAX:
                 self._call_payments.clear()
             self._call_payments.add(event.payment_id)

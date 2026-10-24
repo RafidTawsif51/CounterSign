@@ -22,7 +22,8 @@ So that a board that only watches the global channel always gets them, these eve
 | Event | On the global channel |
 |---|---|
 | `call.started`, `call.transcript`, `call.outcome` | always |
-| `payment.paid`, `payment.held`, `payment.blocked` | only for a payment that has had a call (so a clean payment does not flood the channel) |
+| `payment.reviewed` | always |
+| `payment.paid`, `payment.held`, `payment.blocked` | only for a payment that has had a call or a controller decision (so a clean payment does not flood the channel) |
 | `run.updated` | always |
 
 The global channel has no replay. A client that missed events reloads from `GET /api/payments/{id}` and `GET /api/payment-runs/{id}`; every event carries `run_id` and `payment_id` so the board can route it. Events of the three planted attacks are included (their `attack.logged` events still are not).
