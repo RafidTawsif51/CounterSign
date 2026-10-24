@@ -228,6 +228,8 @@ def call_test(args) -> int:
     if resp.status_code >= 300:
         return _result(False, f"{resp.status_code}: {resp.text[:200]}")
     info = resp.json()
+    if info["mode"] == "web":
+        print("web mode: open the vendor phone page on your phone (python -m scripts.integrations_cli vendor-phone-url) and tap Answer")
     print(f"started ({info['mode']}), run {info['run_id']}; waiting for events (up to 120 s)")
     deadline, no_answers, final, grace = time.time() + 120, 0, None, None
     while time.time() < deadline:
@@ -254,6 +256,30 @@ def call_test(args) -> int:
     return _result(True, f"final outcome: {final}")
 
 
+def vendor_phone_url(_args) -> int:
+    """The softphone link for Summit Concrete. This is the ONLY place VENDOR_PHONE_KEY is printed: treat the output as a secret."""
+    from urllib.parse import quote
+
+    from sqlmodel import Session, select
+
+    from app.config import get_settings
+    from app.db import engine
+    from app.models import Vendor
+    from app.services import voice
+
+    base, key = get_settings().public_base_url.rstrip("/"), voice._env("VENDOR_PHONE_KEY")
+    missing = [n for n, v in {"PUBLIC_BASE_URL": base, "VENDOR_PHONE_KEY": key}.items() if not v]
+    if missing:
+        return _result(False, "missing in .env: " + ", ".join(missing))
+    with Session(engine) as session:
+        vendor = session.exec(select(Vendor).where(Vendor.name == "Summit Concrete")).first()
+    if vendor is None:
+        return _result(False, "no vendor named Summit Concrete; seed the database or run create-test-hold")
+    print(f"{base}/api/voice/vendor-phone/{vendor.id}?k={quote(key)}")
+    print("Note: this is the only place the key is printed. Anyone with this link can answer the verification call.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -261,6 +287,7 @@ def main() -> int:
                      "smoke-nessie": smoke_nessie, "setup-nessie": setup_nessie, "smoke-transfer": smoke_transfer}.items():
         sub.add_parser(name).set_defaults(fn=fn)
     sub.add_parser("create-test-hold").set_defaults(fn=create_test_hold)
+    sub.add_parser("vendor-phone-url").set_defaults(fn=vendor_phone_url)
     ct = sub.add_parser("call-test")
     ct.add_argument("payment_id")
     ct.add_argument("--api", default="http://127.0.0.1:8000", help="base URL of the running backend")

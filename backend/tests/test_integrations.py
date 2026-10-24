@@ -411,6 +411,7 @@ def fdb(tmp_path, monkeypatch):
     SQLModel.metadata.create_all(eng)
     use_engine(monkeypatch, eng)
     monkeypatch.setattr(verify, "arm_answer_watchdog", lambda call_id: None)
+    monkeypatch.setenv("VOICE_MODE", "twilio")  # os.getenv wins over .env, so a developer's VOICE_MODE=web cannot leak into tests
     monkeypatch.setattr(get_settings(), "public_base_url", "https://pub.example")
     monkeypatch.setattr(get_settings(), "allowed_call_numbers", "+14155550142")
     with Session(eng) as s:
@@ -428,8 +429,7 @@ def _call_row(eng):
 @pytest.mark.parametrize("speech,expected,paid", [
     ("No we never changed banks", CallOutcome.denied, False),
     ("Yes we did", CallOutcome.confirmed, True),
-    ("uh what", CallOutcome.unclear, False),
-    ("", CallOutcome.unclear, False),
+    ("", CallOutcome.unclear, False),  # silence is never re-asked (it already had its own retry)
 ])
 def test_gather_endpoint(fdb, speech, expected, paid):
     client, eng = fdb
@@ -631,11 +631,13 @@ def test_real_mode_start_verification_returns_at_once(fdb, monkeypatch, tmp_path
     monkeypatch.setattr(voice, "place_call", fake_place)
     monkeypatch.setattr(voice, "tts_clip", fake_clip)
     with Session(eng) as s:
+        s.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer  # the fixture call is settled, so a new one may start
+        s.commit()
         res = run(verify.start_verification("pay_t", s))
         s.expire_all()
         assert res.in_progress and res.payment_status == PaymentStatus.held and not res.needs_controller
         calls = s.exec(select(VerificationCall).where(VerificationCall.payment_id == "pay_t")).all()
-        assert len(calls) == 2 and sum(c.outcome is None for c in calls) == 2  # the fixture call plus the new one, both open
+        assert len(calls) == 2 and sum(c.outcome is None for c in calls) == 1  # the settled fixture call plus the new open one
         new = next(c for c in calls if c.id != "cal_t")
         assert s.get(Payment, "pay_t").status == PaymentStatus.held
     tok = voice._token_path(new.id).read_text().strip()
@@ -644,7 +646,7 @@ def test_real_mode_start_verification_returns_at_once(fdb, monkeypatch, tmp_path
                        f"https://pub.example/api/webhooks/twilio/status?call_id={new.id}&t={tok}")]
     with Session(eng) as s:
         assert tok not in " ".join(str(a.detail_json) for a in s.exec(select(AuditLog))) and not any(tok in c for c in clips)
-    assert len(clips) == 6 and any("9999" in c for c in clips)
+    assert len(clips) == 8 and any("9999" in c for c in clips)
 
 
 def test_real_mode_refuses_a_number_off_the_allow_list(fdb, monkeypatch):
@@ -654,6 +656,8 @@ def test_real_mode_refuses_a_number_off_the_allow_list(fdb, monkeypatch):
     monkeypatch.setattr(cfg, "mock_cartesia", False)
     monkeypatch.setattr(cfg, "allowed_call_numbers", "+14155550199")
     with Session(eng) as s:
+        s.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer  # settled, so a new start reaches the allow list check
+        s.commit()
         with pytest.raises(verify.CallNotAllowed):
             run(verify.start_verification("pay_t", s))
         assert len(s.exec(select(VerificationCall)).all()) == 1  # no new call row
@@ -705,6 +709,9 @@ def test_manual_call_route_in_mock_mode(fdb, monkeypatch):
     client, eng = fdb
     monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
     monkeypatch.setattr(contacts, "MOCK_OVERRIDES", {"ven_t": "+14155550142"})
+    with Session(eng) as s:
+        s.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer  # the fixture call is settled; an open one blocks a second start
+        s.commit()
     r = client.post("/api/verifications/pay_t/call?answer=Yes%20we%20did")
     assert r.status_code == 202 and r.json()["mode"] == "mock"
     with Session(eng) as s:
@@ -768,3 +775,365 @@ def test_create_test_hold_on_a_seeded_database(seed_template, tmp_path, monkeypa
     finally:
         verify.MOCK_OUTCOMES.pop(pay_id, None)
     assert res.outcome == CallOutcome.denied and res.payment_status == PaymentStatus.blocked
+
+
+# ---------------------------------------------------------------- re-ask and "hold on"
+
+
+def _gather(client, speech, r=0):
+    return client.post(f"/api/voice/gather/cal_t{'?r=1' if r else ''}", data={"SpeechResult": speech}).text
+
+
+def test_unclear_answer_is_re_asked_once_then_finalizes_unclear(fdb):
+    client, eng = fdb
+    first = _gather(client, "who is this?")
+    assert "ending 9999" in first and "<Gather" in first and "<Hangup/>" not in first and "gather/cal_t?r=1" in first
+    assert _call_row(eng)[0].outcome is None
+    second = _gather(client, "what account?", r=1)
+    assert second.endswith("<Hangup/></Response>") and "ending 9999" not in second
+    call, pay = _call_row(eng)
+    assert call.outcome == CallOutcome.unclear and pay.status == PaymentStatus.held
+    assert [l["speaker"] for l in call.transcript] == ["agent", "vendor", "agent", "vendor", "agent"]
+
+
+def test_re_ask_then_clear_answer_resolves(fdb):
+    client, eng = fdb
+    _gather(client, "who is this?")
+    assert _gather(client, "No, never", r=1).endswith("<Hangup/></Response>")
+    assert _call_row(eng)[0].outcome == CallOutcome.denied
+
+
+def test_hold_on_regathers_and_uses_up_the_single_re_ask(fdb):
+    client, eng = fdb
+    page = _gather(client, "hold on a second")
+    assert "take your time" in page.lower() or "<Play>" in page
+    assert "<Gather" in page and _call_row(eng)[0].outcome is None
+    assert _call_row(eng)[0].transcript[-1]["text"] == "Sure, take your time."
+    assert _gather(client, "umm", r=1).endswith("<Hangup/></Response>")  # no second re-ask
+    assert _call_row(eng)[0].outcome == CallOutcome.unclear
+
+
+def test_silence_after_a_re_ask_ends_the_call_unclear(fdb):
+    client, eng = fdb
+    _gather(client, "what?")
+    assert "<Hangup/>" in client.post("/api/voice/twiml/cal_t?end=1&r=1").text
+    call = _call_row(eng)[0]
+    assert call.outcome == CallOutcome.unclear and [l["speaker"] for l in call.transcript] == ["agent", "vendor", "agent", "vendor", "agent"]
+
+
+def test_decide_rules():
+    assert voice.decide("who is this", "unclear", False) == "reask"
+    assert voice.decide("who is this", "unclear", True) == "close"
+    assert voice.decide("", "unclear", False) == "close"
+    assert voice.decide("one moment please", "unclear", False) == "hold"
+    assert voice.decide("wait, no we never did", "denied", False) == "hold"  # asked to wait: let them finish
+    assert voice.decide("yes", "confirmed", False) == "close"
+
+
+def test_regather_twiml_uses_only_allowed_verbs(fdb):
+    client, _ = fdb
+    for speech in ("who is this", "hold on"):
+        tags = set(re.findall(r"<([A-Za-z]+)", _gather(client, speech))) - {"Response"}
+        assert tags <= {"Say", "Play", "Gather", "Redirect", "Pause", "Hangup"}, tags
+        client.post("/api/voice/twiml/cal_t?end=1&r=1")
+        break
+
+
+# ---------------------------------------------------------------- double start
+
+
+def test_second_start_returns_the_call_already_going(fdb):
+    _, eng = fdb
+    with Session(eng) as s:
+        res = run(verify.start_verification("pay_t", s))  # the fixture's cal_t is still open
+        again = run(verify.start_verification("pay_t", s))
+        assert res.call_id == again.call_id == "cal_t" and res.in_progress
+        assert len(s.exec(select(VerificationCall).where(VerificationCall.payment_id == "pay_t")).all()) == 1
+
+
+# ---------------------------------------------------------------- browser softphone
+
+KEY = "phone-key-123"
+
+
+@pytest.fixture
+def web(fdb, monkeypatch, tmp_path):
+    """Real mode with VOICE_MODE=web. The fixture's call is settled, then a web call is started through start_verification."""
+    client, eng = fdb
+    cfg = get_settings()
+    monkeypatch.setattr(voice, "AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(cfg, "mock_twilio", False)
+    monkeypatch.setattr(cfg, "mock_cartesia", False)
+    monkeypatch.setattr(cfg, "twilio_require_call_token", None)
+    monkeypatch.setenv("VOICE_MODE", "web")
+    monkeypatch.setenv("VENDOR_PHONE_KEY", KEY)
+    monkeypatch.setattr(voice, "web_calls", {})
+    monkeypatch.setattr(verify, "RETRY_DELAY_SECONDS", 3600)
+
+    async def fake_clip(text, settings=None):
+        return voice.clip_url(text, settings)
+
+    async def no_dial(*a, **k):
+        raise AssertionError("web mode must not dial")
+
+    monkeypatch.setattr(voice, "tts_clip", fake_clip)
+    monkeypatch.setattr(voice, "place_call", no_dial)
+    with Session(eng) as s:
+        s.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer
+        s.commit()
+
+    async def go():
+        with Session(eng) as s:
+            return await verify.start_verification("pay_t", s)
+
+    res = asyncio.run(go())
+    return client, eng, res
+
+
+def _pending(client, k=KEY):
+    return client.get(f"/api/voice/pending/ven_t?k={k}")
+
+
+def _web_state(eng, call_id):
+    with Session(eng) as s:
+        return s.get(VerificationCall, call_id), s.get(Payment, "pay_t")
+
+
+def test_web_call_shows_as_pending_and_never_dials(web):
+    client, eng, res = web
+    assert res.in_progress and res.call_id in voice.web_calls
+    body = _pending(client).json()["call"]
+    assert body["call_id"] == res.call_id and body["vendor_name"] == "Test Co" and set(body["clips"]) >= {"intro", "question", "clarify", "hold", "confirmed", "denied"}
+    assert voice.check_call_token(res.call_id, body["token"])
+    with Session(eng) as s:
+        placed = [a for a in s.exec(select(AuditLog).where(AuditLog.action == "verification_call_placed"))]
+        assert placed and placed[-1].detail_json["channel"] == "web" and body["token"] not in str([a.detail_json for a in s.exec(select(AuditLog))])
+
+
+def _answer(client, res, text, token=None):
+    tok = token or _pending(client).json()["call"]["token"]
+    return client.post(f"/api/voice/web-answer/{res.call_id}?t={tok}", json={"answer": text})
+
+
+def test_web_denied_blocks_the_payment(web):
+    client, eng, res = web
+    r = _answer(client, res, "No we never changed banks")
+    assert r.status_code == 200 and r.json()["final"] and r.json()["outcome"] == "denied" and r.json()["clip"]
+    call, pay = _web_state(eng, res.call_id)
+    assert call.outcome == CallOutcome.denied and pay.status == PaymentStatus.blocked
+    assert res.call_id not in voice.web_calls and _pending(client).json()["call"] is None
+
+
+def test_web_confirmed_pays(web):
+    client, eng, res = web
+    r = _answer(client, res, "Yes we did")
+    assert r.json()["outcome"] == "confirmed"
+    call, pay = _web_state(eng, res.call_id)
+    assert call.outcome == CallOutcome.confirmed and pay.status == PaymentStatus.paid
+
+
+def test_web_decline_is_no_answer(web):
+    client, eng, res = web
+    tok = _pending(client).json()["call"]["token"]
+    r = client.post(f"/api/voice/web-answer/{res.call_id}?t={tok}", json={"decline": True})
+    assert r.status_code == 200 and r.json()["outcome"] == "no_answer"
+    call, pay = _web_state(eng, res.call_id)
+    assert call.outcome == CallOutcome.no_answer and pay.status == PaymentStatus.held
+
+
+def test_web_re_ask_once_then_unclear(web):
+    client, eng, res = web
+    tok = _pending(client).json()["call"]["token"]
+    first = _answer(client, res, "who is this?", tok).json()
+    assert first["action"] == "reask" and not first["final"] and "ending 9999" in first["text"]
+    assert _web_state(eng, res.call_id)[0].outcome is None
+    second = _answer(client, res, "what account?", tok).json()
+    assert second["final"] and second["outcome"] == "unclear"
+    assert _web_state(eng, res.call_id)[1].status == PaymentStatus.held
+
+
+def test_web_hold_on_listens_again(web):
+    client, _, res = web
+    tok = _pending(client).json()["call"]["token"]
+    first = _answer(client, res, "hold on", tok).json()
+    assert first["action"] == "hold" and first["text"] == "Sure, take your time." and not first["final"]
+    assert _answer(client, res, "No never", tok).json()["outcome"] == "denied"
+
+
+def test_answered_call_stops_ringing_the_page(web):
+    client, _, res = web
+    tok = _pending(client).json()["call"]["token"]
+    assert client.post(f"/api/voice/web-answer/{res.call_id}?t={tok}", json={"event": "answered"}).json() == {"ok": True}
+    assert _pending(client).json()["call"] is None and res.call_id in voice.web_calls
+
+
+def test_softphone_page_and_pending_need_the_key(web, monkeypatch):
+    client, _, _ = web
+    for k in ("", "wrong", KEY + "x"):
+        assert client.get(f"/api/voice/vendor-phone/ven_t?k={k}").status_code == 403
+        assert _pending(client, k).status_code == 403
+    assert client.get("/api/voice/vendor-phone/ven_t").status_code == 403
+    ok = client.get(f"/api/voice/vendor-phone/ven_t?k={KEY}")
+    assert ok.status_code == 200 and "ngrok-skip-browser-warning" in ok.text and "Disconnected" in ok.text
+    monkeypatch.setenv("VENDOR_PHONE_KEY", "")
+    monkeypatch.setattr(voice, "_env", lambda name: "")  # no key configured anywhere: nothing opens
+    assert client.get("/api/voice/vendor-phone/ven_t?k=").status_code == 403
+    assert client.get("/api/voice/vendor-phone/ven_missing?k=anything").status_code == 403
+
+
+def test_web_answer_rejects_a_wrong_token(web):
+    client, eng, res = web
+    for suffix in ("", "?t=wrong", "?t="):
+        r = client.post(f"/api/voice/web-answer/{res.call_id}{suffix}", json={"answer": "Yes we did"})
+        assert r.status_code == 403
+    assert _web_state(eng, res.call_id)[0].outcome is None
+
+
+def test_pending_marks_the_page_as_open(web):
+    client, _, _ = web
+    monkey_vendor = "ven_t"
+    voice._last_poll.pop(monkey_vendor, None)
+    assert not voice.vendor_phone_recent(monkey_vendor)
+    _pending(client)
+    assert voice.vendor_phone_recent(monkey_vendor)
+
+
+# ---------------------------------------------------------------- failover
+
+
+@pytest.fixture
+def twilio_down(fdb, monkeypatch, tmp_path):
+    client, eng = fdb
+    cfg = get_settings()
+    monkeypatch.setattr(voice, "AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(cfg, "mock_twilio", False)
+    monkeypatch.setattr(cfg, "mock_cartesia", False)
+    monkeypatch.setenv("VOICE_MODE", "twilio")
+    monkeypatch.setenv("VENDOR_PHONE_KEY", KEY)
+    monkeypatch.setattr(voice, "web_calls", {})
+    monkeypatch.setattr(voice, "_last_poll", {})
+    monkeypatch.setattr(verify, "RETRY_DELAY_SECONDS", 3600)
+
+    async def fake_clip(text, settings=None):
+        return voice.clip_url(text, settings)
+
+    async def broken(*a, **k):
+        raise RuntimeError("twilio is down")
+
+    monkeypatch.setattr(voice, "tts_clip", fake_clip)
+    monkeypatch.setattr(voice, "place_call", broken)
+    with Session(eng) as s:
+        s.get(VerificationCall, "cal_t").outcome = CallOutcome.no_answer
+        s.commit()
+    return client, eng
+
+
+def test_twilio_failure_fails_over_to_the_softphone_when_the_page_is_open(twilio_down):
+    client, eng = twilio_down
+    voice.note_poll("ven_t")
+    with Session(eng) as s:
+        res = run(verify.start_verification("pay_t", s))
+        assert res.in_progress and res.call_id in voice.web_calls
+        actions = [a.action for a in s.exec(select(AuditLog))]
+        assert "voice_failover_to_web" in actions
+        placed = [a for a in s.exec(select(AuditLog).where(AuditLog.action == "verification_call_placed"))][-1]
+        assert placed.detail_json["channel"] == "web"
+
+
+def test_twilio_failure_without_an_open_page_keeps_the_old_behavior(twilio_down):
+    _, eng = twilio_down
+    with Session(eng) as s:
+        with pytest.raises(RuntimeError):
+            run(verify.start_verification("pay_t", s))
+        assert len(s.exec(select(VerificationCall)).all()) == 1 and not voice.web_calls
+
+
+def test_a_stale_poll_does_not_count(twilio_down, monkeypatch):
+    _, eng = twilio_down
+    voice.note_poll("ven_t")
+    monkeypatch.setattr(voice, "VENDOR_PHONE_FRESH_SECONDS", -1)
+    with Session(eng) as s:
+        with pytest.raises(RuntimeError):
+            run(verify.start_verification("pay_t", s))
+
+
+def test_voice_mode_defaults_to_twilio(monkeypatch):
+    monkeypatch.delenv("VOICE_MODE", raising=False)
+    monkeypatch.setattr(voice, "_env", lambda name: "")
+    assert voice.voice_mode() == "twilio"
+    monkeypatch.setattr(voice, "_env", lambda name: "WEB")
+    assert voice.voice_mode() == "web"
+
+
+def test_logs_for_the_softphone_carry_no_token(web, caplog):
+    import logging
+
+    client, _, res = web
+    tok = _pending(client).json()["call"]["token"]
+    with caplog.at_level(logging.INFO):
+        _answer(client, res, "Yes we did", tok)
+        client.post(f"/api/voice/web-answer/{res.call_id}?t=nope", json={})
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("countersign"))  # the test client logs its own URLs
+    assert tok not in ours and KEY not in ours and "finished" in ours
+
+
+# ---------------------------------------------------------------- softphone: the call stays open after a re-ask or hold
+
+
+def test_web_re_ask_keeps_the_call_open_then_no_is_denied_and_blocked(web):
+    client, eng, res = web
+    tok = _pending(client).json()["call"]["token"]
+    first = _answer(client, res, "Who is this", tok)
+    assert first.status_code == 200 and first.json()["action"] == "reask" and not first.json()["final"]
+    assert res.call_id in voice.web_calls and _web_state(eng, res.call_id)[0].outcome is None
+    second = _answer(client, res, "No", tok)  # exactly one more answer, and no 410
+    assert second.status_code == 200 and second.json()["final"] and second.json()["outcome"] == "denied"
+    call, pay = _web_state(eng, res.call_id)
+    assert call.outcome == CallOutcome.denied and pay.status == PaymentStatus.blocked
+
+
+def test_web_hold_keeps_the_call_open_then_yes_is_confirmed_and_paid(web):
+    client, eng, res = web
+    tok = _pending(client).json()["call"]["token"]
+    first = _answer(client, res, "hold on one moment", tok)
+    assert first.status_code == 200 and first.json()["action"] == "hold"
+    assert res.call_id in voice.web_calls
+    second = _answer(client, res, "Yes", tok)
+    assert second.status_code == 200 and second.json()["outcome"] == "confirmed"
+    call, pay = _web_state(eng, res.call_id)
+    assert call.outcome == CallOutcome.confirmed and pay.status == PaymentStatus.paid
+
+
+@pytest.mark.parametrize("speech,action", [("Who is this", "reask"), ("hold on", "hold"), ("No we never did", "close"), ("Yes we did", "close")])
+def test_web_answer_always_names_the_clip_to_play(web, speech, action):
+    client, _, res = web
+    body = _answer(client, res, speech).json()
+    assert body["action"] == action
+    assert re.fullmatch(r"https://pub\.example/api/voice/audio/[0-9a-f]{64}\.wav", body["clip"] or ""), body
+    assert body["clip"] == voice.clip_url(body["text"])  # the clip is the text that was recorded in the transcript
+
+
+def test_a_re_ask_or_hold_gives_the_vendor_a_fresh_60_seconds(web, monkeypatch):
+    client, _, res = web
+    armed = []
+    monkeypatch.setattr(verify, "arm_answer_watchdog", lambda cid: armed.append(cid))
+    tok = _pending(client).json()["call"]["token"]
+    _answer(client, res, "who is this", tok)
+    assert armed == [res.call_id, res.call_id]  # once for the first answer, once more for the re-ask
+    _answer(client, res, "No", tok)  # a final answer is not re-armed
+    assert armed == [res.call_id, res.call_id]
+
+
+def test_a_finished_call_answers_410_with_a_reason(web):
+    client, _, res = web
+    tok = _pending(client).json()["call"]["token"]
+    _answer(client, res, "Yes we did", tok)
+    r = _answer(client, res, "No", tok)
+    assert r.status_code == 410 and "over" in r.json()["detail"]
+
+
+def test_softphone_page_plays_every_clip_through_one_unlocked_player(web):
+    client, _, _ = web
+    html = client.get(f"/api/voice/vendor-phone/ven_t?k={KEY}").text
+    assert html.count("<audio id=") == 1 and "unlockPlayer()" in html and "Tap to hear the question" in html
+    assert "stopListening()" in html and 'id="yes"' in html and "new Audio(" not in html
