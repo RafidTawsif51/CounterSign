@@ -27,6 +27,8 @@ interface CurrentRun {
   summary: RunSummary;
   startRun: () => Promise<string>;
   clearRun: () => void;
+  /** After a demo reset: forget the run and every cached record. */
+  forgetAfterReset: () => void;
   pinned: PinnedAttack | null;
   /** The pinned attack's mini-run, from attack.logged through run.report. */
   pinnedEvents: RunEvent[];
@@ -139,7 +141,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   // A late call outcome changes a payment's record, and the global channel has no replay: refetch every payment record
   // when one arrives and when the channel reconnects.
-  const lateSettled = global.events.filter((e) => e.type !== "call.transcript" && e.type !== "call.started").length;
+  const lateSettled = global.events.filter((e) => e.type !== "call.transcript" && e.type !== "call.started" && e.type !== "demo.reset").length;
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: ["payment"] });
   }, [lateSettled, global.connections, queryClient]);
@@ -189,17 +191,25 @@ export function RunProvider({ children }: { children: ReactNode }) {
     unpin();
   }, [unpin, setRunId]);
 
-  // The demo was reset (here or in another browser): the run and every cached record are gone.
+  // After a reset the run and every cached record are gone. Payment records (the drawer's and the board rows') are
+  // dropped, not refetched: the rows are still mounted at this point and would each ask for a deleted payment.
+  const forgetAfterReset = useCallback(() => {
+    clearRun();
+    const isPayment = (key: readonly unknown[]) => key[0] === "payment" || key[0] === "payment-row";
+    queryClient.removeQueries({ predicate: (q) => isPayment(q.queryKey) });
+    void queryClient.invalidateQueries();
+  }, [clearRun, queryClient]);
+
+  // The demo was reset in another browser. A reset from this one arrives here too, after the dialog already forgot
+  // everything; doing it twice only refetches what is cached.
   const resets = global.events.filter((e) => e.type === "demo.reset").length;
   useEffect(() => {
-    if (resets === 0) return;
-    clearRun();
-    void queryClient.invalidateQueries();
-  }, [resets, clearRun, queryClient]);
+    if (resets > 0) forgetAfterReset();
+  }, [resets, forgetAfterReset]);
 
   const value = useMemo(
-    () => ({ runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents }),
-    [runId, events, status, summary, startRun, clearRun, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents],
+    () => ({ runId, events, status, summary, startRun, clearRun, forgetAfterReset, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents }),
+    [runId, events, status, summary, startRun, clearRun, forgetAfterReset, runFailed, pinned, pinnedEvents, pinAttack, unpin, allEvents],
   );
   return <RunContext.Provider value={value}>{children}</RunContext.Provider>;
 }
