@@ -137,6 +137,8 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `InvoicePreview` | `inbox/invoice-preview.tsx` | The invoice page at US Letter proportions with "Reveal hidden content": hidden text is outlined in brick in place, legible, with its technique and confidence on a brick tab. 150ms, no zoom. |
 | `AttackCardPicker` | `attack/attack-card-picker.tsx` | Selectable cards over native radios (arrow keys, focus ring). The label selects; "What we'll check" is outside it, so expanding never selects. Selected: accent edge and tint. |
 | `PinnedAttack` | `board/pinned-attack.tsx` | A judge's attack pinned above the ledger in an accent outline, with its own row that reveals the result. The attack console never shows the result. |
+| Leaderboard | `pages/Leaderboard.tsx` | Second screen, always dark. "Money moved to attackers" is the one headline figure (text-2xl mono). New attempts slide in at the top; a miss stays, marked "Logged as new test case". `?tv=1`: zoom 1.5, refresh every 10 s, cursor hidden after 3 s idle. The bounty QR (fixed dark-on-white print colors) shows only when `VITE_BOUNTY_EMAIL` is set. |
+| Red team chart | `redteam/catch-rate-chart.tsx` | Recharts grouped bars: baseline in muted ink, Countersign in accent, square marks, 2px gap, rate printed on every bar, inline legend above the plot, axes labeled in place, hover tooltip with counts. |
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.

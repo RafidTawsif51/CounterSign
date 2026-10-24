@@ -11,7 +11,8 @@ import {
   subscribeMockRun,
 } from "@/lib/mock/run";
 import { mockAsk } from "@/lib/mock/ask";
-import { mockLaunchAttack, resetMockAttacks } from "@/lib/mock/attacks";
+import { mockLaunchAttack, mockLeaderboard, resetMockAttacks } from "@/lib/mock/attacks";
+import { MOCK_REDTEAM } from "@/lib/mock/redteam";
 import { mockAddMessage, mockThread, mockThreads, mockVendorHistory, mockVendors, resetMockInbox } from "@/lib/mock/inbox";
 import { ApiError } from "@/lib/api-error";
 import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
@@ -44,6 +45,8 @@ const routes: [string, Handler][] = [
   ["GET /api/inbox/threads/:threadId", ({ threadId }) => mockThread(threadId)],
   ["POST /api/inbox/messages", (_, body) => mockAddMessage(body)],
   ["POST /api/attacks", (_, body) => mockLaunchAttack(body)],
+  ["GET /api/attacks/leaderboard", () => mockLeaderboard()],
+  ["GET /api/redteam/results", () => MOCK_REDTEAM],
   [
     "POST /api/demo/reset",
     () => {

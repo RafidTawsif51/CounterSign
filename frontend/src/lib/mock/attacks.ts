@@ -9,9 +9,9 @@ import { ApiError } from "@/lib/api-error";
 import { COMPANY_DOMAIN, lookalikeOf } from "@/lib/inbox";
 import { domainOf } from "@/lib/domain-diff";
 import { postMessage } from "@/lib/mock/inbox";
-import { startMockMiniRun } from "@/lib/mock/run";
+import { getMockPaymentDetail, startMockMiniRun } from "@/lib/mock/run";
 import { POISONED_HIDDEN_TEXT, accountByVendor, messages, openInvoices, vendorById, vendorProfile, type AttackPlan } from "@/lib/mock/seed";
-import type { LaunchAttackRequest, LaunchAttackResponse, Message } from "@/lib/types";
+import type { LaunchAttackRequest, LaunchAttackResponse, LeaderboardResponse, LeaderboardRow, Message } from "@/lib/types";
 
 const PATH = "/api/attacks";
 const EMAIL = /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/;
@@ -141,6 +141,7 @@ export function mockLaunchAttack(raw: unknown): LaunchAttackResponse {
     attack: {
       attackId,
       attackerName: name,
+      source: req.source === "judge" ? "judge" : "console",
       card: req.card,
       kind,
       signals: kind === "hidden" ? [] : signals,
@@ -167,4 +168,46 @@ function hiddenText(body: string) {
 /** demo reset: take attack invoices out of this week's list. Their messages go with resetMockInbox. */
 export function resetMockAttacks() {
   for (let i = openInvoices.length - 1; i >= 0; i--) if (openInvoices[i].attack) openInvoices.splice(i, 1);
+}
+
+/**
+ * GET /api/attacks/leaderboard: every attack launched this session, newest first, scored from its payment. Like the
+ * backend: caught = held or blocked, missed = paid (and its amount counts as sandbox money moved).
+ */
+export function mockLeaderboard(): LeaderboardResponse {
+  const rows: LeaderboardRow[] = openInvoices
+    .filter((i) => i.attack)
+    .map((i): LeaderboardRow => {
+      const a = i.attack!;
+      const status = getMockPaymentDetail("pay_" + i.id.slice("inv_".length))?.payment.status;
+      const result: LeaderboardRow["result"] = status === "paid" ? "missed" : status === "held" || status === "blocked" ? "caught" : null;
+      const msg = messages.find((m) => m.id === i.message_id);
+      return {
+        id: a.attackId,
+        handle: a.attackerName,
+        source: a.source,
+        card: a.card,
+        result,
+        outcome: status ?? "processing",
+        top_reasons: a.signals.slice(0, 3).map((s) => `${s.name}: ${s.detail}`),
+        amount_usd: i.amount_usd,
+        paid_usd: status === "paid" ? i.amount_usd : 0,
+        created_at: msg?.received_at ?? new Date().toISOString(),
+        moderation_status: "approved",
+        text: msg ? { subject: msg.subject, from_addr: msg.from_addr, body: msg.body.slice(0, 2000), has_pdf: Boolean(i.pdf_path) } : null,
+      };
+    })
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return {
+    attempts: rows,
+    totals: {
+      attempts: rows.length,
+      unique_attackers: new Set(rows.map((r) => r.handle.toLowerCase())).size,
+      sandbox_usd_moved: Math.round(rows.reduce((t, r) => t + (r.result === "missed" ? r.paid_usd : 0), 0) * 100) / 100,
+      caught: rows.filter((r) => r.result === "caught").length,
+      missed: rows.filter((r) => r.result === "missed").length,
+      pending_result: rows.filter((r) => r.result === null).length,
+      by_card: rows.reduce<Record<string, number>>((m, r) => ((m[r.card] = (m[r.card] ?? 0) + 1), m), {}),
+    },
+  };
 }

@@ -218,12 +218,16 @@ function script(inv: OpenInvoice, rng: Rng, transferNo: () => string): Script {
   ] };
 }
 
-function attackLogged(rng: Rng, card: string, who?: { attackId: string; name: string; result: "caught" | "missed" | null }): Draft {
+function attackLogged(
+  rng: Rng,
+  card: string,
+  who?: { attackId: string; name: string; source: "console" | "judge"; result: "caught" | "missed" | null },
+): Draft {
   return {
     type: "attack.logged",
     attack_id: who?.attackId ?? `atk_${rng.hex(12)}`,
     attacker_name: who?.name ?? "Seeded attack",
-    source: "console",
+    source: who?.source ?? "console",
     card,
     result: who ? who.result : "caught",
     moderation_status: "approved",
@@ -234,7 +238,7 @@ function attackLogged(rng: Rng, card: string, who?: { attackId: string; name: st
 function attackScript(inv: OpenInvoice, a: AttackPlan, rng: Rng, transferNo: () => string, parsed: Draft, extract: number): Script {
   const vendor = vendorById.get(inv.vendor_id)!;
   const pid = paymentId(inv.id);
-  const who = (result: "caught" | "missed") => attackLogged(rng, a.card, { attackId: a.attackId, name: a.attackerName, result });
+  const who = (result: "caught" | "missed") => attackLogged(rng, a.card, { attackId: a.attackId, name: a.attackerName, source: a.source, result });
   const signals = a.signals.map((x) => signal(rng, x.name, x.weight, x.detail));
   const score = Math.min(100, signals.reduce((t, x) => t + x.weight, 0));
   const top = signals.slice().sort((x, y) => y.weight - x.weight).slice(0, 4);
@@ -445,7 +449,7 @@ export function startMockMiniRun(runId: string, invoiceId: string): { queued: bo
   const run = newRun(runId);
   const ahead = (active ? 1 : 0) + (miniBusy ? 1 : 0) + miniQueue.length;
   const waitingFor = active ?? miniBusy ?? miniQueue.at(-1) ?? null;
-  emit(run, attackLogged(run.rng, a.card, { attackId: a.attackId, name: a.attackerName, result: null }));
+  emit(run, attackLogged(run.rng, a.card, { attackId: a.attackId, name: a.attackerName, source: a.source, result: null }));
   if (ahead > 0) emit(run, { type: "attack.queued", attack_id: a.attackId, position: miniQueue.length + 1, waiting_for: waitingFor });
   miniQueue.push(runId);
   miniTimer ??= setInterval(pumpMini, 200);

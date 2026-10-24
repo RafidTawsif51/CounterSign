@@ -483,6 +483,71 @@ export interface LaunchAttackResponse {
   waiting_for: string | null;
 }
 
+// ---------- Leaderboard ----------
+
+/** One row of GET /api/attacks/leaderboard (backend attacks.leaderboard_row). Bounty handles arrive masked. */
+export interface LeaderboardRow {
+  id: string;
+  handle: string;
+  source: AttackSource;
+  card: AttackCard | string;
+  /** null while the attack is still being processed. */
+  result: AttackResult | null;
+  outcome: string;
+  top_reasons: string[];
+  amount_usd: number | null;
+  /** Sandbox dollars the attack got paid out. */
+  paid_usd: number;
+  created_at: ISODateTime;
+  moderation_status: ModerationStatus;
+  /** The attack text, only once moderation approved it. Untrusted. */
+  text: { subject: string | null; from_addr: string | null; body: string; has_pdf: boolean } | null;
+}
+
+export interface LeaderboardResponse {
+  /** Newest first. Seeded attacks never appear. */
+  attempts: LeaderboardRow[];
+  totals: {
+    attempts: number;
+    unique_attackers: number;
+    /** Paid out on missed attacks, sandbox money. */
+    sandbox_usd_moved: number;
+    caught: number;
+    missed: number;
+    pending_result: number;
+    by_card: Record<string, number>;
+  };
+}
+
+// ---------- Red team ----------
+
+export type RedTeamFamily = "bank_change" | "poisoned_invoice" | "ceo_pressure" | "lookalike_domain" | "amount_padding";
+
+/**
+ * GET /api/redteam/results. Proposed shape: backend/app/redteam/ is empty and the route does not exist yet (Aditya's
+ * harness). Metrics follow CLAUDE.md "Red-team harness". Confirm with Aditya before relying on extra fields.
+ */
+export interface RedTeamResults {
+  /** "mock" until a measured run exists, so the page can say the numbers are samples. */
+  source: "mock" | "measured";
+  generated_at: ISODateTime;
+  families: {
+    family: RedTeamFamily;
+    attacks: number;
+    caught_baseline: number;
+    caught_countersign: number;
+    /** Clean invoices mixed into this family's batch, and how many each agent held or blocked anyway. */
+    clean_invoices: number;
+    false_positives_baseline: number;
+    false_positives_countersign: number;
+    /** Paid to an account the attacker controls. A miss that pays the real vendor's verified account is not counted. */
+    lost_to_scammers_usd_baseline: number;
+    lost_to_scammers_usd_countersign: number;
+  }[];
+  legit_changes: { total: number; handled_countersign: number };
+  median_run_seconds: { baseline: number; countersign: number };
+}
+
 export type ComponentMode = "real" | "simulated" | "mock" | "down";
 
 export interface SystemComponentStatus {

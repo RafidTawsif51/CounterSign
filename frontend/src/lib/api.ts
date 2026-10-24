@@ -5,7 +5,8 @@ import { ApiError } from "@/lib/api-error";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
-  Attack,
+  LeaderboardResponse,
+  RedTeamResults,
   InboxMessage,
   InboxThreadDetail,
   InboxThreadSummary,
@@ -22,6 +23,8 @@ import type {
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
+/** The Rob Countersign bounty inbox, or "" until the organizers approve advertising it. */
+export const BOUNTY_EMAIL = (import.meta.env.VITE_BOUNTY_EMAIL ?? "").trim();
 
 type Method = "GET" | "POST";
 
@@ -79,10 +82,10 @@ export const api = {
   startCall: (paymentId: string) => post<void>(`/api/verifications/${paymentId}/call`),
 
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
-  leaderboard: () => get<Attack[]>("/api/attacks/leaderboard"),
+  leaderboard: () => get<LeaderboardResponse>("/api/attacks/leaderboard"),
 
   runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
-  redTeamResults: () => get<unknown>("/api/redteam/results"),
+  redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 
   systemStatus: () => get<SystemComponentStatus[]>("/api/system/status"),
 };

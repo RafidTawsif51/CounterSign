@@ -147,6 +147,7 @@ export interface OpenInvoice extends Invoice {
 export interface AttackPlan {
   attackId: string;
   attackerName: string;
+  source: "console" | "judge";
   card: string;
   kind: "new_bank" | "hidden" | "amount" | "clean";
   signals: { name: string; weight: number; detail: string }[];
