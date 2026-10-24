@@ -93,6 +93,20 @@ def test_place_call_sends_only_trial_parameters(allowed, monkeypatch):
     assert set(sent[0]) == {"to", "from_", "url", "status_callback"} and set(sent[1]) == {"to", "from_", "url"}
 
 
+def test_recording_is_requested_only_when_enabled_and_only_then_does_the_call_say_recorded(allowed, monkeypatch):
+    sent = []
+    monkeypatch.setattr(voice, "_create_call", lambda s, kwargs: sent.append(kwargs) or "CAreal")
+    off = get_settings().model_copy(update={"mock_twilio": False, "twilio_from_number": "+15005550006", "call_recording_enabled": False})
+    on = off.model_copy(update={"call_recording_enabled": True})
+    run(voice.place_call("+14155550142", "https://x/y", settings=off))
+    run(voice.place_call("+14155550142", "https://x/y", settings=on))
+    assert "record" not in sent[0] and sent[1]["record"] is True
+    assert voice.disclosure(off) == "This call is being transcribed."
+    assert voice.call_intro(settings=on) == "This is an automated assistant calling for Ridgeline Builders accounts payable. This call is being recorded and transcribed."
+    assert voice.call_script("Acme", "1234").intro == voice.call_intro()  # the real call, the mock call and the dev mock-run share this line
+    assert get_settings().call_recording_enabled is False  # default
+
+
 def test_place_call_refuses_before_dialing(allowed, monkeypatch):
     sent = []
     monkeypatch.setattr(voice, "_create_call", lambda s, kwargs: sent.append(kwargs) or "CAreal")
@@ -464,7 +478,8 @@ def test_twiml_flow_first_retry_end(fdb):
 def test_only_last4_is_ever_spoken():
     sc = voice.call_script("Summit Concrete", "123456789")
     assert "6789" in sc.question and "12345" not in " ".join(sc.all_texts())
-    assert "automated" in sc.intro and "recorded and transcribed" in sc.intro
+    assert sc.intro == "This is an automated assistant calling for Ridgeline Builders accounts payable. This call is being transcribed."
+    assert "recorded" not in " ".join(sc.all_texts())  # the trial account does not record, so the call must not say it does
 
 
 def test_twiml_uses_only_allowed_verbs(fdb):

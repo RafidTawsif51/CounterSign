@@ -411,7 +411,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
             rows.append(VerificationCall(
                 id=f"cal_{key}_change", payment_id=pay.id, contact_id=contact, started_at=a.row.valid_from, outcome=CallOutcome.confirmed,
                 transcript=[
-                    {"speaker": "agent", "text": f"Hello, this is an automated assistant calling for {COMPANY} accounts payable. This call is recorded. "
+                    {"speaker": "agent", "text": f"This is an automated assistant calling for {COMPANY} accounts payable. This call is being transcribed. "
                                                  f"We received a request to change where we send your payments, to an account ending {a.row.account_last4}. Did your company make this change?"},
                     {"speaker": "vendor", "text": "Yes, that change is correct."},
                     {"speaker": "agent", "text": "Thank you. I will note that you confirmed it. Goodbye."},

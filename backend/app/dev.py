@@ -7,6 +7,7 @@ import random
 from fastapi import APIRouter, Query
 
 from app import events as ev
+from app.services import voice
 from app.models import (
     AttackResult,
     AttackSource,
@@ -70,7 +71,7 @@ async def play_mock_run(run_id: str, delay: float) -> None:
             await ev.emit(ev.CallStarted(run_id=run_id, payment_id=pay, contact_source=ContactSource.on_file))
             await beat()
             lines = [
-                ("agent", "Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. This call is recorded and transcribed. We received a request to change where we send your payments, to an account ending 7781. Did your company make this change?"),
+                ("agent", f"{voice.call_intro()} We received a request to change where we send your payments, to an account ending 7781. Did your company make this change?"),
                 ("vendor", "No. We never changed banks."),
                 ("agent", "Thank you. I will not process that change and I am alerting the controller. Goodbye."),
             ]

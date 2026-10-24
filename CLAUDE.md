@@ -42,7 +42,7 @@ Backend services talk in-process. Every input (including judge and bounty attack
 - Company: Ridgeline Builders (fictional 40-person general contractor), 30 vendors, weekly Thursday payment run. Only fictional data; no real people or accounts.
 - Personas: Maria (AP clerk, runs the run), Dev (controller, approves exceptions), real vendor (e.g. Summit Concrete, receives the call), attacker (judges and hackers).
 - Attack cards: Classic "We changed banks" (lookalike domain reply in the Summit Concrete thread), AI hijack (PDF with hidden white text), CEO pressure ("CEO approved, pay today, keep it quiet"), Freestyle (any email or invoice; a miss is logged as a new test case).
-- Seed: 30 vendors, about 1,200 historical invoices over 12 months, a few legitimate bank changes each with a recorded call, current week of 40 open invoices (37 clean, 3 planted attacks: bank-change email, poisoned PDF, CEO-pressure email), 10 lookalike domains (e.g. summitconcrete.com vs summit-concrete.co). Seed script must be deterministic (fixed random seed) and rebuild the DB in under 10 s.
+- Seed: 30 vendors, about 1,200 historical invoices over 12 months, a few legitimate bank changes each with a recorded phone call (a transcript), current week of 40 open invoices (37 clean, 3 planted attacks: bank-change email, poisoned PDF, CEO-pressure email), 10 lookalike domains (e.g. summitconcrete.com vs summit-concrete.co). Seed script must be deterministic (fixed random seed) and rebuild the DB in under 10 s.
 - Rob Countersign bounty: public inbound email plus QR code. Emails and invoices go through the same pipeline and appear on the leaderboard. Rate limit 5 submissions per sender per hour. Sandbox money only. Moderation queue before anything shows on screen. Organizers must be asked (#ask-directors) before advertising.
 - Backup: recorded clean run of the full flow. Demo reset restores seeded state in under 5 s.
 
@@ -126,7 +126,7 @@ One JSON object per event over SSE:
 | Contact details in the request differ from verified on-file contacts | Ignore the new contacts; use only independent numbers |
 | Amount above the vendor's 12-month maximum by more than 50% | Hold for controller review |
 
-Call agent rules: never read out full account numbers, never accept new contact details during the call, never confirm a change on the vendor's behalf, hang up after 60 seconds, always disclose it is automated and the call is recorded (California all-party consent).
+Call agent rules: never read out full account numbers, never accept new contact details during the call, never confirm a change on the vendor's behalf, hang up after 60 seconds, always disclose it is automated and say only what is true about recording (California all-party consent): "This call is being transcribed." by default, and "recorded and transcribed" only when `CALL_RECORDING_ENABLED=true` and `place_call` actually requests recording (a Twilio trial account cannot record).
 
 Call outcomes: denied = block payment, mark request as fraud, alert controller, add to leaderboard. Confirmed = write new bank account with verified_by_call_id (via verify.py only), release payment. No answer after 2 tries = keep hold; pay old verified account only if controller approves. Unclear = keep hold, send to controller with transcript.
 

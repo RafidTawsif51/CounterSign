@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Webhook authentication. REQUIRE_CALL_TOKEN: each verification call has its own secret in its webhook URLs. Blank means on
     # whenever MOCK_TWILIO is false. VALIDATE_SIGNATURES: strict mode, a valid X-Twilio-Signature is also required (off by
     # default because trial accounts fetch TwiML without one).
+    # Only true if the Twilio account can record (a trial cannot): place_call then asks Twilio to record and the call says "recorded and
+    # transcribed". Otherwise the call says only that it is being transcribed, which is what it is.
+    call_recording_enabled: bool = False
     twilio_require_call_token: Optional[bool] = None
     twilio_validate_signatures: bool = False
     public_base_url: str = ""

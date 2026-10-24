@@ -14,7 +14,7 @@
 #   (in_progress=True, payment still held) so a payment run never waits on a phone. Twilio's webhooks (app/integrations.py)
 #   then call handle_outcome, which applies the final result, pays through payments.pay_payment on a confirmed call and
 #   retries a first no_answer once. Nothing times out a no_answer; the only timer is the 60 s answer rule.
-#   Call script rules for the real caller: say it is automated and recorded, read only the last 4
+#   Call script rules for the real caller: say it is automated and what is true about recording (voice.disclosure), read only the last 4
 #   digits of an account, accept no new contact details, never confirm on the vendor's behalf, hang
 #   up after CALL_TIMEOUT_SECONDS.
 # Flags: MOCK_TWILIO and MOCK_CARTESIA. The mock caller is used if either is true.
@@ -254,8 +254,7 @@ class MockCaller:
         else:
             outcome = SEEDED_OUTCOMES.get(payment_id) or (CallOutcome.denied if is_attack else CallOutcome.confirmed)
         agent_q = (
-            f"Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. "
-            f"This call is recorded and transcribed. We received a request to change where we send {vendor_name}'s payments, "
+            f"{voice.call_intro()} We received a request to change where we send {vendor_name}'s payments, "
             f"to an account ending {question_last4}. Did your company make this change?"
         )
         script = {
