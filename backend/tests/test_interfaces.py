@@ -443,8 +443,22 @@ def test_only_verify_writes_bank_accounts_and_contacts():
 # ================================================================ payments
 
 
+def _transfer_payment(**kw) -> Payment:
+    """A pending payment for a real seeded-style vendor, invoice and verified account. The transfer
+    guard checks the destination against the vendor's verified account, so these rows must exist."""
+    w = world()
+    base = dict(run_id=w["run"], invoice_id=_invoice_of(w["payment"]), amount_usd=10, destination_account_id=w["old"], status=PaymentStatus.pending)
+    base.update(kw)
+    return Payment(**base)
+
+
+def _invoice_of(payment_id: str) -> str:
+    with Session(engine) as s:
+        return s.get(Payment, payment_id).invoice_id
+
+
 def test_payments_mock_transfer():
-    p = Payment(run_id="r", invoice_id="i", amount_usd=10, destination_account_id="bac_1", status=PaymentStatus.pending)
+    p = _transfer_payment()
     tid = run(payments.send_transfer(p))
     assert tid.startswith("nes_mock_")
     p.nessie_transfer_id = tid
@@ -462,11 +476,17 @@ def test_payments_refuses_unsafe_transfers(kw):
         run(payments.send_transfer(Payment(**base)))
 
 
-def test_payments_real_flag_not_built(monkeypatch):
+def test_payments_real_flag_uses_real_sender(monkeypatch):
+    # The real Nessie sender is built now. It is chosen by MOCK_NESSIE=false, and if Nessie fails the
+    # transfer falls back to a mock_tr_ id so the demo never breaks.
     monkeypatch.setattr(payments, "get_settings", lambda: Settings(mock_nessie=False))
-    p = Payment(run_id="r", invoice_id="i", amount_usd=10, destination_account_id="bac_1", status=PaymentStatus.pending)
-    with pytest.raises(NotImplementedError):
-        run(payments.send_transfer(p))
+    assert isinstance(payments.get_sender(), payments.RealTransferSender)
+
+    def boom(*_a):
+        raise RuntimeError("nessie down")
+
+    monkeypatch.setattr(payments, "_real_transfer", boom)
+    assert run(payments.send_transfer(_transfer_payment())).startswith("mock_tr_")
 
 
 def test_injection_and_risk_flags_are_independent_of_claude_flag(monkeypatch):

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app import dev, events
+from app import dev, events, integrations
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
 from app.services import ingest, review, run, vendors
@@ -49,5 +49,6 @@ api.include_router(run.router)
 api.include_router(review.router)
 api.include_router(vendors.router)
 api.include_router(dev.router)
+api.include_router(integrations.router)
 
 app.include_router(api)
