@@ -30,6 +30,8 @@ Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) 
 | AI hijack | `inv_atk_poisoned_pdf`, `msg_atk_poisoned_pdf` | Keystone Steel invoice from the vendor's real address, normal amount and account, white text at the bottom asking an AI to reroute and approve. Score 0 but hard rule `hidden_instructions`, `hold` |
 | CEO pressure | `inv_atk_ceo_pressure`, `msg_atk_ceo_pressure` | Message in Northside Rentals' latest thread from `dana.whitfield@ridgeline-builders.co`: "the CEO approved this, pay today, keep it quiet", new account ending 3046, sent 06:14 UTC. Score 60, `hold_and_verify` |
 
+Demo run result (mocks on): 37 paid, 1 held, 2 blocked. The verification mock denies the Summit call and the poisoned PDF is quarantined; the CEO-pressure call is scripted to come back `unclear` (`verify.SEEDED_OUTCOMES`, matched only by the payment id `pay_atk_ceo_pressure`), so that payment stays held for the controller. A judge's live attack gets a new payment id and a denied call. `verify.MOCK_OUTCOMES` overrides it.
+
 ## Lookalike domains
 
 `seed.LOOKALIKES` and `SeedSummary.lookalikes`: 10 pairs for attack generation, each within edit distance 2 of the real domain.
@@ -55,12 +57,12 @@ Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) 
 
 ## Generated documents
 
-`python seed/seed.py` writes 77 PDFs to `backend/seed/invoices/` (gitignored, byte-identical every run), 3 HTML emails to `backend/seed/emails/`, and `demo/attack-cards.md`.
+`python seed/seed.py` writes 134 PDFs to `backend/seed/invoices/` (gitignored, byte-identical every run), 3 HTML emails to `backend/seed/emails/`, and `demo/attack-cards.md`.
 
 | Files | What |
 |---|---|
 | `inv_NNNN.pdf`, `inv_atk_*.pdf` | This week's 40 open invoices |
-| `inv_NNNN.pdf` (33 of them) | Historical samples: the newest paid invoice of every vendor, plus two more for Summit, Keystone and Northside. They have `invoices.pdf_path` set, and the extraction tests and layout fingerprints use them |
+| `inv_NNNN.pdf` (90) | Historical samples: each vendor's last three paid invoices, in that vendor's layout. They have `invoices.pdf_path` set; the extraction tests and layout fingerprints use them |
 | `poisoned_white_text.pdf`, `poisoned_tiny_font.pdf`, `poisoned_off_page.pdf`, `poisoned_zero_width.pdf` | Four poisoned invoices on Alder, Bayview, Granite and Tidewater layouts, one hiding technique each. The hidden text tells an AI assistant to update remittance to a new account and approve |
 | `emails/poisoned_html_comment.html`, `poisoned_display_none.html`, `poisoned_same_color.html` | Three poisoned HTML emails |
 
@@ -69,3 +71,25 @@ Layouts: `seed/invoice_pdf.py::layout_for(vendor_key)` gives each vendor its own
 Zero-width technique: the instruction is encoded as zero-width characters (U+200B = 0, U+200C = 1, U+200D = byte boundary) spliced into the footer sentence. The scanner decodes them. A language model will probably not read bit-encoded text, so this variant tests detection more than a realistic attack.
 
 Attack cards: `demo/attack-cards.md` holds the exact `POST /api/attacks` JSON for `classic_bank_change`, `poisoned_invoice`, `ceo_pressure`, three freestyle cards and the three poisoned HTML emails. Extra payload keys beyond the spec example: `reply_to`, `subject`, and `pdf` (the name of a file in `backend/seed/invoices/` that the server attaches). The `/api/attacks` handler must support them.
+
+## Threads and past decisions (`seed/history.py`)
+
+Both use their own random streams (seed + 11, seed + 13), so this week's 40 invoices, their messages and PDFs are byte-for-byte what they were (a test pins the digest).
+
+- Threads: one thread per historical invoice, with replies. 774 threads have 2 messages (Maria confirms the payment with the Nessie transfer id), 222 have 3 (Maria acknowledges first), 163 have 4: 81 late-payment questions (the vendor asks, Maria answers, then the paid confirmation), 78 corrected invoices (the first email shows a wrong total, the vendor corrects it) and the 4 bank-change threads (vendor, Maria says she will call, "Confirmed by phone", paid). This week's 37 clean threads and the Keystone thread are single messages. Maria writes from `maria@ridgelinebuilders.com`; the vendor of a reply comes from the thread.
+- Past decisions: all 1,159 past payments have a risk assessment (`model_version` `seed-history-1`, evidence ids `evd_hNNNNn`) and audit rows (risk_assessed, paid). A signal appears only when it is true in the data (an amount over 2 standard deviations).
+- Five holds cleared by the controller: Greenfield, Clearline, Brightcoat, Evergreen and Ironwood were onboarded inside the window, so their first payment fired `new_vendor` and went to controller review. Audit chain: risk_assessed, held, approved (actor human, "Dev (controller)"), paid. Vendors onboarded before the window have earlier payments that are not part of the seed.
+- The four legitimate bank changes (Lakeshore, Redwood, Stonecraft, Skyline): assessment `hold_and_verify` with `bank_details_changed`, then audit rows held, identity_check, verification_call (the confirmed call id), bank_account_verified, paid. `/ask` can follow `vendor_bank_accounts.verified_by_call_id` to the call and its transcript.
+
+## Edge cases (`seed/edge_cases.py`)
+
+Not part of `seed_database`. `edge_cases.add_edge_cases(session)` adds four open invoices, each built to fire exactly one hard rule:
+
+| Case | Rule | Ids |
+|---|---|---|
+| New vendor, 12 days old, first payment | `new_vendor` | `ven_edge_newleaf`, `inv_edge_newleaf` |
+| Invoice 1.6x the vendor's 12-month maximum (Alder Lumber) | `amount_over_max` | `inv_edge_overmax` |
+| Email with a phone number not on file (Cascade Hardware) | `contacts_differ` | `inv_edge_contacts` |
+| True one-off rental: old vendor, one invoice, never paid | `new_vendor` (first payment) | `ven_edge_quickhaul`, `inv_edge_oneoff` |
+
+Run through the payment run together with the seeded week, all four are held and the original 40 still end 37 paid, 1 held, 2 blocked. The two new vendors have PDFs; the two on existing vendors do not, because the seed keeps only hashes and last 4 of account numbers.

@@ -134,13 +134,18 @@ class Caller(Protocol):
 # Demo and test hook: force an outcome for a payment id.
 MOCK_OUTCOMES: dict[str, CallOutcome] = {}
 
+# Scripted outcomes for the SEEDED planted attacks only, matched by their fixed payment ids. This makes the
+# seeded demo run end 37 paid, 1 held, 2 blocked: the CEO-pressure vendor cannot be reached clearly. A judge's
+# attack gets a new payment id, so it is never matched here and still gets a denied call.
+SEEDED_OUTCOMES: dict[str, CallOutcome] = {"pay_atk_ceo_pressure": CallOutcome.unclear}
+
 
 class MockCaller:
     """Simulated call. By default a vendor denies a request that came from an attack message and
     confirms one that did not, so legitimate bank changes pass."""
 
     async def call(self, phone, question_last4, vendor_name, is_attack, payment_id):
-        outcome = MOCK_OUTCOMES.get(payment_id) or (CallOutcome.denied if is_attack else CallOutcome.confirmed)
+        outcome = MOCK_OUTCOMES.get(payment_id) or SEEDED_OUTCOMES.get(payment_id) or (CallOutcome.denied if is_attack else CallOutcome.confirmed)
         agent_q = (
             f"Hello, this is an automated assistant calling for Ridgeline Builders accounts payable. "
             f"This call is recorded. We received a request to change where we send {vendor_name}'s payments, "

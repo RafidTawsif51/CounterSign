@@ -19,6 +19,7 @@ from app.models import (
     Invoice,
     Message,
     Payment,
+    PaymentRun,
     PaymentStatus,
     RiskAssessment,
     VendorBankAccount,
@@ -28,13 +29,17 @@ from app.services import extract, payments, risk, run, verify
 from seed import seed as seedmod
 from tests.helpers import use_engine
 
+pytestmark = pytest.mark.slow  # every test here runs the whole payment run
+
 BANK, POISON, CEO = (f"pay_{k}" for k in ("atk_bank_change", "atk_poisoned_pdf", "atk_ceo_pressure"))
 
 
 @pytest.fixture()
-def env(tmp_path, monkeypatch):
-    """A freshly seeded database that the app, the run and the services all use."""
-    eng = create_engine(f"sqlite:///{tmp_path}/run.sqlite", connect_args={"check_same_thread": False})
+def env(tmp_path, monkeypatch, seed_template):
+    """A private copy of the seeded database that the app, the run and the services all use."""
+    from tests.conftest import copy_seeded
+
+    eng = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path, 'run.sqlite')}", connect_args={"check_same_thread": False})
 
     @event.listens_for(eng, "connect")
     def _wal(conn, _):
@@ -42,9 +47,6 @@ def env(tmp_path, monkeypatch):
         conn.execute("PRAGMA busy_timeout=10000")
 
     use_engine(monkeypatch, eng)
-    SQLModel.metadata.create_all(eng)
-    with Session(eng) as s:
-        seedmod.seed_database(s)
     monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
     verify.MOCK_OUTCOMES.clear()
     run._active.clear()
@@ -86,7 +88,7 @@ def test_run_returns_at_once_and_finishes_fast(env):
         time.sleep(0.02)
     g = client.get(f"/api/payment-runs/{body['run_id']}").json()
     assert g["status"] == "completed" and g["wall_seconds"] < 20
-    assert g["totals"]["paid"] == 37 and g["totals"]["held"] == 0 and g["totals"]["blocked"] == 3 and g["totals"]["pending"] == 0
+    assert g["totals"]["paid"] == 37 and g["totals"]["held"] == 1 and g["totals"]["blocked"] == 2 and g["totals"]["pending"] == 0
     assert g["invoice_count"] == 40 and set(g["timings_ms"]) >= {"extract", "scan", "risk", "commit", "transfer", "verify", "total"}
     with Session(eng) as s:
         paid = s.exec(select(func.sum(Payment.amount_usd)).where(Payment.run_id == body["run_id"], Payment.status == PaymentStatus.paid)).one()
@@ -99,7 +101,8 @@ def test_the_three_attacks_and_why(env):
     body, g = go(client)
     with Session(eng) as s:
         for pid in (BANK, POISON, CEO):
-            assert s.get(Payment, pid).status == PaymentStatus.blocked and s.get(Payment, pid).nessie_transfer_id is None
+            assert s.get(Payment, pid).nessie_transfer_id is None  # none of the three moved money
+        assert [s.get(Payment, pid).status for pid in (BANK, POISON, CEO)] == [PaymentStatus.blocked, PaymentStatus.blocked, PaymentStatus.held]
         bank = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == BANK)).one()
         assert bank.decision == Decision.hold_and_verify and bank.hard_rules_fired == ["destination_changed"]
         assert {x["name"] for x in bank.signals_json} >= {"bank_details_changed", "lookalike_domain", "vendor_identity_check"}
@@ -107,7 +110,7 @@ def test_the_three_attacks_and_why(env):
         poison = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == POISON)).one()
         assert poison.hard_rules_fired == ["hidden_instructions"]
         calls = s.exec(select(VerificationCall).where(VerificationCall.payment_id.in_([BANK, CEO, POISON]))).all()
-        assert {c.payment_id for c in calls} == {BANK, CEO} and all(c.outcome == CallOutcome.denied for c in calls)  # no call for the quarantined one
+        assert {c.payment_id: c.outcome for c in calls} == {BANK: CallOutcome.denied, CEO: CallOutcome.unclear}  # no call for the quarantined one
         findings = s.exec(select(InjectionFinding)).all()
         assert [f.technique for f in findings] == ["white_text"] and findings[0].invoice_id == "inv_atk_poisoned_pdf"
         inv = s.get(Invoice, "inv_atk_poisoned_pdf")
@@ -122,16 +125,18 @@ def test_every_decision_is_assessed_and_audited(env):
     client, eng = env
     body, g = go(client)
     with Session(eng) as s:
-        assert s.exec(select(func.count()).select_from(RiskAssessment)).one() == 40
+        mine = select(Payment.id).where(Payment.run_id == body["run_id"])
+        started = s.get(PaymentRun, body["run_id"]).started_at
+        assert s.exec(select(func.count()).select_from(RiskAssessment).where(RiskAssessment.payment_id.in_(mine))).one() == 40
         for p in s.exec(select(Payment).where(Payment.run_id == body["run_id"])).all():
             actions = [a.action for a in s.exec(select(AuditLog).where(AuditLog.entity == "payment", AuditLog.entity_id == p.id))]
             assert "risk_assessed" in actions and {p.status.value, "blocked_by_verification"} & set(actions), p.id
         runs = [a.action for a in s.exec(select(AuditLog).where(AuditLog.entity == "run", AuditLog.entity_id == body["run_id"]))]
         assert runs == ["started", "completed"] or set(runs) == {"started", "completed"}
         # CRS only for a changed destination or a first payment: here Summit's and Northside's forged requests
-        ident = {a.entity_id for a in s.exec(select(AuditLog).where(AuditLog.action == "identity_check"))}
+        ident = {a.entity_id for a in s.exec(select(AuditLog).where(AuditLog.action == "identity_check", AuditLog.at >= started))}
         assert ident == {"ven_summit", "ven_northside"}
-        assert s.exec(select(func.count()).select_from(AuditLog).where(AuditLog.action == "paid")).one() == 37
+        assert s.exec(select(func.count()).select_from(AuditLog).where(AuditLog.action == "paid", AuditLog.entity_id.in_(mine))).one() == 37
 
 
 def test_event_stream_order_for_the_bank_change(env):
@@ -142,13 +147,14 @@ def test_event_stream_order_for_the_bank_change(env):
     types = [e.type for e in evs]
     assert types[0] == "run.started" and types[-2:] == ["run.completed", "run.report"]
     assert types.count("invoice.parsed") == 40 and types.count("risk.scored") == 40 and types.count("payment.paid") == 37
-    assert types.count("payment.blocked") == 3 and types.count("payment.held") == 2  # the two calls each held first
+    assert types.count("payment.blocked") == 2 and types.count("payment.held") == 2  # bank change held then blocked; CEO held
     mine = [e.type for e in evs if (e.payload or {}).get("payment_id") == BANK]
     assert mine == ["risk.scored", "payment.held", "call.started", "call.transcript", "call.transcript", "call.transcript", "call.outcome", "payment.blocked"]
     poisoned = [e.type for e in evs if (e.payload or {}).get("payment_id") == POISON or (e.payload or {}).get("invoice_id") == "inv_atk_poisoned_pdf"]
     assert poisoned == ["invoice.parsed", "injection.detected", "risk.scored", "payment.blocked"]
     report = next(e for e in evs if e.type == "run.report").payload
-    assert report["paid"] == 37 and report["blocked"] == 3 and report["blocked_usd"] > 0 and len(report["findings"]) == 3
+    assert report["paid"] == 37 and report["held"] == 1 and report["blocked"] == 2 and report["blocked_usd"] > 0 and len(report["findings"]) == 3
+    assert any("waiting for the controller" in f for f in report["findings"])
     assert [e for e in evs if e.type == "run.completed"][0].payload["total_usd"] == g["totals"]["total_usd"]
 
 
@@ -201,7 +207,7 @@ def test_verification_confirmed_releases_to_the_new_verified_account(env):
     client, eng = env
     verify.MOCK_OUTCOMES[BANK] = CallOutcome.confirmed
     body, g = go(client)
-    assert g["totals"]["paid"] == 38 and g["totals"]["blocked"] == 2
+    assert g["totals"]["paid"] == 38 and g["totals"]["blocked"] == 1 and g["totals"]["held"] == 1
     with Session(eng) as s:
         p = s.get(Payment, BANK)
         acct = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == "ven_summit", VendorBankAccount.valid_to.is_(None))).one()
@@ -335,7 +341,7 @@ def test_extraction_failure_holds_the_invoice(env, monkeypatch):
         assert len(inv) == 1
         p = s.exec(select(Payment).where(Payment.invoice_id == inv[0].id)).one()
         assert p.status == PaymentStatus.held and s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == p.id)).all() == []
-    assert g["totals"]["paid"] == 36 and g["totals"]["held"] == 1
+    assert g["totals"]["paid"] == 36 and g["totals"]["held"] == 2
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -361,3 +367,57 @@ def test_contacts_differ():
     assert run.contacts_differ("call me on +1 415 555 0177", known) is True
     assert run.contacts_differ("our line is (415) 555-0100", known) is False
     assert run.contacts_differ("no phone here", known) is False
+
+
+# ---------------------------------------------------------------- scripted vs live outcomes
+
+
+def test_a_denied_override_still_blocks_the_seeded_ceo_attack(env):
+    client, eng = env
+    verify.MOCK_OUTCOMES[CEO] = CallOutcome.denied  # explicit overrides beat the scripted default
+    body, g = go(client)
+    assert g["totals"]["held"] == 0 and g["totals"]["blocked"] == 3 and pay_status(eng, CEO) == PaymentStatus.blocked
+
+
+def test_a_judges_ceo_attack_still_gets_a_denied_call(env):
+    """Same attack as the seeded CEO one, launched live: new ids, so the scripted 'unclear' does not apply."""
+    client, eng = env
+    go(client)  # the seeded run: CEO attack held
+    with Session(eng) as s:
+        seeded = s.get(Invoice, "inv_atk_ceo_pressure")
+        thread = s.get(Message, seeded.message_id).thread_id
+        s.add(Message(id="msg_judge_ceo", thread_id=thread, vendor_id="ven_northside", from_addr="dana.whitfield@ridgeline-builders.co",
+                      subject="pay today", body="The CEO approved this, please pay today and keep it quiet.", received_at=ev_mod.utcnow(), is_attack=True))
+        s.add(Invoice(id="inv_judge_ceo", vendor_id="ven_northside", message_id="msg_judge_ceo", number="NOR-JUDGE", amount_usd=2400.0,
+                      due_date=seeded.due_date, remittance_json=seeded.remittance_json, pdf_path=seeded.pdf_path))
+        s.commit()
+    body, g = go(client)
+    assert body["invoice_count"] == 1
+    assert g["totals"]["blocked"] == 1 and g["totals"]["held"] == 0
+    with Session(eng) as s:
+        call = s.exec(select(VerificationCall).where(VerificationCall.payment_id == "pay_judge_ceo")).one()
+        assert call.outcome == CallOutcome.denied and s.get(Payment, "pay_judge_ceo").status == PaymentStatus.blocked
+        assert s.get(Payment, CEO).status == PaymentStatus.held  # the seeded one is untouched
+
+
+def test_scripted_outcomes_apply_only_to_the_seeded_payment_id():
+    assert set(verify.SEEDED_OUTCOMES) == {"pay_atk_ceo_pressure"}
+    assert verify.SEEDED_OUTCOMES[CEO] == CallOutcome.unclear
+
+
+def test_edge_cases_through_the_run_are_all_held(env):
+    """The four hard-rule edge cases join the seeded week: none is paid, and the original 40 still end 37/1/2."""
+    from seed import edge_cases
+
+    client, eng = env
+    with Session(eng) as s:
+        cases = edge_cases.add_edge_cases(s)
+    body, g = go(client)
+    assert body["invoice_count"] == 44
+    assert g["totals"]["paid"] == 37 and g["totals"]["blocked"] == 2 and g["totals"]["held"] == 5
+    with Session(eng) as s:
+        for c in cases.values():
+            p = s.exec(select(Payment).where(Payment.invoice_id == c.invoice_id)).one()
+            ras = s.exec(select(RiskAssessment).where(RiskAssessment.payment_id == p.id)).one()
+            assert p.status == PaymentStatus.held and p.nessie_transfer_id is None, c.name
+            assert ras.hard_rules_fired == [c.rule], c.name
