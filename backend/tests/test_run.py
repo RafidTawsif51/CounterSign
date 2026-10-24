@@ -29,13 +29,17 @@ from app.services import extract, payments, risk, run, verify
 from seed import seed as seedmod
 from tests.helpers import use_engine
 
+pytestmark = pytest.mark.slow  # every test here runs the whole payment run
+
 BANK, POISON, CEO = (f"pay_{k}" for k in ("atk_bank_change", "atk_poisoned_pdf", "atk_ceo_pressure"))
 
 
 @pytest.fixture()
-def env(tmp_path, monkeypatch):
-    """A freshly seeded database that the app, the run and the services all use."""
-    eng = create_engine(f"sqlite:///{tmp_path}/run.sqlite", connect_args={"check_same_thread": False})
+def env(tmp_path, monkeypatch, seed_template):
+    """A private copy of the seeded database that the app, the run and the services all use."""
+    from tests.conftest import copy_seeded
+
+    eng = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path, 'run.sqlite')}", connect_args={"check_same_thread": False})
 
     @event.listens_for(eng, "connect")
     def _wal(conn, _):
@@ -43,9 +47,6 @@ def env(tmp_path, monkeypatch):
         conn.execute("PRAGMA busy_timeout=10000")
 
     use_engine(monkeypatch, eng)
-    SQLModel.metadata.create_all(eng)
-    with Session(eng) as s:
-        seedmod.seed_database(s)
     monkeypatch.setattr(verify, "MOCK_STEP_DELAY", 0)
     verify.MOCK_OUTCOMES.clear()
     run._active.clear()

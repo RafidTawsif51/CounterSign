@@ -272,6 +272,7 @@ def pdf_hashes():
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(seedmod.PDF_DIR.glob("*.pdf"))}
 
 
+@pytest.mark.slow
 def test_two_runs_are_identical(tmp_path):
     a, b = fresh_session(tmp_path, "a"), fresh_session(tmp_path, "b")
     sa = seedmod.seed_database(a)
@@ -285,6 +286,7 @@ def test_two_runs_are_identical(tmp_path):
     assert ids(a, Invoice) == ids(b, Invoice) and ids(a, Payment) == ids(b, Payment)
 
 
+@pytest.mark.slow
 def test_reseed_over_existing_data_resets_it(tmp_path):
     s = fresh_session(tmp_path)
     seedmod.seed_database(s, write_pdfs=False)

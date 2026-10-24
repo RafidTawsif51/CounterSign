@@ -27,11 +27,12 @@ HIDDEN_PDFS = {"white_text": "poisoned_white_text.pdf", "tiny_font": "poisoned_t
 
 
 @pytest.fixture(scope="module")
-def world(tmp_path_factory):
-    engine = create_engine(f"sqlite:///{tmp_path_factory.mktemp('assets')}/a.sqlite")
-    SQLModel.metadata.create_all(engine)
+def world(tmp_path_factory, seed_template):
+    from tests.conftest import copy_seeded
+
+    engine = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path_factory.mktemp('assets'))}")
     s = Session(engine)
-    summary = seedmod.seed_database(s)
+    summary = seed_template[1]
     yield s, summary
     s.close()
 

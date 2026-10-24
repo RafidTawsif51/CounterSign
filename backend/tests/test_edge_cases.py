@@ -18,11 +18,11 @@ from tests.helpers import build_context  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def world(tmp_path_factory):
-    engine = create_engine(f"sqlite:///{tmp_path_factory.mktemp('edge')}/e.sqlite")
-    SQLModel.metadata.create_all(engine)
+def world(tmp_path_factory, seed_template):
+    from tests.conftest import copy_seeded
+
+    engine = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path_factory.mktemp('edge'))}")
     s = Session(engine)
-    seedmod.seed_database(s)
     cases = edge_cases.add_edge_cases(s)
     yield s, cases
     s.close()

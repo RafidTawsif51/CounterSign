@@ -37,11 +37,12 @@ THIS_WEEK_DIGEST = "b8908959e26d425ca7db2e80c3225b146dbbb2b395d096a37aa8ee716d9f
 
 
 @pytest.fixture(scope="module")
-def world(tmp_path_factory):
-    engine = create_engine(f"sqlite:///{tmp_path_factory.mktemp('hist')}/h.sqlite")
-    SQLModel.metadata.create_all(engine)
+def world(tmp_path_factory, seed_template):
+    from tests.conftest import copy_seeded
+
+    engine = create_engine(f"sqlite:///{copy_seeded(seed_template, tmp_path_factory.mktemp('hist'))}")
     s = Session(engine)
-    summary = seedmod.seed_database(s)
+    summary = seed_template[1]
     yield s, summary
     s.close()
 
