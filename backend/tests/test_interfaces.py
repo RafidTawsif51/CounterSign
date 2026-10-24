@@ -272,10 +272,22 @@ def test_identity_mock():
         identity.MOCK_OVERRIDES.clear()
 
 
-def test_identity_real_flag_not_built(monkeypatch):
+def test_identity_real_flag_uses_crs_checker(monkeypatch):
+    import httpx
+
     monkeypatch.setattr(identity, "get_settings", lambda: Settings(mock_crs=False))
-    with pytest.raises(NotImplementedError):
-        run(identity.check(mkvendor()))
+    monkeypatch.setenv("CRS_USERNAME", "u")
+    monkeypatch.setenv("CRS_PASSWORD", "p")
+
+    def timeout(request):
+        raise httpx.ReadTimeout("slow")
+
+    identity.set_transport(httpx.MockTransport(timeout))
+    try:
+        assert isinstance(identity.get_checker(), identity.RealIdentityChecker)
+        assert run(identity.check(mkvendor())).status == "unverified"  # CRS timed out: not verified, and no exception
+    finally:
+        identity.set_transport(None)
 
 
 # ================================================================ contacts
