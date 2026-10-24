@@ -125,6 +125,9 @@ class Vendor(SQLModel, table=True):
     name: str
     trade: str
     email_domain: str
+    # The vendor's website, a page WE host (see seed/sites.py). The phone lookup crawls this and never email_domain, which may
+    # belong to a real business.
+    website_url: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow)
     status: VendorStatus = Field(
         default=VendorStatus.active, sa_column=enum_col(VendorStatus)

@@ -45,6 +45,7 @@ from app.models import (  # noqa: E402
 )
 from app.services.extract import hash_routing  # noqa: E402
 from invoice_pdf import layout_for, render_invoice  # noqa: E402
+from sites import contact_url, website_url  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -67,14 +68,14 @@ EXPECTED_RULES = {
 
 def _new_vendor(session: Session, rng: random.Random, vid: str, name: str, trade: str, domain: str, age_days: int, phone: str):
     created = S.ANCHOR - timedelta(days=age_days)
-    session.add(Vendor(id=vid, name=name, trade=trade, email_domain=domain, created_at=created))
+    session.add(Vendor(id=vid, name=name, trade=trade, email_domain=domain, website_url=website_url(name), created_at=created))
     routing = "99" + "".join(str(rng.randint(0, 9)) for _ in range(7))
     number = "".join(str(rng.randint(0, 9)) for _ in range(10))
     acct = VendorBankAccount(id=f"bac_{vid[4:]}_1", vendor_id=vid, routing_hash=hash_routing(routing), account_last4=number[-4:],
                              bank_name="Cascadia Savings", valid_from=created)
     session.add(acct)
     session.add(VendorContact(id=f"con_{vid[4:]}_1", vendor_id=vid, phone=phone, source=ContactSource.on_file, first_seen=created, last_verified=created))
-    session.add(VendorContact(id=f"con_{vid[4:]}_2", vendor_id=vid, phone=phone, source=ContactSource.website, source_url=f"https://www.{domain}/contact",
+    session.add(VendorContact(id=f"con_{vid[4:]}_2", vendor_id=vid, phone=phone, source=ContactSource.website, source_url=contact_url(name),
                               first_seen=created, last_verified=created))
     return acct, routing, number
 

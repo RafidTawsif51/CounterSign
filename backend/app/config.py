@@ -73,6 +73,9 @@ class Settings(BaseSettings):
 
     frontend_url: str = ""
 
+    # Where the generated vendor sites are published (GitHub Pages). Each vendor's website_url is <this>/<vendor-slug>/.
+    pages_base_url: str = "https://aayushswami123.github.io/Countersign"
+
     @field_validator("twilio_require_call_token", mode="before")
     @classmethod
     def _blank_is_default(cls, v):

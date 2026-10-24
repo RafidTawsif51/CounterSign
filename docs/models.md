@@ -36,7 +36,8 @@ VendorStatus values and the Decision list are my choice because the spec names t
 | id | str PK | |
 | name | str | |
 | trade | str | concrete, steel, electrical, rentals, ... |
-| email_domain | str | the vendor's known domain, used for lookalike checks |
+| email_domain | str | the vendor's known domain, used for lookalike checks. Never crawled: it may belong to a real business |
+| website_url | str, null | the vendor's website, a page we host: `<PAGES_BASE_URL>/<vendor-slug>/` (see docs/sites.md). The phone lookup crawls this and nothing else |
 | created_at | datetime | drives the "created in last 30 days" hard rule |
 | status | VendorStatus | default active |
 
@@ -64,7 +65,7 @@ Only verify.py writes (seed excepted).
 | id | str PK | |
 | vendor_id | str FK vendors.id | |
 | phone | str | |
-| source | ContactSource | on_file, website, listing. Never email |
+| source | ContactSource | on_file, website, listing. Never email. A `website` contact's `source_url` is the vendor's own hosted `contact.html` (website_url + `contact.html`), never a page on email_domain |
 | source_url | str, null | |
 | first_seen | datetime | |
 | last_verified | datetime, null | |
