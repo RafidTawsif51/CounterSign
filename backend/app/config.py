@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     allowed_call_numbers: str = ""
 
     bounty_webhook_secret: str = ""
+    # Required whenever BOUNTY_WEBHOOK_SECRET is set (the inbox is live): GET /api/bounty/queue and POST /api/bounty/{id}/moderate need the
+    # header x-moderator-token, and answer 503 while this is blank.
+    bounty_moderator_token: str = ""
+    bounty_global_limit_per_hour: int = 60  # accepted bounty submissions per hour across all senders; 0 closes the inbox
 
     # Where uploaded invoice PDFs are saved (generated filenames only).
     upload_dir: str = "./uploads"

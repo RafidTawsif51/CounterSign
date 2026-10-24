@@ -57,6 +57,7 @@ class InvoiceParsed(EventBase):
     type: Literal["invoice.parsed"] = "invoice.parsed"
     run_id: str
     invoice_id: str
+    payment_id: Optional[str] = None  # the id its payment has (or will have), so clients never derive it
     vendor: str
     amount_usd: float
 
@@ -65,6 +66,7 @@ class InjectionDetected(EventBase):
     type: Literal["injection.detected"] = "injection.detected"
     run_id: str
     invoice_id: Optional[str] = None
+    payment_id: Optional[str] = None  # set when the finding is in an invoice
     message_id: Optional[str] = None
     technique: str
     snippet: str
@@ -300,7 +302,7 @@ class Broadcaster:
         # global channel (the one the leaderboard reads). So does run.updated.
         if isinstance(event, DemoReset):
             self._call_payments.clear()
-        if isinstance(event, GLOBAL_CALL_EVENTS):
+        if isinstance(event, (*GLOBAL_CALL_EVENTS, PaymentReviewed)):  # a controller's decision is as late as a call outcome
             if len(self._call_payments) >= CALL_PAYMENTS_MAX:
                 self._call_payments.clear()
             self._call_payments.add(event.payment_id)

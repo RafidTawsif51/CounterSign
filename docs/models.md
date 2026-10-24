@@ -152,6 +152,11 @@ Signal object inside `signals_json` (Pydantic `Signal` in models.py):
 | technique | str | e.g. white_text, tiny_font, off_page, zero_width, html_comment, instruction_classifier |
 | snippet | str | the hidden text found |
 | confidence | float | 0 to 1 |
+| page | int, null | PDF findings: 1-based page of the flagged text. Null for email findings |
+| bbox_json | list[float], null | PDF findings: `[x0, top, x1, bottom]` in PDF points, origin at the top left of the page |
+| page_width, page_height | float, null | PDF findings: the page size in points (612 x 792 for US Letter) |
+
+Where a PDF finding sits: the box is the union of the flagged characters on the first page that has any (one finding per technique). Zero-width characters get the box of the text line they sit in. Off-page text keeps its real coordinates, so its box lies outside `0..page_width`. The API returns the box as `bbox` next to `page`, `page_width` and `page_height` (see "Invoice PDF and finding locations" below). Databases created before these columns get them added when the app starts.
 
 ### verification_calls (`cal_`)
 
@@ -210,3 +215,25 @@ Persisted copy of every SSE event. Append-only. Composite primary key (id, at).
 ## Prefix reference
 
 ven_ vendors, bac_ bank accounts, con_ contacts, msg_ messages, thr_ threads, inv_ invoices, run_ payment runs, pay_ payments, ras_ risk assessments, inj_ injection findings, cal_ calls, atk_ attacks, aud_ audit rows, evt_ events, evd_ signal evidence.
+
+## Invoice PDF and finding locations
+
+`GET /api/invoices/{invoice_id}/pdf` serves the original stored PDF: `application/pdf`, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`. The file is found from the invoice record only, never from a path in the request. 404 when the invoice does not exist, has no PDF, or the file is gone. It works for PDFs uploaded by judges (`pdf_base64` on `POST /api/attacks`) too. The bytes are untrusted.
+
+`GET /api/payments/{id}` returns each finding in `injection_findings` with `page`, `bbox`, `page_width` and `page_height`. They are null for email findings.
+
+## Payment ids
+
+Clients never derive a payment id from an invoice id. The backend rule is `payment_id_for_invoice` in `app/models.py` (`inv_1160` is paid as `pay_1160`), and the API hands the id out wherever an invoice appears:
+
+| Where | Field |
+|---|---|
+| `GET /api/inbox/threads/{id}` | each message has `invoices: [{id, payment_id, has_pdf}]` next to `invoice_ids` |
+| `GET /api/inbox/threads` and `/threads/{id}` | `attachment_count`: invoices with a PDF in the thread |
+| `POST /api/invoices/upload` | `payment_id` |
+| `POST /api/attacks` | `payment_id` |
+| `GET /api/attacks/leaderboard` | each attempt has `payment_id` (null for a bounty email that is not approved) |
+| `GET /api/vendors/{id}/history` | each invoice has `payment_id` (as before) |
+| events `invoice.parsed`, `injection.detected` | `payment_id` (null for an email-only finding) |
+
+The payment row exists only once a run has read the invoice. Before that, `GET /api/payments/{payment_id}` is a 404.

@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.audit import write_audit
 from app.config import get_settings
 from app.db import get_session
-from app.models import Invoice, Message, Vendor, new_id
+from app.models import Invoice, Message, Vendor, new_id, payment_id_for_invoice
 
 router = APIRouter()
 
@@ -97,6 +98,13 @@ class ThreadSummary(BaseModel):
     count: int
     has_attack: bool
     last_received_at: datetime
+    attachment_count: int = 0  # invoice PDFs in the thread
+
+
+class InvoiceRef(BaseModel):
+    id: str
+    payment_id: str  # the id its payment has, or will have once a run reads the invoice
+    has_pdf: bool
 
 
 class MessageOut(BaseModel):
@@ -111,13 +119,14 @@ class MessageOut(BaseModel):
     received_at: datetime
     is_attack: bool
     invoice_ids: list[str]
+    invoices: list[InvoiceRef] = []
 
 
 class ThreadDetail(ThreadSummary):
     messages: list[MessageOut]
 
 
-def _summary(thread_id: str, msgs: list[Message], vendors: dict[str, Vendor]) -> ThreadSummary:
+def _summary(thread_id: str, msgs: list[Message], vendors: dict[str, Vendor], attachments: int = 0) -> ThreadSummary:
     """msgs must be oldest first."""
     vendor_id = next((m.vendor_id for m in msgs if m.vendor_id), None)
     vendor = vendors.get(vendor_id) if vendor_id else None
@@ -129,6 +138,7 @@ def _summary(thread_id: str, msgs: list[Message], vendors: dict[str, Vendor]) ->
         count=len(msgs),
         has_attack=any(m.is_attack for m in msgs),
         last_received_at=msgs[-1].received_at,
+        attachment_count=attachments,
     )
 
 
@@ -151,7 +161,12 @@ def list_threads(
     for m in rows:
         grouped.setdefault(m.thread_id, []).append(m)
     vendors = _vendors_by_id(session, {m.vendor_id for m in rows if m.vendor_id})
-    out = [_summary(tid, msgs, vendors) for tid, msgs in grouped.items()]
+    pdfs: dict[str, int] = {}  # thread id -> invoices with a PDF
+    thread_of = {m.id: m.thread_id for m in rows}
+    for msg_id in session.exec(select(Invoice.message_id).where(Invoice.pdf_path.is_not(None), Invoice.message_id.is_not(None))).all():
+        if msg_id in thread_of:
+            pdfs[thread_of[msg_id]] = pdfs.get(thread_of[msg_id], 0) + 1
+    out = [_summary(tid, msgs, vendors, pdfs.get(tid, 0)) for tid, msgs in grouped.items()]
     out.sort(key=lambda t: t.last_received_at, reverse=True)
     return out[:limit]
 
@@ -165,13 +180,13 @@ def get_thread(thread_id: str, session: Session = Depends(get_session)) -> Threa
         raise HTTPException(404, "thread not found")
     vendors = _vendors_by_id(session, {m.vendor_id for m in msgs if m.vendor_id})
     invoices = session.exec(
-        select(Invoice.id, Invoice.message_id).where(Invoice.message_id.in_([m.id for m in msgs]))
+        select(Invoice.id, Invoice.message_id, Invoice.pdf_path).where(Invoice.message_id.in_([m.id for m in msgs]))
     ).all()
-    by_msg: dict[str, list[str]] = {}
-    for inv_id, msg_id in invoices:
-        by_msg.setdefault(msg_id, []).append(inv_id)
+    by_msg: dict[str, list[InvoiceRef]] = {}
+    for inv_id, msg_id, pdf_path in invoices:
+        by_msg.setdefault(msg_id, []).append(InvoiceRef(id=inv_id, payment_id=payment_id_for_invoice(inv_id), has_pdf=bool(pdf_path)))
     return ThreadDetail(
-        **_summary(thread_id, msgs, vendors).model_dump(),
+        **_summary(thread_id, msgs, vendors, sum(r.has_pdf for refs in by_msg.values() for r in refs)).model_dump(),
         messages=[
             MessageOut(
                 id=m.id,
@@ -184,7 +199,8 @@ def get_thread(thread_id: str, session: Session = Depends(get_session)) -> Threa
                 is_html=is_html(m.body),
                 received_at=m.received_at,
                 is_attack=m.is_attack,
-                invoice_ids=by_msg.get(m.id, []),
+                invoice_ids=[r.id for r in by_msg.get(m.id, [])],
+                invoices=by_msg.get(m.id, []),
             )
             for m in msgs
         ],
@@ -276,6 +292,7 @@ def add_message(body: MessageIn, session: Session = Depends(get_session)) -> Mes
 
 class UploadOut(BaseModel):
     invoice_id: str
+    payment_id: str
     message_id: Optional[str]
     vendor_id: Optional[str]
     size_bytes: int
@@ -330,5 +347,22 @@ async def upload_invoice(
         raise
 
     return UploadOut(
-        invoice_id=invoice.id, message_id=message_id, vendor_id=vendor_id, size_bytes=size
+        invoice_id=invoice.id, payment_id=payment_id_for_invoice(invoice.id), message_id=message_id, vendor_id=vendor_id, size_bytes=size
     )
+
+
+# ---------------------------------------------------------------- the stored PDF
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+def invoice_pdf(invoice_id: str, session: Session = Depends(get_session)) -> FileResponse:
+    """The original PDF as stored, for the inbox preview. Looked up by invoice id only: the file path comes from our own
+    record, never from the request. The bytes are untrusted: served inline with sniffing off."""
+    from app.services.run import _resolve  # lazy: run imports this module's siblings
+
+    inv = session.get(Invoice, invoice_id)
+    path = _resolve(inv.pdf_path) if inv and inv.pdf_path else None
+    if path is None or not path.is_file():
+        raise HTTPException(404, "no PDF for this invoice")
+    return FileResponse(path, media_type="application/pdf", content_disposition_type="inline", filename=f"{inv.number or inv.id}.pdf",
+                        headers={"X-Content-Type-Options": "nosniff"})

@@ -217,3 +217,23 @@ def test_a_failing_or_slow_claude_falls_back_to_the_template(env, monkeypatch):
     monkeypatch.setattr(ask, "_ask_claude", boom)
     body = q(client, CEO, "why was this held")
     assert body["source"] == "template" and body["claims"]
+
+
+def test_an_answer_without_claims_is_asked_again_once(env, monkeypatch):
+    client, eng = env
+    go(client)
+    with Session(eng) as s:
+        data = ask.gather(s, POISON)
+    good = next(e for e in data["evidence"] if e == "rule:hidden_instructions")
+    inputs = [{"answer": "It was blocked.", "claims": []},
+              {"answer": "Hidden instructions were found, so it was blocked.", "claims": [{"text": "hidden instructions found", "evidence_id": good}]}]
+    calls = []
+
+    def fake(model, user, deadline):
+        calls.append(1)
+        return ask._Answer(**inputs[min(len(calls) - 1, 1)])
+
+    monkeypatch.setattr(ask, "get_settings", lambda: Settings(mock_claude=False, anthropic_api_key="k"))
+    monkeypatch.setattr(ask, "_ask_claude", fake)
+    body = q(client, POISON, "explain the block to me please")
+    assert len(calls) == 2 and body["source"] == "claude" and [c["evidence_id"] for c in body["claims"]] == [good]

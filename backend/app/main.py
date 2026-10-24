@@ -8,7 +8,7 @@ from sqlmodel import Session
 from app import dev, events, integrations
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
-from app.services import ask, attacks, ingest, reset, review, run, vendors
+from app.services import ask, attacks, bounty, ingest, reset, review, run, status, vendors
 
 
 @asynccontextmanager
@@ -52,7 +52,9 @@ api.include_router(review.router)
 api.include_router(ask.router)
 api.include_router(vendors.router)
 api.include_router(attacks.router)
+api.include_router(bounty.router)
 api.include_router(reset.router)
+api.include_router(status.router)
 api.include_router(dev.router)
 api.include_router(integrations.router)
 

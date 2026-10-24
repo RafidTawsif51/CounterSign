@@ -66,6 +66,11 @@ class Finding(BaseModel):
     evidence_id: str = Field(default_factory=lambda: new_id("inj"))
     invoice_id: Optional[str] = None
     message_id: Optional[str] = None
+    # PDF findings only: 1-based page, (x0, top, x1, bottom) in PDF points from the top left, and the page size.
+    page: Optional[int] = None
+    bbox: Optional[list[float]] = None
+    page_width: Optional[float] = None
+    page_height: Optional[float] = None
 
 
 class Scanner(Protocol):
@@ -228,7 +233,20 @@ def _pdf_layer1(data: bytes) -> tuple[list[Finding], str]:
     import pdfplumber
 
     hidden: dict[str, list[str]] = {"white_text": [], "near_background_text": [], "tiny_font": [], "off_page": []}
+    # Per technique: the first page with flagged characters, and the union box of the flagged characters on that page.
+    where: dict[str, tuple[int, list[float], float, float]] = {}
     texts: list[str] = []
+
+    def mark(technique: str, ch: dict, page) -> None:
+        hidden[technique].append(ch["text"])
+        box = [ch["x0"], ch["top"], ch["x1"], ch["bottom"]]
+        seen = where.get(technique)
+        if seen is None:
+            where[technique] = (page.page_number, box, float(page.width), float(page.height))
+        elif seen[0] == page.page_number:
+            b = seen[1]
+            b[0], b[1], b[2], b[3] = min(b[0], box[0]), min(b[1], box[1]), max(b[2], box[2]), max(b[3], box[3])
+
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         for page in pdf.pages:
             texts.append(page.extract_text() or "")
@@ -249,16 +267,46 @@ def _pdf_layer1(data: bytes) -> tuple[list[Finding], str]:
 
             for ch in page.chars:
                 if ch["x0"] < -1 or ch["x1"] > page.width + 1 or ch["top"] < -1 or ch["bottom"] > page.height + 1:
-                    hidden["off_page"].append(ch["text"])
+                    mark("off_page", ch, page)
                 elif ch["size"] < 2:
-                    hidden["tiny_font"].append(ch["text"])
+                    mark("tiny_font", ch, page)
                 else:
                     color = _rgb(ch.get("non_stroking_color"))
                     if color is not None and _near(color, background) and not on_contrasting_fill(ch, color):
-                        hidden["white_text" if min(color) >= 0.98 else "near_background_text"].append(ch["text"])
+                        mark("white_text" if min(color) >= 0.98 else "near_background_text", ch, page)
     # A couple of characters touching the page edge is layout noise, not hidden text.
-    findings = [_hidden_finding(t, "".join(c)) for t, c in hidden.items() if len("".join(c).replace(" ", "")) >= MIN_HIDDEN_CHARS]
+    findings = []
+    for t, c in hidden.items():
+        if len("".join(c).replace(" ", "")) >= MIN_HIDDEN_CHARS:
+            f = _hidden_finding(t, "".join(c))
+            f.page, f.bbox, f.page_width, f.page_height = where[t][0], [round(v, 2) for v in where[t][1]], where[t][2], where[t][3]
+            findings.append(f)
     return findings, "\n".join(texts)
+
+
+def _locate_zero_width(findings: list[Finding], data: bytes) -> None:
+    """Give zero_width findings on a PDF the box of the text line the invisible characters sit in."""
+    todo = [f for f in findings if f.technique == "zero_width" and f.page is None]
+    if not todo:
+        return
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        for page in pdf.pages:
+            chars = page.chars
+            hits = [c for c in chars if _ZERO_WIDTH_RE.match(c["text"]) or "\U000e0020" <= c["text"] <= "\U000e007e"]
+            if not hits:
+                continue
+            box = None
+            for h in hits:
+                mid = (h["top"] + h["bottom"]) / 2
+                line = [c for c in chars if c["top"] - 1 <= mid <= c["bottom"] + 1]
+                for c in line:
+                    b = [c["x0"], c["top"], c["x1"], c["bottom"]]
+                    box = b if box is None else [min(box[0], b[0]), min(box[1], b[1]), max(box[2], b[2]), max(box[3], b[3])]
+            for f in todo:
+                f.page, f.bbox, f.page_width, f.page_height = page.page_number, [round(v, 2) for v in box], float(page.width), float(page.height)
+            return
 
 
 # ---------------------------------------------------------------- layer 1: HTML email and MIME
@@ -563,7 +611,9 @@ class MockScanner:
 
     def _pdf(self, item: ScanItem) -> list[Finding]:
         findings, text = _pdf_layer1(item.pdf_bytes or b"")
-        return findings + self._keywords(text, already_hidden=bool(findings))
+        out = findings + self._keywords(text, already_hidden=bool(findings))
+        _locate_zero_width(out, item.pdf_bytes or b"")
+        return out
 
     def _email(self, item: ScanItem) -> list[Finding]:
         findings, text = _email_layer1(item.text or "")
@@ -596,6 +646,8 @@ class RealScanner:
             else:
                 findings, text = _email_layer1(body)
         findings += _invisible_findings(text)
+        if item.kind == "pdf":
+            _locate_zero_width(findings, item.pdf_bytes or b"")
         # Already conclusive (hidden text that reads as an instruction): no need to spend a Claude call.
         if any(f.confidence >= HIDDEN_WITH_INSTRUCTION for f in findings):
             return findings
@@ -639,5 +691,9 @@ def save_findings(session: Session, findings: list[Finding]) -> None:
                 technique=f.technique,
                 snippet=f.snippet,
                 confidence=f.confidence,
+                page=f.page,
+                bbox_json=f.bbox,
+                page_width=f.page_width,
+                page_height=f.page_height,
             )
         )

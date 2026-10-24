@@ -150,7 +150,7 @@ def test_event_stream_order_for_the_bank_change(env):
     assert types.count("invoice.parsed") == 40 and types.count("risk.scored") == 40 and types.count("payment.paid") == 37
     assert types.count("payment.blocked") == 2 and types.count("payment.held") == 2  # bank change held then blocked; CEO held
     mine = [e.type for e in evs if (e.payload or {}).get("payment_id") == BANK]
-    assert mine == ["risk.scored", "payment.held", "call.started", "call.transcript", "call.transcript", "call.transcript", "call.outcome", "payment.blocked"]
+    assert mine == ["invoice.parsed", "risk.scored", "payment.held", "call.started", "call.transcript", "call.transcript", "call.transcript", "call.outcome", "payment.blocked"]
     poisoned = [e.type for e in evs if (e.payload or {}).get("payment_id") == POISON or (e.payload or {}).get("invoice_id") == "inv_atk_poisoned_pdf"]
     assert poisoned == ["invoice.parsed", "injection.detected", "risk.scored", "payment.blocked"]
     report = next(e for e in evs if e.type == "run.report").payload

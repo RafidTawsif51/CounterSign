@@ -44,6 +44,7 @@ from app.models import (
     CallOutcome,
     Decision,
     Invoice,
+    payment_id_for_invoice,
     Message,
     ModerationStatus,
     AttackResult,
@@ -230,8 +231,7 @@ def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Ass
     return atk
 
 
-def _payment_id(invoice_id: str) -> str:
-    return "pay_" + invoice_id.split("_", 1)[-1]  # deterministic: inv_1160 -> pay_1160, inv_atk_x -> pay_atk_x
+_payment_id = payment_id_for_invoice  # deterministic: inv_1160 -> pay_1160, inv_atk_x -> pay_atk_x
 
 
 def _commit_decision(
@@ -492,7 +492,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
             failure = "no_pdf_and_no_fields"
     amount = ex.amount_usd if ex else (inv.amount_usd or 0.0)
     if ex or not failure:  # an invoice with no PDF (an emailed request) is "parsed" from its row
-        await ev.emit(ev.InvoiceParsed(run_id=run_id, invoice_id=inv.id, vendor=vendor.name, amount_usd=amount))
+        await ev.emit(ev.InvoiceParsed(run_id=run_id, invoice_id=inv.id, payment_id=_payment_id(inv.id), vendor=vendor.name, amount_usd=amount))
     if failure:
         reason = f"extraction_failed: {failure}"
         _commit_decision(run_id, ld, None, PaymentStatus.held, amount, ld.current.id if ld.current else None, None, [], False, None, reason,
@@ -554,7 +554,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
             _, atk = _commit_decision(run_id, ld, ex, PaymentStatus.blocked, amount, dest_id, a, findings, True, ident, reason)
         stats.notes[pid] = reason
         for f in findings:
-            await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, message_id=None if f.invoice_id else f.message_id,
+            await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, payment_id=_payment_id(f.invoice_id) if f.invoice_id else None, message_id=None if f.invoice_id else f.message_id,
                                                technique=f.technique, snippet=f.snippet))
         await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=_pub_signals(ld, a.signals[:4])))
         await ev.emit(ev.PaymentBlocked(run_id=run_id, payment_id=pid, reason=_pub(ld, reason)))
@@ -576,7 +576,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
         _, atk = _commit_decision(run_id, ld, ex, PaymentStatus.held, amount, dest_id, a, findings, False, ident, "; ".join(reasons[:2]))
     stats.notes[pid] = reasons[0]
     for f in findings:  # low-confidence findings are still recorded and shown
-        await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, message_id=None if f.invoice_id else f.message_id,
+        await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, payment_id=_payment_id(f.invoice_id) if f.invoice_id else None, message_id=None if f.invoice_id else f.message_id,
                                            technique=f.technique, snippet=f.snippet))
     await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=_pub_signals(ld, a.signals[:4])))
     await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=_pub_list(ld, reasons)))
