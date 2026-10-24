@@ -143,7 +143,7 @@ def test_contacts_on_file_plus_independent_source(world):
         indep = [c for c in cs if c.source != ContactSource.on_file]
         assert len(indep) == 1 and indep[0].source_url.startswith("https://")
     for c in s.exec(select(VendorContact)).all():
-        assert re.fullmatch(r"\+1415555\d{4}", c.phone), c.phone  # obviously fake 555 numbers (demo phone unset in tests)
+        assert re.fullmatch(r"\+1415555\d{4}", c.phone), c.phone  # obviously fake 555 numbers (the pinned test demo phone is one too)
 
 
 def test_demo_phone_is_used_for_summit_when_configured(tmp_path, monkeypatch):

@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.models import Invoice, Message, Payment, PaymentStatus, Vendor, VendorBankAccount, VendorContact
-from app.services import injection, layout
+from app.services import injection, layout, verify
 from app.services.run import contacts_differ
 from app.services.injection import ScanItem
 from app.services.risk import Destination, RiskContext
@@ -18,9 +18,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
     msg = session.get(Message, invoice.message_id) if invoice.message_id else None
     rem = invoice.remittance_json
     requested = Destination(rem["routing_hash"], rem["account_last4"]) if rem else None
-    current = session.exec(
-        select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor.id, VendorBankAccount.valid_to.is_(None))
-    ).first()
+    current = verify.open_verified_account(session, vendor.id)
     last = Destination(current.routing_hash, current.account_last4) if current else None
 
     paid = session.exec(

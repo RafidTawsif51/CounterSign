@@ -9,7 +9,7 @@ from reportlab.lib.colors import white
 from reportlab.pdfgen import canvas
 from sqlmodel import Session, select
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db import create_all, engine
 from app.models import (
     Attack,
@@ -285,12 +285,20 @@ def test_contacts_mock():
     v = mkvendor()
     v.id = new_id("ven")
     c = run(contacts.lookup_phone(v))
-    assert c.phone == contacts.MOCK_PHONE and c.source in ("website", "listing") and c.source_url.startswith("https://")
+    # the test environment pins DEMO_VENDOR_PHONE (conftest); the mock hands out the configured demo phone
+    assert c.phone == get_settings().demo_vendor_phone == "+14155550142" and c.source in ("website", "listing") and c.source_url.startswith("https://")
     contacts.MOCK_OVERRIDES[v.id] = None
     try:
         assert run(contacts.lookup_phone(v)) is None
     finally:
         contacts.MOCK_OVERRIDES.clear()
+
+
+def test_contacts_mock_without_a_demo_phone_uses_the_fiction_number(monkeypatch):
+    monkeypatch.setattr(contacts, "get_settings", lambda s=Settings(demo_vendor_phone=""): s)
+    v = mkvendor()
+    v.id = new_id("ven")
+    assert run(contacts.lookup_phone(v)).phone == contacts.MOCK_PHONE
 
 
 def test_contacts_real_flag_not_built(monkeypatch):
@@ -308,8 +316,9 @@ def _fast_calls(monkeypatch):
     verify.MOCK_OUTCOMES.clear()
 
 
-def world(attack=True, phone=contacts.MOCK_PHONE):
+def world(attack=True, phone=None):
     """Vendor with a verified account (2204), an on-file phone, and a held payment asking for 7781."""
+    phone = phone or get_settings().demo_vendor_phone or contacts.MOCK_PHONE  # the number the mock lookup returns too
     with Session(engine) as s:
         v = Vendor(name="Summit Concrete", trade="concrete", email_domain="summitconcrete.com", created_at=utcnow() - timedelta(days=400))
         s.add(v)

@@ -9,8 +9,14 @@
 #     in the same transaction as the payment status change (risk and injection never touch the database).
 #   * Hard rules beat the assessor: the decision is re-derived from the score and the fired rules, and
 #     a changed destination always means a verification call.
-#   * Backstop: right before send_transfer the destination is re-read from the database. If it is not
-#     the vendor's current verified account, the transfer is refused and logged, whatever risk said.
+#   * Two independent money checks, both of which must pass for a payment to be paid:
+#       1. this module's backstop (check_destination), written here and run right before the transfer: the destination
+#          is re-read from the database and must be a closed-loop verified account of THIS vendor;
+#       2. payments.pay_payment's guard (Teammate B), which runs inside the transfer call.
+#     Either one refusing leaves the payment held, whatever risk said.
+#   * When an invoice asks for new bank details, verify.record_requested_destination stores the account as an UNVERIFIED
+#     candidate and the payment points at it. A candidate is never trusted by itself: only a confirmed verification call
+#     (verify.py) promotes it, and a controller approval pays the last verified account instead.
 #   * An error on one invoice never lets it pay: it is held with the error recorded.
 # Flags: none of its own; each service it calls picks its mock or real adapter.
 
@@ -34,6 +40,7 @@ from app.db import engine, get_session
 from app.models import (
     Attack,
     AttackSource,
+    AuditLog,
     CallOutcome,
     Decision,
     Invoice,
@@ -47,6 +54,7 @@ from app.models import (
     Vendor,
     VendorBankAccount,
     VendorContact,
+    VerificationCall,
     utcnow,
 )
 from app.services import extract, identity, injection, layout, payments, risk, verify
@@ -161,7 +169,7 @@ def _load(invoice_id: str, run_id: str) -> Loaded:
         current = phones = None
         hist, senders, hours, past, prior = [], set(), set(), [], 0
         if vendor:
-            current = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor.id, VendorBankAccount.valid_to.is_(None))).first()
+            current = verify.open_verified_account(s, vendor.id)  # the trusted account; a requested candidate is never it
             phones = [c.phone for c in s.exec(select(VendorContact).where(VendorContact.vendor_id == vendor.id))]
             # History comes from earlier runs only, so the result does not depend on processing order.
             rows = s.exec(
@@ -262,8 +270,10 @@ def _commit_decision(
             s.add(row)
             write_audit("payment", pay.id, "agent", "risk_assessed",
                         {"assessment_id": row.id, "score": a.score, "decision": a.decision.value, "hard_rules_fired": a.hard_rules_fired}, session=s)
-        write_audit("payment", pay.id, "agent", status.value, {"reason": reason, "transfer_id": transfer_id}, session=s)
-        atk = _attack_for(s, msg, fired, a, status, amount, [reason[:160]] + [r[:160] for r in (a.reasons if a else [])][:2] if fired else None)
+        write_audit("payment", pay.id, "agent", "cleared_for_payment" if status == PaymentStatus.pending else status.value,
+                    {"reason": reason, "transfer_id": transfer_id}, session=s)
+        atk = None if status == PaymentStatus.pending else _attack_for(  # a payment waiting to be paid has no attack result yet
+            s, msg, fired, a, status, amount, [reason[:160]] + [r[:160] for r in (a.reasons if a else [])][:2] if fired else None)
         if atk:
             write_audit("attack", atk.id, "agent", f"attack_{atk.result.value}", {"payment_id": pay.id, "card": atk.card}, session=s)
         s.commit()
@@ -291,87 +301,102 @@ def _release(payment_id: str, run_id: str, transfer_id: Optional[str], status: P
 
 
 def check_destination(payment_id: str) -> tuple[bool, str]:
-    """The hard backstop. Reads the database fresh: the payment must go to the vendor's CURRENT verified
-    account, and the invoice must not be asking for any other account."""
+    """This module's own backstop, deliberately NOT built on verify.current_verified_account (which payments.pay_payment uses),
+    so the two money checks do not share a bug. Reads the database fresh. The account being paid must
+
+      * exist, belong to this invoice's vendor, and be open;
+      * be verified: opened by a confirmed verification call, or be the vendor's genuine onboarding account (the earliest, and
+        never one that only came from a payment request);
+      * be exactly the account the invoice asks for, when the invoice names one."""
     with Session(engine) as s:
         pay = s.get(Payment, payment_id)
-        inv = s.get(Invoice, pay.invoice_id)
-        if not inv.vendor_id:
-            return False, "invoice has no vendor"
-        current = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == inv.vendor_id, VendorBankAccount.valid_to.is_(None))).first()
-        if current is None:
-            return False, "vendor has no verified bank account"
-        if pay.destination_account_id != current.id:
-            return False, "payment destination is not the last verified account"
+        inv = s.get(Invoice, pay.invoice_id) if pay else None
+        if pay is None or inv is None or not inv.vendor_id:
+            return False, "payment, invoice or vendor not found"
+        acct = s.get(VendorBankAccount, pay.destination_account_id) if pay.destination_account_id else None
+        if acct is None:
+            return False, "payment has no destination account"
+        if acct.vendor_id != inv.vendor_id:
+            return False, "the destination account belongs to a different vendor"
+        if acct.valid_to is not None:
+            return False, "the destination account is closed"
+        if acct.verified_by_call_id:
+            call = s.get(VerificationCall, acct.verified_by_call_id)
+            if call is None or call.outcome != CallOutcome.confirmed:
+                return False, "the call that verified this account was not a confirmed call"
+        else:
+            requested = s.exec(select(AuditLog.id).where(AuditLog.entity == "vendor_bank_account", AuditLog.entity_id == acct.id,
+                                                         AuditLog.action == verify.REQUESTED_ACTION)).first()
+            earliest = s.exec(select(func.min(VendorBankAccount.valid_from)).where(VendorBankAccount.vendor_id == inv.vendor_id)).one()
+            if requested is not None or acct.valid_from != earliest:
+                return False, "this account was only requested; no call verified it"
         rem = inv.remittance_json
-        if rem and (rem.get("routing_hash"), rem.get("account_last4")) != (current.routing_hash, current.account_last4):
-            return False, "invoice asks for an account that is not the last verified one"
+        if rem and (rem.get("routing_hash"), rem.get("account_last4")) != (acct.routing_hash, acct.account_last4):
+            return False, "the invoice asks for a different account than the one being paid"
         return True, "ok"
 
 
 # ---------------------------------------------------------------- the pipeline for one invoice
 
 
-async def _pay(run_id: str, payment_id: str, stats: Stats, marks: dict, prelim: Optional[tuple] = None) -> PaymentStatus:
-    """Backstop, then send_transfer. Returns the final status. `prelim` is (ld, ex, amount, dest, a, findings, ident) for the
-    auto-pay path, where the payment row does not exist yet and is written together with the assessment."""
-    ok, why = check_destination_for(payment_id, prelim)
-    if not ok:
-        log.warning("backstop refused %s: %s", payment_id, why)
-        return await _finish(run_id, payment_id, stats, marks, prelim, PaymentStatus.held, f"backstop_refused: {why}", None)
-    try:
-        with timer(stats, "transfer", marks):
-            pay = Payment(id=payment_id, run_id=run_id, invoice_id=prelim[0].invoice.id if prelim else "", amount_usd=prelim[2] if prelim else 0,
-                          destination_account_id=prelim[3] if prelim else None, status=PaymentStatus.pending)
-            if not prelim:
-                with Session(engine) as s:
-                    pay = s.get(Payment, payment_id)
-                    s.expunge(pay)
-            transfer_id = await payments.send_transfer(pay)
-    except Exception as exc:
-        log.exception("transfer failed for %s", payment_id)
-        return await _finish(run_id, payment_id, stats, marks, prelim, PaymentStatus.held, f"transfer_failed: {type(exc).__name__}", None)
-    return await _finish(run_id, payment_id, stats, marks, prelim, PaymentStatus.paid, "paid to the last verified account", transfer_id)
-
-
-def check_destination_for(payment_id: str, prelim: Optional[tuple]) -> tuple[bool, str]:
-    if prelim is None:
-        return check_destination(payment_id)
-    # Payment not written yet: apply the same checks to the values we are about to pay.
-    ld, ex, amount, dest, a, findings, ident = prelim
+async def _stop_pending(run_id: str, payment_id: str, stats: Stats, reason: str, ld: Optional["Loaded"], a: Optional[Assessment]) -> PaymentStatus:
+    """A payment that was cleared but must not be paid: back to held, with the reason."""
+    atk = None
     with Session(engine) as s:
-        current = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == ld.invoice.vendor_id, VendorBankAccount.valid_to.is_(None))).first()
-    if current is None:
-        return False, "vendor has no verified bank account"
-    if dest != current.id:
-        return False, "payment destination is not the last verified account"
-    rem = ex.remittance if ex else None
-    req = (rem.routing_hash, rem.account_last4) if rem else ((ld.invoice.remittance_json or {}).get("routing_hash"), (ld.invoice.remittance_json or {}).get("account_last4")) if ld.invoice.remittance_json else None
-    if req and req != (current.routing_hash, current.account_last4):
-        return False, "invoice asks for an account that is not the last verified one"
-    return True, "ok"
-
-
-async def _finish(run_id, payment_id, stats, marks, prelim, status: PaymentStatus, reason: str, transfer_id: Optional[str]) -> PaymentStatus:
-    with timer(stats, "commit", marks):
-        if prelim:
-            ld, ex, amount, dest, a, findings, ident = prelim
-            _, atk = _commit_decision(run_id, ld, ex, status, amount, dest, a, findings, False, ident, reason, transfer_id)
-            vendor_name = ld.vendor.name
-        else:
-            audit_action = status.value if status != PaymentStatus.held else "held_after_verification"
-            atk = _release(payment_id, run_id, transfer_id, status, reason, audit_action)
-            vendor_name = ""
+        s.execute(update(Payment).where(Payment.id == payment_id, Payment.status == PaymentStatus.pending).values(status=PaymentStatus.held))
+        write_audit("payment", payment_id, "agent", "held", {"reason": reason}, session=s)
+        pay = s.get(Payment, payment_id)
+        inv = s.get(Invoice, pay.invoice_id)
+        msg = s.get(Message, inv.message_id) if inv.message_id else None
+        if msg is not None and msg.is_attack:
+            atk = _attack_for(s, msg, False, None, PaymentStatus.held, pay.amount_usd, [reason[:160]])
+        s.commit()
+        if atk:
+            s.refresh(atk)
+            s.expunge(atk)
+    log.warning("payment %s not paid: %s", payment_id, reason)
     stats.notes[payment_id] = reason
-    if prelim:
-        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=payment_id, score=prelim[4].score, decision=prelim[4].decision, top_signals=_pub_signals(prelim[0], prelim[4].signals[:4])))
-    if status == PaymentStatus.paid:
-        await ev.emit(ev.PaymentPaid(run_id=run_id, payment_id=payment_id, nessie_transfer_id=transfer_id))
-    else:
-        await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=payment_id, reasons=_pub_list(prelim[0], [reason] + prelim[4].reasons) if prelim else [reason]))
+    reasons = [reason] + (a.reasons if a else [])
+    await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=payment_id, reasons=_pub_list(ld, reasons) if ld else reasons))
     if atk:
         await _emit_attack(run_id, atk)
-    return status
+    return PaymentStatus.held
+
+
+async def _record_paid_attack(run_id: str, payment_id: str) -> None:
+    """An attack whose payment was paid is a miss: update its leaderboard row."""
+    atk = None
+    with Session(engine) as s:
+        pay = s.get(Payment, payment_id)
+        inv = s.get(Invoice, pay.invoice_id)
+        msg = s.get(Message, inv.message_id) if inv.message_id else None
+        if msg is not None and msg.is_attack:
+            atk = _attack_for(s, msg, False, None, PaymentStatus.paid, pay.amount_usd, ["paid to the last verified account"])
+            write_audit("attack", atk.id, "agent", f"attack_{atk.result.value}", {"payment_id": payment_id, "card": atk.card}, session=s)
+            s.commit()
+            s.refresh(atk)
+            s.expunge(atk)
+    if atk:
+        await _emit_attack(run_id, atk)
+
+
+async def _pay_existing(run_id: str, payment_id: str, stats: Stats, marks: dict, ld: Optional["Loaded"] = None, a: Optional[Assessment] = None) -> PaymentStatus:
+    """Pay a pending payment through BOTH money checks: this module's backstop, then payments.pay_payment (whose own guard
+    runs inside it). pay_payment commits the paid status, writes the audit row and emits payment.paid."""
+    ok, why = check_destination(payment_id)
+    if not ok:
+        return await _stop_pending(run_id, payment_id, stats, f"backstop_refused: {why}", ld, a)
+    try:
+        with timer(stats, "transfer", marks):
+            with Session(engine) as s:
+                await payments.pay_payment(s, payment_id)
+    except payments.TransferRefused as exc:
+        return await _stop_pending(run_id, payment_id, stats, f"payment_guard_refused: {exc}", ld, a)
+    except Exception as exc:
+        log.exception("transfer failed for %s", payment_id)
+        return await _stop_pending(run_id, payment_id, stats, f"transfer_failed: {type(exc).__name__}", ld, a)
+    await _record_paid_attack(run_id, payment_id)
+    return PaymentStatus.paid
 
 
 def mask_handle(name: str) -> str:
@@ -496,6 +521,12 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
     last = Destination(ld.current.routing_hash, ld.current.account_last4) if ld.current else None
     destination_changed = requested is not None and requested != last
     dest_id = ld.current.id if ld.current else None
+    if destination_changed and not fired and requested is not None:
+        # The invoice asks for new bank details. Store them as an UNVERIFIED candidate account and point the payment at it.
+        # A candidate is never trusted: only a confirmed call (verify.py) can promote it.
+        bank = (rem.bank_name if rem else (inv.remittance_json or {}).get("bank_name")) or "Unknown bank"
+        with Session(engine) as rs:
+            dest_id = verify.record_requested_destination(rs, vendor.id, requested.routing_hash, requested.account_last4, bank)
 
     # 4. CRS identity check: changed destination or first payment (skipped when the document is already quarantined)
     ident = None
@@ -531,11 +562,12 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
             await _emit_attack(run_id, atk)
         return
 
-    prelim = (ld, ex, amount, dest_id, a, findings, ident)
-
-    # 6b. clean: auto-pay through the backstop
+    # 6b. clean: save the payment as cleared (with its assessment, in one transaction), then pay it through both money checks
     if decision == Decision.auto_pay:
-        await _pay(run_id, pid, stats, marks, prelim)
+        with timer(stats, "commit", marks):
+            _commit_decision(run_id, ld, ex, PaymentStatus.pending, amount, dest_id, a, findings, False, ident, "no hard rule fired and the score is below 30")
+        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=_pub_signals(ld, a.signals[:4])))
+        await _pay_existing(run_id, pid, stats, marks, ld, a)
         return
 
     # 6c. hold; a changed destination also gets a verification call
@@ -577,7 +609,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
         _release(pid, run_id, None, PaymentStatus.held, stats.notes[pid], "held_after_verification")
         await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=[stats.notes[pid]]))
         return
-    await _pay(run_id, pid, stats, marks, None)
+    await _pay_existing(run_id, pid, stats, marks, ld, a)
 
 
 # ---------------------------------------------------------------- the run

@@ -31,7 +31,8 @@ def settings(**kw) -> Settings:
 @pytest.fixture(autouse=True)
 def real_scanner(monkeypatch, tmp_path):
     """Real scanner, Claude off, a private classifier cache."""
-    monkeypatch.setattr(injection, "get_settings", lambda: settings(mock_claude=True, injection_cache_dir=str(tmp_path / "cls")))
+    s = settings(mock_claude=True, injection_cache_dir=str(tmp_path / "cls"))  # built once: every Settings() re-reads the .env file
+    monkeypatch.setattr(injection, "get_settings", lambda: s)
     monkeypatch.setattr(injection, "classifier", Classifier())
 
 

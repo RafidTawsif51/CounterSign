@@ -274,20 +274,20 @@ def test_backstop_refuses_a_destination_that_is_not_the_last_verified_account(en
     monkeypatch.setattr(risk, "get_assessor", lambda: Liar())
     monkeypatch.setattr(run, "effective_decision", lambda a, changed: Decision.auto_pay)
     sent = []
-    real = payments.send_transfer
+    real = payments.create_transfer
 
-    async def spy(p):
-        sent.append(p.id)
-        return await real(p)
+    async def spy(dest, amount, description):
+        sent.append(description.rsplit(" ", 1)[-1])  # "Countersign payment pay_xxx"
+        return await real(dest, amount, description)
 
-    monkeypatch.setattr(payments, "send_transfer", spy)
+    monkeypatch.setattr(payments, "create_transfer", spy)
     body, g = go(client)
     assert BANK not in sent and CEO not in sent
     assert pay_status(eng, BANK) == pay_status(eng, CEO) == PaymentStatus.held
     assert g["totals"]["paid"] == 37 - 0 and len(sent) == 37
     with Session(eng) as s:
         refused = s.exec(select(AuditLog).where(AuditLog.entity_id == BANK, AuditLog.action == "held")).one()
-        assert refused.detail_json["reason"].startswith("backstop_refused")
+        assert refused.detail_json["reason"].startswith("backstop_refused") and "only requested" in refused.detail_json["reason"]
 
 
 def test_check_destination_reads_the_database_fresh(env):
@@ -304,7 +304,7 @@ def test_check_destination_reads_the_database_fresh(env):
         s.add(VendorBankAccount(id="bac_swapped", vendor_id=vendor_id, routing_hash="x" * 64, account_last4="0000", bank_name="B", valid_from=ev_mod.utcnow()))
         s.commit()
     ok, why = run.check_destination(pid)
-    assert ok is False and "not the last verified" in why
+    assert ok is False and "closed" in why
 
 
 def test_a_failed_transaction_leaves_no_partial_records(env, monkeypatch):

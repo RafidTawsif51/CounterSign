@@ -15,6 +15,12 @@ for _flag in ("NESSIE", "CRS", "APIFY", "TWILIO", "CARTESIA", "CLAUDE"):
 os.environ["MOCK_INJECTION"] = "false"
 os.environ["MOCK_RISK"] = "false"  # the real assessor; its Claude classifier stays off because MOCK_CLAUDE is true
 os.environ["ANTHROPIC_API_KEY"] = ""
+# Same for every other value a real .env might hold: fixed fake values (fiction-range phone numbers), blank keys.
+os.environ["DEMO_VENDOR_PHONE"] = "+14155550142"
+os.environ["ALLOWED_CALL_NUMBERS"] = "+14155550142"
+for _blank in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "PUBLIC_BASE_URL", "CARTESIA_API_KEY", "CARTESIA_VOICE_ID", "STT_API_KEY",
+               "NESSIE_API_KEY", "APIFY_TOKEN", "CRS_API_KEY", "BOUNTY_WEBHOOK_SECRET"):
+    os.environ[_blank] = ""
 
 
 import shutil  # noqa: E402

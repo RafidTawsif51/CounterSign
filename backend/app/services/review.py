@@ -36,7 +36,7 @@ from app.models import (
     VendorContact,
     VerificationCall,
 )
-from app.services import payments, risk, run
+from app.services import payments, risk, run, verify
 from app.services.vendors import call_view, identity_for
 
 router = APIRouter()
@@ -60,14 +60,21 @@ def _conflict(error: str, **extra) -> HTTPException:
 
 
 def _current_account(s: Session, vendor_id: Optional[str]) -> Optional[VendorBankAccount]:
-    if not vendor_id:
-        return None
-    return s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id, VendorBankAccount.valid_to.is_(None))).first()
+    """The vendor's trusted account (verify.current_verified_account): never an account that only came from a payment request."""
+    return verify.open_verified_account(s, vendor_id) if vendor_id else None
 
 
-def _account_view(a: Optional[VendorBankAccount]) -> Optional[dict]:
+def _is_unverified_request(s: Session, acct: Optional[VendorBankAccount], vendor_id: Optional[str]) -> bool:
+    """True for a candidate account that a payment request created (verify.record_requested_destination) and no call has verified."""
+    if acct is None or acct.vendor_id != vendor_id or acct.verified_by_call_id:
+        return False
+    return s.exec(select(AuditLog.id).where(AuditLog.entity == "vendor_bank_account", AuditLog.entity_id == acct.id, AuditLog.action == verify.REQUESTED_ACTION)).first() is not None
+
+
+def _account_view(a: Optional[VendorBankAccount], trusted_id: Optional[str] = None) -> Optional[dict]:
     return None if a is None else {"id": a.id, "bank_name": a.bank_name, "account_last4": a.account_last4, "valid_from": a.valid_from,
-                                   "valid_to": a.valid_to, "verified_by_call_id": a.verified_by_call_id}
+                                   "valid_to": a.valid_to, "verified_by_call_id": a.verified_by_call_id,
+                                   "trusted": a.id == trusted_id}  # false for an account that only came from a payment request
 
 
 def _latest_assessment(s: Session, payment_id: str) -> Optional[RiskAssessment]:
@@ -101,6 +108,7 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
     ras = _latest_assessment(session, pay.id)
     current = _current_account(session, vendor.id if vendor else None)
     destination = session.get(VendorBankAccount, pay.destination_account_id) if pay.destination_account_id else None
+    dest_is_request = _is_unverified_request(session, destination, vendor.id if vendor else None)
     requested = inv.remittance_json if inv else None
     requested_differs = bool(requested and current and (requested.get("routing_hash"), requested.get("account_last4")) != (current.routing_hash, current.account_last4))
 
@@ -126,12 +134,15 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
         can_approve, approve_blocked = False, "the payment run is still processing it"
     elif ras and "hidden_instructions" in ras.hard_rules_fired:
         can_approve, approve_blocked = False, "quarantined document: reject it"
-    elif current is None or pay.destination_account_id != current.id:
+    elif current is None:
+        can_approve, approve_blocked = False, "the vendor has no verified bank account to pay"
+    elif pay.destination_account_id != current.id and not dest_is_request:
         can_approve, approve_blocked = False, "no current verified account matches this payment"
 
     return {
         "payment": {"id": pay.id, "run_id": pay.run_id, "status": pay.status.value, "amount_usd": pay.amount_usd, "nessie_transfer_id": pay.nessie_transfer_id,
-                    "destination": _account_view(destination), "last_verified_account": _account_view(current)},
+                    "destination": _account_view(destination, current.id if current else None), "last_verified_account": _account_view(current, current.id if current else None),
+                    "approve_pays": _account_view(current, current.id if current else None)},  # approving always pays this account
         "invoice": None if inv is None else {
             "id": inv.id, "number": inv.number, "amount_usd": inv.amount_usd, "due_date": inv.due_date, "has_pdf": bool(inv.pdf_path),
             "requested_remittance": requested, "requested_account_differs_from_verified": requested_differs,
@@ -170,9 +181,16 @@ async def approve(payment_id: str, body: ReviewIn) -> dict:
         current = _current_account(s, inv.vendor_id if inv else None)
         if current is None:
             raise _conflict("the vendor has no verified bank account to pay")
+        # The payment points either at the verified account, or at the UNVERIFIED account the invoice asked for. In the second
+        # case approving pays the verified account instead, never the requested one. Anything else (an account that was
+        # trusted once, someone else's account, no account) is refused.
+        repoint = False
         if pay.destination_account_id != current.id:
-            raise _conflict("the vendor's verified account changed after this payment was held; it needs a fresh review", payment_destination=pay.destination_account_id,
-                            verified_account=current.id)
+            if not _is_unverified_request(s, s.get(VendorBankAccount, pay.destination_account_id) if pay.destination_account_id else None, inv.vendor_id):
+                raise _conflict("the vendor's verified account changed after this payment was held; it needs a fresh review", payment_destination=pay.destination_account_id,
+                                verified_account=current.id)
+            repoint = True
+        unverified_id = pay.destination_account_id if repoint else None
         requested = inv.remittance_json or {}
         asks_other = bool(requested) and (requested.get("routing_hash"), requested.get("account_last4")) != (current.routing_hash, current.account_last4)
         run_id, amount, current_id, current_last4 = pay.run_id, pay.amount_usd, current.id, current.account_last4
@@ -206,7 +224,8 @@ async def approve(payment_id: str, body: ReviewIn) -> dict:
         s.add(pay)
         write_audit("payment", payment_id, AuditActor.human, "approved",
                     {"approver": body.approver, "reason": body.reason, "paid_account_id": current_id, "paid_account_last4": current_last4,
-                     "invoice_asked_for_a_different_account": asks_other, "new_account_created": False}, session=s)
+                     "invoice_asked_for_a_different_account": asks_other, "new_account_created": False,
+                     "unverified_requested_account_id": unverified_id, "requested_account_trusted": False}, session=s)
         write_audit("payment", payment_id, AuditActor.agent, "paid", {"reason": "approved by the controller", "transfer_id": transfer_id,
                                                                       "to_last_verified_account": True}, session=s)
         s.commit()

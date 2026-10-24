@@ -20,7 +20,8 @@ FEATS = {"page": "612x792", "fonts": "a", "logo": "b", "labels": "c", "table": "
 
 @pytest.fixture(autouse=True)
 def real(monkeypatch, tmp_path):
-    monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_risk=False, mock_claude=True, risk_cache_dir=str(tmp_path / "rc")))
+    s = Settings(mock_risk=False, mock_claude=True, risk_cache_dir=str(tmp_path / "rc"))  # built once: every Settings() re-reads the .env file
+    monkeypatch.setattr(risk, "get_settings", lambda: s)
     monkeypatch.setattr(risk, "pressure_classifier", risk.PressureClassifier())
 
 
@@ -186,7 +187,8 @@ class FakeClaude:
 
 @pytest.fixture()
 def claude_on(monkeypatch, tmp_path):
-    monkeypatch.setattr(risk, "get_settings", lambda: Settings(mock_risk=False, mock_claude=False, risk_cache_dir=str(tmp_path / "rc"), claude_model_fast="claude-haiku-5-5"))
+    s = Settings(mock_risk=False, mock_claude=False, risk_cache_dir=str(tmp_path / "rc"), claude_model_fast="claude-haiku-5-5")
+    monkeypatch.setattr(risk, "get_settings", lambda: s)
     monkeypatch.setattr(risk, "pressure_classifier", risk.PressureClassifier())
 
     def install(fake):

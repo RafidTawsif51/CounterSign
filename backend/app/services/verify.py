@@ -179,12 +179,23 @@ def get_caller() -> Caller:
 
 
 def _write_verified_account(session: Session, vendor_id: str, rem: dict, call_id: str) -> VendorBankAccount:
+    """A confirmed call makes the requested account the vendor's verified account. If the request was already stored as a
+    candidate (record_requested_destination) that very row is promoted; otherwise a new row is written. The previous
+    verified account is closed."""
     now = utcnow()
-    for old in session.exec(
-        select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id, VendorBankAccount.valid_to.is_(None))
-    ):
-        old.valid_to = now
-        session.add(old)
+    prev = current_verified_account(session, vendor_id)
+    candidate = next(
+        (a for a in session.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id))
+         if a.routing_hash == rem["routing_hash"] and a.account_last4 == rem["account_last4"] and not a.verified_by_call_id),
+        None,
+    )
+    if prev is not None and (candidate is None or prev.id != candidate.id):
+        prev.valid_to = now
+        session.add(prev)
+    if candidate is not None:
+        candidate.verified_by_call_id, candidate.valid_from, candidate.valid_to = call_id, now, None
+        session.add(candidate)
+        return candidate
     acct = VendorBankAccount(
         vendor_id=vendor_id,
         routing_hash=rem["routing_hash"],
@@ -195,6 +206,24 @@ def _write_verified_account(session: Session, vendor_id: str, rem: dict, call_id
     )
     session.add(acct)
     return acct
+
+
+def _reject_candidate(session: Session, vendor_id: str, account_id: Optional[str], call_id: str) -> None:
+    """The vendor denied the change: close the requested candidate so it can never be paid. Only touches an account that
+    was created from a payment request and never verified; the vendor's real account is left alone."""
+    if not account_id:
+        return
+    acct = session.get(VendorBankAccount, account_id)
+    if acct is None or acct.vendor_id != vendor_id or acct.verified_by_call_id or acct.valid_to is not None:
+        return
+    was_requested = session.exec(
+        select(AuditLog.id).where(AuditLog.entity == "vendor_bank_account", AuditLog.entity_id == acct.id, AuditLog.action == REQUESTED_ACTION)
+    ).first()
+    if was_requested is None:
+        return
+    acct.valid_to = utcnow()
+    session.add(acct)
+    write_audit("vendor_bank_account", acct.id, "agent", "requested_destination_rejected", {"call_id": call_id, "account_last4": acct.account_last4}, session=session)
 
 
 def _store_contact(session: Session, vendor_id: str, c: contacts.IndependentContact) -> VendorContact:
@@ -239,6 +268,13 @@ def current_verified_account(session: Session, vendor_id: str) -> Optional[Vendo
     if earliest.id not in requested and not earliest.verified_by_call_id:
         trusted.append(earliest)
     return max(trusted, key=lambda a: a.valid_from, default=None)
+
+
+def open_verified_account(session: Session, vendor_id: str) -> Optional[VendorBankAccount]:
+    """current_verified_account, but None if that account has been closed (valid_to set). Used by the run, the controller
+    routes and the vendor views, so a closed account is never offered as the one to pay."""
+    acct = current_verified_account(session, vendor_id)
+    return acct if acct is not None and acct.valid_to is None else None
 
 
 def record_requested_destination(
@@ -333,6 +369,7 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
     needs_controller = outcome == CallOutcome.unclear or (outcome == CallOutcome.no_answer and attempts >= MAX_TRIES)
     if outcome == CallOutcome.denied:
         payment.status = PaymentStatus.blocked
+        _reject_candidate(session, vendor.id, payment.destination_account_id, call.id)
         if message:
             message.is_attack = True
             session.add(message)

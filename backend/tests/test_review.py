@@ -9,6 +9,7 @@ from sqlmodel import Session, func, select
 from app.models import (
     AuditActor,
     AuditLog,
+    CallOutcome,
     Decision,
     Event,
     Invoice,
@@ -19,6 +20,7 @@ from app.models import (
     RiskAssessment,
     Vendor,
     VendorBankAccount,
+    VerificationCall,
     utcnow,
 )
 from app.services import payments, review, run
@@ -131,14 +133,30 @@ def test_approve_cannot_pay_a_new_account(env, spy):
 def test_approve_refuses_when_the_verified_account_changed_after_the_hold(env, spy):
     client, eng = env
     pid = hold(eng, "inv_atk_bank_change")
-    with Session(eng) as s:
+    with Session(eng) as s:  # a proper change: the old account is closed and a NEW account was verified by a confirmed call
+        cur = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == "ven_summit", VendorBankAccount.valid_to.is_(None))).one()
+        cur.valid_to = utcnow()
+        s.add(cur)
+        s.add(VerificationCall(id="cal_new", payment_id="pay_0001", started_at=utcnow(), outcome=CallOutcome.confirmed, transcript=[]))
+        s.add(VendorBankAccount(id="bac_summit_new", vendor_id="ven_summit", routing_hash="y" * 64, account_last4="0001", bank_name="B", valid_from=utcnow(),
+                                verified_by_call_id="cal_new"))
+        s.commit()
+    r = client.post(f"/api/payments/{pid}/approve", json=ASK)
+    assert r.status_code == 409 and "changed after this payment was held" in str(r.json()["detail"])
+    assert spy == [] and pay_state(eng, pid)[0] == PaymentStatus.held
+
+
+def test_approve_refuses_when_the_verified_account_was_closed_and_nothing_replaced_it(env, spy):
+    client, eng = env
+    pid = hold(eng, "inv_atk_bank_change")
+    with Session(eng) as s:  # closed, and the "new" account has no verification at all
         cur = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == "ven_summit", VendorBankAccount.valid_to.is_(None))).one()
         cur.valid_to = utcnow()
         s.add(cur)
         s.add(VendorBankAccount(id="bac_summit_new", vendor_id="ven_summit", routing_hash="y" * 64, account_last4="0001", bank_name="B", valid_from=utcnow()))
         s.commit()
     r = client.post(f"/api/payments/{pid}/approve", json=ASK)
-    assert r.status_code == 409 and "changed after this payment was held" in str(r.json()["detail"])
+    assert r.status_code == 409 and "no verified bank account" in str(r.json()["detail"])
     assert spy == [] and pay_state(eng, pid)[0] == PaymentStatus.held
 
 
@@ -257,7 +275,12 @@ def test_payment_detail_after_a_real_run(env):
     client, eng = env
     go(client)
     d = client.get(f"/api/payments/{BANK}").json()
-    assert d["payment"]["status"] == "blocked" and d["payment"]["destination"]["account_last4"] == d["payment"]["last_verified_account"]["account_last4"]
+    assert d["payment"]["status"] == "blocked"
+    # the payment points at the account the invoice asked for (an unverified candidate); the verified account is a different one
+    assert d["payment"]["destination"]["account_last4"] == "7781" and d["payment"]["destination"]["trusted"] is False
+    assert d["payment"]["destination"]["valid_to"] is not None  # the vendor denied it, so the candidate was closed
+    assert d["payment"]["last_verified_account"]["account_last4"] == "2204" and d["payment"]["last_verified_account"]["trusted"] is True
+    assert d["payment"]["approve_pays"]["id"] == d["payment"]["last_verified_account"]["id"]
     assert d["invoice"]["requested_account_differs_from_verified"] is True and d["invoice"]["requested_remittance"]["account_last4"] == "7781"
     assert d["vendor"]["name"] == "Summit Concrete" and d["vendor"]["identity"]["status"] and d["identity"] == d["vendor"]["identity"]
     assert d["message"]["from_addr"].endswith("@summit-concrete.co") and d["message"]["is_attack"] is True

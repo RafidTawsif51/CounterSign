@@ -64,7 +64,7 @@ from app.models import (
     new_id,
     utcnow,
 )
-from app.services import run
+from app.services import run, verify
 from app.services.extract import hash_routing
 from app.services.ingest import MAX_BODY_CHARS, MAX_PDF_BYTES, _EMAIL_RE, vendor_for_thread
 
@@ -231,7 +231,7 @@ def _build(
     if pdf is not None:
         inv.pdf_path = _save_pdf(inv.id, pdf)  # the run extracts amount, number and bank details from it
     elif remit is None and vendor_id:
-        cur = s.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id, VendorBankAccount.valid_to.is_(None))).first()
+        cur = verify.open_verified_account(s, vendor_id)
         remit = {"bank_name": cur.bank_name, "routing_hash": cur.routing_hash, "account_last4": cur.account_last4} if cur else None
     inv.remittance_json = remit if pdf is None else None
     attack = Attack(

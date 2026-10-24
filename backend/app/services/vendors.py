@@ -29,7 +29,7 @@ from app.models import (
     VendorContact,
     VerificationCall,
 )
-from app.services import identity
+from app.services import identity, verify
 
 router = APIRouter()
 
@@ -60,12 +60,13 @@ async def identity_for(session: Session, vendor: Vendor) -> dict:
     return detail
 
 
-def bank_view(a: VendorBankAccount, calls: dict[str, VerificationCall]) -> dict:
+def bank_view(a: VendorBankAccount, calls: dict[str, VerificationCall], trusted_id: Optional[str] = None, requested_ids: frozenset = frozenset()) -> dict:
     call = calls.get(a.verified_by_call_id) if a.verified_by_call_id else None
+    requested = a.id in requested_ids and not a.verified_by_call_id
+    verified_by = ("phone call: " + call.outcome.value) if call and call.outcome else ("requested, not verified" if requested else "onboarding" if a.verified_by_call_id is None else "unknown")
     return {
         "id": a.id, "bank_name": a.bank_name, "account_last4": a.account_last4, "valid_from": a.valid_from, "valid_to": a.valid_to,
-        "current": a.valid_to is None, "verified_by_call_id": a.verified_by_call_id,
-        "verified_by": ("phone call: " + call.outcome.value) if call and call.outcome else ("onboarding" if a.verified_by_call_id is None else "unknown"),
+        "current": a.id == trusted_id, "trusted": a.id == trusted_id, "verified_by_call_id": a.verified_by_call_id, "verified_by": verified_by,
     }
 
 
@@ -80,7 +81,7 @@ def call_view(c: VerificationCall, contact: Optional[VendorContact]) -> dict:
 @router.get("/vendors")
 def list_vendors(session: Session = Depends(get_session)) -> list[dict]:
     vendors = session.exec(select(Vendor).order_by(Vendor.name)).all()
-    current = {a.vendor_id: a for a in session.exec(select(VendorBankAccount).where(VendorBankAccount.valid_to.is_(None)))}
+    current = {v.id: verify.open_verified_account(session, v.id) for v in vendors}  # the trusted account, never a requested candidate
     accounts_n = dict(session.exec(select(VendorBankAccount.vendor_id, func.count()).group_by(VendorBankAccount.vendor_id)).all())
     by_status: dict[str, dict[str, int]] = defaultdict(lambda: {"paid": 0, "held": 0, "blocked": 0, "pending": 0})
     for vid, st, n in session.exec(select(Invoice.vendor_id, Payment.status, func.count()).join(Invoice, Invoice.id == Payment.invoice_id).group_by(Invoice.vendor_id, Payment.status)):
@@ -98,6 +99,11 @@ def list_vendors(session: Session = Depends(get_session)) -> list[dict]:
                                              .join(RiskAssessment, RiskAssessment.payment_id == Payment.id).order_by(PaymentRun.started_at, Payment.id)):
         latest[vid] = (pid, score, dec)
     ident = latest_identity_map(session)
+    requested_n: dict[str, int] = defaultdict(int)  # accounts that came from a payment request and no call has verified
+    cand_ids = set(session.exec(select(AuditLog.entity_id).where(AuditLog.entity == "vendor_bank_account", AuditLog.action == verify.REQUESTED_ACTION)).all())
+    for vid, aid, vcall, closed in session.exec(select(VendorBankAccount.vendor_id, VendorBankAccount.id, VendorBankAccount.verified_by_call_id, VendorBankAccount.valid_to)):
+        if aid in cand_ids and not vcall and closed is None:
+            requested_n[vid] += 1
     out = []
     for v in vendors:
         st = by_status[v.id]
@@ -106,6 +112,7 @@ def list_vendors(session: Session = Depends(get_session)) -> list[dict]:
         out.append({
             "id": v.id, "name": v.name, "trade": v.trade, "email_domain": v.email_domain, "status": v.status.value, "created_at": v.created_at,
             "current_account": {"bank_name": acct.bank_name, "account_last4": acct.account_last4, "since": acct.valid_from} if acct else None,
+            "unverified_requested_accounts": requested_n.get(v.id, 0),
             "identity": ident.get(v.id),  # the CRS result, or null if no check has run yet (the history call runs one)
             "risk_summary": {
                 "payments": st, "open_invoices": open_n.get(v.id, 0), "attack_messages": attacks.get(v.id, 0), "flagged_payments": flagged.get(v.id, 0),
@@ -132,6 +139,8 @@ async def vendor_history(vendor_id: str, limit: int = Query(300, ge=1, le=2000),
     contacts = session.exec(select(VendorContact).where(VendorContact.vendor_id == vendor_id).order_by(VendorContact.first_seen)).all()
     by_contact = {c.id: c for c in contacts}
     accounts = session.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == vendor_id).order_by(VendorBankAccount.valid_from)).all()
+    trusted = verify.open_verified_account(session, vendor_id)
+    requested_ids = frozenset(session.exec(select(AuditLog.entity_id).where(AuditLog.entity == "vendor_bank_account", AuditLog.action == verify.REQUESTED_ACTION)).all())
     call_by_id = {c.id: c for c in calls}
 
     rows = []
@@ -149,7 +158,7 @@ async def vendor_history(vendor_id: str, limit: int = Query(300, ge=1, le=2000),
         "summary": {"invoices": len(rows), "paid": len(paid_amounts), "average_paid_usd": round(sum(paid_amounts) / len(paid_amounts), 2) if paid_amounts else None,
                     "max_paid_usd": max(paid_amounts) if paid_amounts else None},
         "invoices": rows,
-        "bank_accounts": [bank_view(a, call_by_id) for a in accounts],
+        "bank_accounts": [bank_view(a, call_by_id, trusted.id if trusted else None, requested_ids) for a in accounts],
         "contacts": [{"id": c.id, "source": c.source.value, "source_url": c.source_url, "phone": mask_phone(c.phone), "first_seen": c.first_seen,
                       "last_verified": c.last_verified} for c in contacts],
         "calls": [call_view(c, by_contact.get(c.contact_id) if c.contact_id else None) for c in calls],
