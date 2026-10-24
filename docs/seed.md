@@ -1,0 +1,54 @@
+# Seed data
+
+`backend/seed/seed.py`. Run `cd backend && python seed/seed.py`, or call `seed_database(session)` (demo reset does). It wipes every table and rebuilds the same world: fixed random seed (`SEED`), fixed clock (`ANCHOR`, Thursday 2026-10-22 16:00 UTC), sequential ids. About 0.2 seconds. `seed_database(session, keep_attacks=True)` keeps the attacks table (leaderboard) and wipes the rest. Demo PDFs are written byte-identical, so the extraction cache keeps hitting.
+
+Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) except Summit Concrete, which gets `DEMO_VENDOR_PHONE` when set. Routing numbers start with 99 (not a real range). Vendor domains are invented `.com` names; a few may exist in the real world, and nothing is ever sent to them.
+
+## The world
+
+| Item | Value |
+|---|---|
+| Company | Ridgeline Builders (`ridgelinebuilders.com`), CEO Dana Whitfield, AP clerk Maria, controller Dev |
+| Vendors | 30, ids like `ven_summit`: 12 monthly suppliers, 12 progress-billing subcontractors, 6 equipment and site rentals |
+| History | about 1,160 paid invoices, 50 weekly Thursday runs (`run_2025w44` ... `run_2026w42`), one payment per invoice, `nes_seed_NNNN` transfer ids |
+| Seasonality | busier in spring and summer: more invoices per week and larger amounts (factor 0.55 in December, 1.4 in May and June) |
+| Bank history | every vendor has one current account (`valid_to` null). 4 had a legitimate change, each with a confirmed `verification_calls` row and `verified_by_call_id` set: `lakeshore`, `redwood`, `stonecraft`, `skyline`. Onboarding accounts have no call (verified at onboarding) |
+| Contacts | each vendor: one `on_file` phone plus one `website` or `listing` contact with `source_url` |
+| Send times | each vendor emails inside one daily UTC window (4 to 6 hours), so `outside_usual_hours` works |
+
+## This week (Thursday 2026-10-22 run)
+
+40 open invoices (no payment row yet), PDFs in `backend/seed/invoices/<invoice_id>.pdf`.
+
+37 clean (`SeedSummary.clean_invoice_ids`): every vendor has a current account that matches the invoice remittance, a known sender address, a usual send hour, and a typical amount. A test runs `risk.assess` on all of them: score 0, `auto_pay`, no hard rules, so no extra calls.
+
+3 planted attacks (ids in `seed.PLANTED`):
+
+| Card | Ids | What the pipeline sees |
+|---|---|---|
+| Classic bank change | `inv_atk_bank_change`, `msg_atk_bank_change`, thread `thr_summit_0919` | Reply in the real Sept 19 Summit thread from `ar@summit-concrete.co`, Reply-To `billing@summit-concrete.co`, "please process today", new account ending 7781 vs verified 2204. Score 95, `hold_and_verify` |
+| AI hijack | `inv_atk_poisoned_pdf`, `msg_atk_poisoned_pdf` | Keystone Steel invoice from the vendor's real address, normal amount and account, white text at the bottom asking an AI to reroute and approve. Score 0 but hard rule `hidden_instructions`, `hold` |
+| CEO pressure | `inv_atk_ceo_pressure`, `msg_atk_ceo_pressure` | Message in Northside Rentals' latest thread from `dana.whitfield@ridgeline-builders.co`: "the CEO approved this, pay today, keep it quiet", new account ending 3046, sent 06:14 UTC. Score 60, `hold_and_verify` |
+
+## Lookalike domains
+
+`seed.LOOKALIKES` and `SeedSummary.lookalikes`: 10 pairs for attack generation, each within edit distance 2 of the real domain.
+
+| Vendor | Real | Lookalike | Technique |
+|---|---|---|---|
+| summit | summitconcrete.com | summit-concrete.co | hyphen + tld |
+| keystone | keystonesteel.com | keystone-steel.com | hyphen |
+| alder | alderlumber.com | alderlurnber.com | rn for m |
+| bayview | bayviewelectric.com | bayviewe1ectric.com | 1 for l |
+| granite | graniteridgeagg.com | graniteridgeagg.co | tld |
+| pacific | pacificrebar.com | pacificrebar.co | tld |
+| northgate | northgateelectric.com | northgateelectrlc.com | l for i |
+| lakeshore | lakeshoreplumbing.com | lakeshore-plumbing.com | hyphen |
+| northside | northsiderentals.com | n0rthsiderentals.com | 0 for o |
+| skyline | skylinecrane.com | skylinecrane.co | tld |
+
+## Notes for the rest of the build
+
+- Invoice rows for this week already carry `number`, `amount_usd`, `due_date`, `remittance_json` and `pdf_path`; `extracted_json` is null. The mock extractor reproduces the same values from the PDFs (tested), so the payment run can extract or skip.
+- `tests/helpers.py::build_context` shows how to build a `RiskContext` from these rows.
+- Full routing and account numbers exist only inside the generated PDFs. The database holds the hash and last 4.
