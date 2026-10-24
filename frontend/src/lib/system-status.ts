@@ -57,4 +57,5 @@ export const MODE_LABEL: Record<SystemComponentStatus["mode"], string> = {
   sandboxed: "Sandboxed",
   simulated: "Simulated",
   mock: "Mock",
+  degraded: "Degraded",
 };

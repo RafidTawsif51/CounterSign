@@ -68,6 +68,9 @@ def servers(tmp_path_factory):
         if f.is_file() and f.suffix in {".html", ".302", ".txt"}:
             f.write_text(f.read_text().replace("{{OTHER_ORIGIN}}", other_origin))
     site = serve(site_root, site_hits)
+    site_origin = f"http://127.0.0.1:{site.server_address[1]}"
+    for f in site_root.rglob("*.html"):  # absolute links to the same host, for the shared-host tests
+        f.write_text(f.read_text().replace("{{SITE_ORIGIN}}", site_origin))
     yield {"site": f"http://127.0.0.1:{site.server_address[1]}", "other": other_origin, "site_hits": site_hits, "other_hits": other_hits}
     site.shutdown()
     other.shutdown()

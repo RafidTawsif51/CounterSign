@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
@@ -8,7 +9,7 @@ from sqlmodel import Session
 from app import dev, events, integrations
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
-from app.services import ask, attacks, bounty, ingest, reset, review, run, status, vendors
+from app.services import ask, attacks, bounty, contacts, ingest, reset, review, run, status, vendors
 
 
 @asynccontextmanager
@@ -16,7 +17,12 @@ async def lifespan(_app: FastAPI):
     create_all()
     run.mark_stale_runs()
     await attacks.start()
+    warm = None
+    if not settings.mock_apify:  # the demo vendor's independent lookup, so the first demo call does not wait for the Actor
+        warm = asyncio.create_task(contacts.warm())
     yield
+    if warm is not None:
+        warm.cancel()
     await attacks.stop()
 
 

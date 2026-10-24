@@ -29,7 +29,7 @@ rapidfuzz>=3.9
 twilio>=9
 cartesia>=2
 deepgram-sdk>=3
-apify-client>=1.7
+apify-client==3.3.0
 
 # Tests
 pytest>=8

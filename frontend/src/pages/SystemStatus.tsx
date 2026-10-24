@@ -13,7 +13,7 @@ import type { ComponentMode, HealthResponse, SystemComponentStatus } from "@/lib
 // The labels say what each component is in the product; health's mock flags say what this server is running right now,
 // so a component labeled Real can never quietly be a mock in front of a judge.
 
-const BADGE: Record<ComponentMode, "accent" | "neutral"> = { real: "accent", sandboxed: "neutral", simulated: "neutral", mock: "neutral" };
+const BADGE: Record<ComponentMode, "accent" | "neutral"> = { real: "accent", sandboxed: "neutral", simulated: "neutral", mock: "neutral", degraded: "neutral" };
 
 export function SystemStatus() {
   const status = useQuery({ queryKey: ["system-status"], queryFn: api.systemStatus, retry: false });

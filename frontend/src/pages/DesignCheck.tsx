@@ -536,6 +536,7 @@ const FIXTURE_CALLS: CallView[] = [
       { speaker: "agent", text: "Thank you. The change is confirmed and recorded. Goodbye." },
     ],
     outcome: "confirmed",
+    finding: { found: true, sourceUrl: "https://aayushswami123.github.io/Countersign/summit-concrete/contact.html", confidence: "high", agreement: "consistent", sourcesAgree: true, holdReasons: [] },
   },
   {
     paymentId: "pay_fixture_no_answer",
@@ -546,6 +547,7 @@ const FIXTURE_CALLS: CallView[] = [
     endedAt: "2026-10-22T17:06:47Z",
     lines: [],
     outcome: "no_answer",
+    finding: null,
   },
 ];
 

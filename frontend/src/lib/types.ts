@@ -243,6 +243,14 @@ export interface CallStartedEvent extends EventBase {
   type: "call.started";
   payment_id: string;
   contact_source: ContactSource;
+  /** The page of the vendor's own website that shows the number: Apify Vendor Contact Verifier's proof. Null for an on-file number alone. */
+  source_url?: string | null;
+  confidence?: "high" | "medium" | "low" | null;
+  agreement?: "consistent" | "conflicting" | "none_found" | null;
+  /** The website's number and the number on file are the same number. Null when the website gave no usable number. */
+  sources_agree?: boolean | null;
+  /** Why the call went where it did, for example "contact sources disagree". They never release a hold. */
+  hold_reasons?: string[];
 }
 export interface CallTranscriptEvent extends EventBase {
   type: "call.transcript";
@@ -414,6 +422,33 @@ export interface PaymentDetail {
   audit: AuditEntry[];
   /** What the controller may do now, and why not. */
   actions: { can_approve: boolean; approve_blocked_reason: string | null; can_reject: boolean };
+  /** What the independent number check (Apify Vendor Contact Verifier) found for the verification call. Null before a call is prepared. */
+  independent_contact: IndependentContact | null;
+}
+
+export interface HoldReason {
+  reason: string;
+  detail: string;
+  evidence_id: string;
+}
+
+export interface IndependentContact {
+  provider: string;
+  evidence_id: string;
+  checked_at: ISODateTime;
+  /** found: a usable number. not_usable: none, conflicting or low confidence. unavailable: Apify failed. no_website: nothing to check. */
+  status: "found" | "not_usable" | "unavailable" | "no_website";
+  /** The number the call used, masked. */
+  number: string | null;
+  number_source: ContactSource | null;
+  source_url: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  agreement: "consistent" | "conflicting" | "none_found" | null;
+  confidence_reason: string | null;
+  sources_agree: boolean | null;
+  cached: boolean | null;
+  actor_run_id: string | null;
+  hold_reasons: HoldReason[];
 }
 
 export interface RemittanceDetails {
@@ -691,9 +726,10 @@ export interface RedTeamResults {
 /**
  * Real: runs live. Sandboxed: a provider's sandbox (sandbox money, test identities). Simulated: generated demo data, or a
  * provider sandbox as the server labels it. Mock: the server runs this component on its mock right now (its MOCK_* flag).
- * The server sends real, simulated and mock; sandboxed comes only from the documented list.
+ * Degraded: the live provider is failing and the component is falling back (Apify lookups). The server sends real,
+ * simulated, mock and degraded; sandboxed comes only from the documented list.
  */
-export type ComponentMode = "real" | "sandboxed" | "simulated" | "mock";
+export type ComponentMode = "real" | "sandboxed" | "simulated" | "mock" | "degraded";
 
 /**
  * One row of GET /api/system/status (backend/app/services/status.py). If the route fails, /status shows the documented

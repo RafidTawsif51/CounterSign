@@ -139,10 +139,19 @@ At least one of invoice_id and message_id is set.
 | Field | Type |
 |---|---|
 | payment_id | str |
-| contact_source | on_file, website, listing |
+| contact_source | on_file, website, listing: where the number being called came from. `website` means the vendor's own website agreed with the number on file and is the proof |
+| source_url | str or null: the page of the vendor's website that shows the number (the Apify Vendor Contact Verifier's proof). Null when the number came from the on-file record alone |
+| confidence | high, medium, low or null: what the Apify Vendor Contact Verifier said about the website's number |
+| agreement | consistent, conflicting, none_found or null: whether the website's pages agreed with each other |
+| sources_agree | bool or null: the website's number and the number on file are the same number. Null when the website gave no usable number |
+| hold_reasons | list[str]: why the call went where it did, for example `contact sources disagree`, `independent contact check found no usable number`, `independent contact check unavailable` (Apify failed). These are added to the hold; they never release it |
+
+The number itself is never in the event. With `DEMO_CALL_ROUTES` set, the call is delivered to a team phone instead of the fictional number, and the event still shows the fictional one.
 
 ```json
-{"type": "call.started", "run_id": "run_042", "payment_id": "pay_mock_012", "contact_source": "on_file"}
+{"type": "call.started", "run_id": "run_042", "payment_id": "pay_mock_012", "contact_source": "website",
+ "source_url": "https://aayushswami123.github.io/Countersign/summit-concrete/contact.html", "confidence": "high", "agreement": "consistent",
+ "sources_agree": true, "hold_reasons": []}
 ```
 
 ### call.transcript

@@ -1,13 +1,25 @@
 // Verification call state for the call panel and the board's compact call strip. Built from the run's events while a
 // run is live (line by line, no refetch lag) and from the payment record otherwise (a call from an earlier run).
 
-import type { CallOutcome, ContactSource, PaymentDetail, RunEvent, TranscriptLine, VendorContact } from "@/lib/types";
+import type { CallOutcome, CallStartedEvent, ContactSource, PaymentDetail, RunEvent, TranscriptLine, VendorContact } from "@/lib/types";
 
 /** A stored contact or a history contact (phone masked to the last four). Both carry what the trust line needs. */
 export type ContactLike = Pick<VendorContact, "id" | "phone" | "source" | "source_url"> & { first_seen?: string };
 
 /** queued: held for a call that has not started. dialing: started, nobody has spoken. live: talking. ended: outcome in. */
 export type CallPhase = "queued" | "dialing" | "live" | "ended";
+
+/** What the independent number check (Apify Vendor Contact Verifier) said about the number for this call. */
+export interface NumberFinding {
+  /** found: the vendor's website showed a usable number. Anything else: the on-file number was used and the hold says why. */
+  found: boolean;
+  sourceUrl: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  agreement: "consistent" | "conflicting" | "none_found" | null;
+  /** The website's number and the on-file number are the same number. Null when the website gave no number. */
+  sourcesAgree: boolean | null;
+  holdReasons: string[];
+}
 
 export interface CallView {
   paymentId: string;
@@ -18,6 +30,7 @@ export interface CallView {
   endedAt: string | null;
   lines: TranscriptLine[];
   outcome: CallOutcome | null;
+  finding: NumberFinding | null;
 }
 
 /** verify.py hangs up at 60 seconds. */
@@ -43,7 +56,7 @@ export function foldCalls(events: RunEvent[]): CallView[] {
     if (e.type === "call.started") {
       call ??= blank(pid, vendorOf.get(pid) ?? "");
       // A second attempt (no answer, retried) starts the panel over.
-      Object.assign(call, { phase: "dialing", contactSource: e.contact_source, startedAt: e.at, endedAt: null, lines: [], outcome: null });
+      Object.assign(call, { phase: "dialing", contactSource: e.contact_source, startedAt: e.at, endedAt: null, lines: [], outcome: null, finding: findingFromEvent(e) });
       calls.set(pid, call);
       continue;
     }
@@ -62,7 +75,34 @@ export function foldCalls(events: RunEvent[]): CallView[] {
 }
 
 function blank(paymentId: string, vendor: string): CallView {
-  return { paymentId, vendor, phase: "queued", contactSource: null, startedAt: null, endedAt: null, lines: [], outcome: null };
+  return { paymentId, vendor, phase: "queued", contactSource: null, startedAt: null, endedAt: null, lines: [], outcome: null, finding: null };
+}
+
+/** The number check as call.started reports it. Null when the event predates the check (mock runs, old records). */
+function findingFromEvent(e: CallStartedEvent): NumberFinding | null {
+  if (e.source_url === undefined && e.confidence === undefined && e.hold_reasons === undefined) return null;
+  return {
+    found: e.confidence != null && e.confidence !== "low" && e.agreement === "consistent",
+    sourceUrl: e.source_url ?? null,
+    confidence: e.confidence ?? null,
+    agreement: e.agreement ?? null,
+    sourcesAgree: e.sources_agree ?? null,
+    holdReasons: e.hold_reasons ?? [],
+  };
+}
+
+/** The same, from the stored payment record. */
+function findingFromDetail(d: PaymentDetail): NumberFinding | null {
+  const c = d.independent_contact;
+  if (!c) return null;
+  return {
+    found: c.status === "found",
+    sourceUrl: c.source_url,
+    confidence: c.confidence,
+    agreement: c.agreement,
+    sourcesAgree: c.sources_agree,
+    holdReasons: c.hold_reasons.map((h) => h.reason),
+  };
 }
 
 /** The same view from the stored payment record. Null when no call was or will be placed. */
@@ -84,6 +124,7 @@ export function callFromDetail(d: PaymentDetail): CallView | null {
     endedAt: call.outcome ? (ended?.at ?? null) : null,
     lines,
     outcome: call.outcome,
+    finding: findingFromDetail(d),
   };
 }
 

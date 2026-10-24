@@ -691,6 +691,9 @@ export function getMockPaymentDetail(pid: string): PaymentDetail | null {
       approve_blocked_reason: !held ? `payment is ${rec.payment.status}` : quarantined ? "quarantined document: reject it" : current ? null : "the vendor has no verified bank account to pay",
       can_reject: held,
     },
+    // The mock calls the on-file number and runs no website check, so no finding is recorded (as with MOCK_APIFY before
+    // the check existed).
+    independent_contact: null,
   };
 }
 
