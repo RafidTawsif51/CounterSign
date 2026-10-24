@@ -1,9 +1,14 @@
 # Owner: Backend lead
 # Prize track: Hyphenate (the judge is the attacker), Armadin (the bounty), Atlassian
 # Contract:
-#   POST /api/attacks                    launch an attack card: {attacker_name, card, payload} -> 201 {attack_id, message_id, run_id, ...}
+#   POST /api/attacks                    launch an attack card: {attacker_name, source, card, payload} -> 201 {attack_id, message_id, run_id, ...}
+#                                        cards: classic_bank_change, poisoned_invoice, ceo_pressure, freestyle. A PDF (a seed file name or
+#                                        pdf_base64) is accepted on poisoned_invoice and freestyle.
 #   POST /api/bounty/inbound             inbound-email webhook for the Rob Countersign bounty (secret, rate limit, moderation)
-#   GET  /api/attacks/leaderboard        attempts and results (only moderation_status "approved" unless include_pending)
+#   GET  /api/attacks/leaderboard        newest first: handle, source, attack type, result, top reasons, and totals (attempts, unique
+#                                        attackers, sandbox dollars moved). The attack text (subject, sender, body) is included ONLY when
+#                                        moderation_status is approved; hidden rows are left out unless include_hidden. Bounty handles and
+#                                        sender addresses are masked on the screen.
 #   POST /api/attacks/{id}/moderation    approve or hide a row on the leaderboard screen
 #
 # An attack or a bounty email NEVER fails because a payment run is active. Each one gets a mini-run: its own run_id
@@ -34,7 +39,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlmodel import Session, select
 
 from app import events as ev
@@ -195,6 +200,16 @@ def _save_pdf(invoice_id: str, data: bytes) -> str:
     return path.as_posix()
 
 
+def _decode_pdf(data: str) -> bytes:
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "pdf_base64 is not valid base64")
+    if not raw.startswith(b"%PDF-") or len(raw) > MAX_PDF_BYTES:
+        raise HTTPException(422, "pdf_base64 must be a PDF of at most 5 MB")
+    return raw
+
+
 def _read_seed_pdf(name: str) -> bytes:
     path = (SEED_INVOICES / name).resolve()
     if path.parent != SEED_INVOICES.resolve() or not path.is_file():
@@ -221,6 +236,8 @@ def _build(
     attack = Attack(
         attacker_name=attacker_name, source=source, card=card, payload_ref=msg.id,
         moderation_status=ModerationStatus.pending if source == AttackSource.bounty_email else ModerationStatus.approved)
+    attack.detail_json = {"subject": subject, "from_addr": from_addr, "body": body[:4000], "has_pdf": pdf is not None, "amount_usd": inv.amount_usd,
+                          "outcome": "processing", "reasons": [], "paid_usd": 0.0}
     run_id = new_id("run")
     s.add_all([msg, inv, attack, PaymentRun(id=run_id, totals_json={"invoice_count": 1, "kind": "attack", "attack_id": attack.id})])
     actor = AuditActor.system if source == AttackSource.bounty_email else AuditActor.human
@@ -239,7 +256,7 @@ async def _launch(attack: Attack, msg: Message, inv: Invoice, run_id: str) -> di
         raise HTTPException(503, "the attack queue is not running")
     async with _lock:  # one launch at a time, first come first served
         queued, position, waiting_for = _plan()
-        await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=attack.id, attacker_name=attack.attacker_name, source=attack.source, card=attack.card,
+        await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=attack.id, attacker_name=run.public_handle(attack), source=attack.source, card=attack.card,
                                       result=None, moderation_status=attack.moderation_status))
         if queued:
             await ev.emit(ev.AttackQueued(run_id=run_id, attack_id=attack.id, position=position, waiting_for=waiting_for))
@@ -257,6 +274,7 @@ class AttackPayload(BaseModel):
     subject: str = Field(default="(no subject)", min_length=1, max_length=300)
     body: str = Field(max_length=MAX_BODY_CHARS)
     pdf: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,100}\.pdf$")  # a file in backend/seed/invoices
+    pdf_base64: Optional[str] = Field(default=None, max_length=7_500_000)  # or the PDF itself, up to 5 MB
 
     @field_validator("from_addr", "reply_to")
     @classmethod
@@ -282,17 +300,29 @@ class AttackPayload(BaseModel):
         return v.strip()
 
 
+PDF_CARDS = ("poisoned_invoice", "freestyle")
+
+
 class AttackIn(BaseModel):
     attacker_name: str = Field(min_length=1, max_length=80)
-    card: str = Field(pattern=r"^[a-z0-9_]{1,40}$")
+    card: Literal["classic_bank_change", "poisoned_invoice", "ceo_pressure", "freestyle"]
     source: Literal["console", "judge"] = "console"
     payload: AttackPayload
+
+    @model_validator(mode="after")
+    def _pdf_rules(self) -> "AttackIn":
+        p = self.payload
+        if (p.pdf or p.pdf_base64) and self.card not in PDF_CARDS:
+            raise ValueError("only poisoned_invoice and freestyle attacks take a PDF")
+        if p.pdf and p.pdf_base64:
+            raise ValueError("send either pdf or pdf_base64, not both")
+        return self
 
 
 @router.post("/attacks", status_code=201)
 async def launch_attack(body: AttackIn, session: Session = Depends(get_session)) -> dict:
     p = body.payload
-    pdf = _read_seed_pdf(p.pdf) if p.pdf else None
+    pdf = _read_seed_pdf(p.pdf) if p.pdf else _decode_pdf(p.pdf_base64) if p.pdf_base64 else None
     attack, msg, inv, run_id = _build(session, attacker_name=body.attacker_name.strip(), source=AttackSource(body.source), card=body.card, thread_id=p.thread_id,
                                       from_addr=p.from_addr, reply_to=p.reply_to, subject=p.subject, body=p.body, pdf=pdf)
     session.commit()
@@ -377,25 +407,44 @@ async def bounty_inbound(request: Request, session: Session = Depends(get_sessio
 # ---------------------------------------------------------------- leaderboard and moderation
 
 
+mask_handle = run.mask_handle
+
+
+def _mask_addr(addr: str) -> str:
+    return mask_handle(addr) + ("@" + addr.split("@", 1)[1] if "@" in addr else "")
+
+
+def leaderboard_row(a: Attack) -> dict:
+    d = a.detail_json or {}
+    bounty = a.source == AttackSource.bounty_email
+    row = {
+        "id": a.id, "handle": mask_handle(a.attacker_name) if bounty else a.attacker_name, "source": a.source.value, "card": a.card,
+        "result": a.result.value if a.result else None, "outcome": d.get("outcome", "processing"), "top_reasons": d.get("reasons", [])[:3],
+        "amount_usd": d.get("amount_usd"), "paid_usd": d.get("paid_usd", 0.0), "created_at": a.created_at, "moderation_status": a.moderation_status.value,
+        "text": None,
+    }
+    if a.moderation_status == ModerationStatus.approved:  # the attack text is shown only once a person approved it
+        row["text"] = {"subject": d.get("subject"), "from_addr": _mask_addr(d["from_addr"]) if bounty and d.get("from_addr") else d.get("from_addr"),
+                       "body": (d.get("body") or "")[:2000], "has_pdf": d.get("has_pdf", False)}
+    return row
+
+
 @router.get("/attacks/leaderboard")
-def leaderboard(limit: int = Query(100, ge=1, le=500), include_pending: bool = False, session: Session = Depends(get_session)) -> dict:
-    q = select(Attack).order_by(Attack.created_at.desc())
-    if not include_pending:
-        q = q.where(Attack.moderation_status == ModerationStatus.approved)
+def leaderboard(limit: int = Query(100, ge=1, le=500), include_hidden: bool = False, session: Session = Depends(get_session)) -> dict:
+    q = select(Attack).order_by(Attack.created_at.desc(), Attack.id.desc())
+    if not include_hidden:
+        q = q.where(Attack.moderation_status != ModerationStatus.hidden)
     attacks = session.exec(q.limit(limit)).all()
-    status_by_msg = dict(session.exec(select(Invoice.message_id, Payment.status).join(Payment, Payment.invoice_id == Invoice.id)).all())
-    rows = [{
-        "id": a.id, "attacker_name": a.attacker_name, "source": a.source.value, "card": a.card, "result": a.result.value if a.result else None,
-        "created_at": a.created_at, "moderation_status": a.moderation_status.value,
-        "outcome": status_by_msg[a.payload_ref].value if a.payload_ref in status_by_msg else "processing",
-    } for a in attacks]
-    counted = [r for r in rows if r["moderation_status"] == "approved"]
+    rows = [leaderboard_row(a) for a in attacks]
     return {
         "attempts": rows,
-        "totals": {"attempts": len(counted), "caught": sum(r["result"] == "caught" for r in counted), "missed": sum(r["result"] == "missed" for r in counted),
-                   "pending_result": sum(r["result"] is None for r in counted),
-                   "unique_attackers": len({r["attacker_name"] for r in counted}),
-                   "by_card": {c: sum(r["card"] == c for r in counted) for c in sorted({r["card"] for r in counted})}},
+        "totals": {
+            "attempts": len(rows), "unique_attackers": len({a.attacker_name.lower() for a in attacks}),
+            "sandbox_usd_moved": round(sum(r["paid_usd"] or 0.0 for r in rows if r["result"] == "missed"), 2),
+            "caught": sum(r["result"] == "caught" for r in rows), "missed": sum(r["result"] == "missed" for r in rows),
+            "pending_result": sum(r["result"] is None for r in rows),
+            "by_card": {c: sum(r["card"] == c for r in rows) for c in sorted({r["card"] for r in rows})},
+        },
     }
 
 
@@ -417,6 +466,6 @@ async def moderate(attack_id: str, body: ModerationIn, session: Session = Depend
     inv = session.exec(select(Invoice).where(Invoice.message_id == a.payload_ref)).first()
     pay = session.exec(select(Payment).where(Payment.invoice_id == inv.id)).first() if inv else None
     run_id = pay.run_id if pay else None
-    await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=a.id, attacker_name=a.attacker_name, source=a.source, card=a.card, result=a.result,
+    await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=a.id, attacker_name=run.public_handle(a), source=a.source, card=a.card, result=a.result,
                                   moderation_status=a.moderation_status))
     return {"id": a.id, "moderation_status": a.moderation_status.value}

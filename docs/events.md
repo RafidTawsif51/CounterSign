@@ -207,6 +207,18 @@ Not in the spec; this shape is ours. Sent right after `run.completed`.
  "findings": ["Summit Concrete: bank-change email from a lookalike domain, denied on the verification call."]}
 ```
 
+### demo.reset
+
+Not in the spec. `POST /api/demo/reset` rebuilt the seeded state. Leaderboard channel only (no run). Screens should reload everything.
+
+| Field | Type |
+|---|---|
+| kept_leaderboard | bool |
+
+```json
+{"type": "demo.reset", "run_id": null, "kept_leaderboard": false}
+```
+
 ### attack.queued
 
 Not in the spec. An attack or bounty email arrived while a full run (or an earlier attack) was running, so it waits its turn. Sent to the attack's own run channel and to the leaderboard channel, right after the first `attack.logged` (result null). Processing starts with that run's `run.started`.

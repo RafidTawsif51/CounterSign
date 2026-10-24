@@ -149,6 +149,7 @@ class Loaded:
     usual_hours: set[int]
     prior_paid: int
     past_layouts: list[dict]  # layout features of the vendor's past invoices (distinct)
+    bounty: bool = False  # the email came from a bounty hunter: public strings must not show their address
 
 
 def _load(invoice_id: str, run_id: str) -> Loaded:
@@ -182,15 +183,21 @@ def _load(invoice_id: str, run_id: str) -> Loaded:
                         feats = _features(path, pp.stat().st_mtime)
                         if feats and dict(feats) not in past:
                             past.append(dict(feats))
+        bounty = False
+        if inv.message_id:
+            atk = s.exec(select(Attack).where(Attack.payload_ref == inv.message_id)).first()
+            bounty = bool(atk and atk.source == AttackSource.bounty_email)
         s.expunge_all()
-        return Loaded(inv, vendor, msg, pdf, current, phones or [], hist, senders, hours, prior, past)
+        return Loaded(inv, vendor, msg, pdf, current, phones or [], hist, senders, hours, prior, past, bounty)
 
 
 # ---------------------------------------------------------------- writes (one transaction per decision)
 
 
-def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Assessment], status: PaymentStatus) -> Optional[Attack]:
-    """Create or update the leaderboard row for an attack. Held and blocked count as caught."""
+def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Assessment], status: PaymentStatus, amount: Optional[float] = None,
+                reasons: Optional[list[str]] = None) -> Optional[Attack]:
+    """Create or update the leaderboard row for an attack. Held and blocked count as caught, paid counts as missed.
+    The row keeps what the leaderboard shows (attack text, outcome, top reasons, dollars moved)."""
     if msg is None or not (msg.is_attack or fired):
         return None
     result = AttackResult.missed if status == PaymentStatus.paid else AttackResult.caught
@@ -200,6 +207,17 @@ def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Ass
         card = "poisoned_invoice" if fired else "classic_bank_change" if "lookalike_domain" in names else "ceo_pressure" if "urgency_language" in names else "freestyle"
         atk = Attack(attacker_name="Seeded attack", source=AttackSource.console, card=card, payload_ref=msg.id, moderation_status=ModerationStatus.approved)
     atk.result = result
+    snap = dict(atk.detail_json or {})
+    if "body" not in snap:
+        snap.update(subject=msg.subject, from_addr=msg.from_addr, body=msg.body[:4000], has_pdf=False)
+    snap["outcome"] = status.value
+    if amount is not None:
+        snap["amount_usd"] = amount
+        snap["paid_usd"] = amount if status == PaymentStatus.paid else 0.0
+    top = reasons if reasons is not None else ([r[:160] for r in a.reasons[:3]] if a else None)
+    if top is not None:
+        snap["reasons"] = [scrub_emails(r) for r in top] if atk.source == AttackSource.bounty_email else top
+    atk.detail_json = snap  # a new dict, so the JSON column is saved
     s.add(atk)
     return atk
 
@@ -245,7 +263,7 @@ def _commit_decision(
             write_audit("payment", pay.id, "agent", "risk_assessed",
                         {"assessment_id": row.id, "score": a.score, "decision": a.decision.value, "hard_rules_fired": a.hard_rules_fired}, session=s)
         write_audit("payment", pay.id, "agent", status.value, {"reason": reason, "transfer_id": transfer_id}, session=s)
-        atk = _attack_for(s, msg, fired, a, status)
+        atk = _attack_for(s, msg, fired, a, status, amount, [reason[:160]] + [r[:160] for r in (a.reasons if a else [])][:2] if fired else None)
         if atk:
             write_audit("attack", atk.id, "agent", f"attack_{atk.result.value}", {"payment_id": pay.id, "card": atk.card}, session=s)
         s.commit()
@@ -264,7 +282,7 @@ def _release(payment_id: str, run_id: str, transfer_id: Optional[str], status: P
         write_audit("payment", pay.id, "agent", audit_action, {"reason": reason, "transfer_id": transfer_id}, session=s)
         inv = s.get(Invoice, pay.invoice_id)
         msg = s.get(Message, inv.message_id) if inv.message_id else None
-        atk = _attack_for(s, msg, False, None, status) if (msg and msg.is_attack) else None
+        atk = _attack_for(s, msg, False, None, status, pay.amount_usd, [reason[:160]]) if (msg and msg.is_attack) else None
         s.commit()
         if atk:
             s.refresh(atk)
@@ -346,18 +364,48 @@ async def _finish(run_id, payment_id, stats, marks, prelim, status: PaymentStatu
             vendor_name = ""
     stats.notes[payment_id] = reason
     if prelim:
-        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=payment_id, score=prelim[4].score, decision=prelim[4].decision, top_signals=prelim[4].signals[:4]))
+        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=payment_id, score=prelim[4].score, decision=prelim[4].decision, top_signals=_pub_signals(prelim[0], prelim[4].signals[:4])))
     if status == PaymentStatus.paid:
         await ev.emit(ev.PaymentPaid(run_id=run_id, payment_id=payment_id, nessie_transfer_id=transfer_id))
     else:
-        await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=payment_id, reasons=[reason] + (prelim[4].reasons if prelim else [])))
+        await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=payment_id, reasons=_pub_list(prelim[0], [reason] + prelim[4].reasons) if prelim else [reason]))
     if atk:
         await _emit_attack(run_id, atk)
     return status
 
 
+def mask_handle(name: str) -> str:
+    """Public handle: a bounty hunter's email address is never shown in full."""
+    local = name.split("@")[0]
+    return (local[:2] + "***") if len(local) > 2 else "***"
+
+
+_EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def scrub_emails(text: str) -> str:
+    """Mask the mailbox part of every email address: hunter@example.com -> hu***@example.com."""
+    return _EMAIL_IN_TEXT.sub(lambda m: mask_handle(m.group().split("@")[0]) + "@" + m.group().split("@", 1)[1], text)
+
+
+def _pub(ld: "Loaded", text: str) -> str:
+    return scrub_emails(text) if ld.bounty else text
+
+
+def _pub_list(ld: "Loaded", items: list[str]) -> list[str]:
+    return [_pub(ld, x) for x in items]
+
+
+def _pub_signals(ld: "Loaded", signals: list) -> list:
+    return [s.model_copy(update={"detail": scrub_emails(s.detail)}) for s in signals] if ld.bounty else signals
+
+
+def public_handle(atk: Attack) -> str:
+    return mask_handle(atk.attacker_name) if atk.source == AttackSource.bounty_email else atk.attacker_name
+
+
 async def _emit_attack(run_id: str, atk: Attack) -> None:
-    await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=atk.id, attacker_name=atk.attacker_name, source=atk.source, card=atk.card,
+    await ev.emit(ev.AttackLogged(run_id=run_id, attack_id=atk.id, attacker_name=public_handle(atk), source=atk.source, card=atk.card,
                                   result=atk.result, moderation_status=atk.moderation_status))
 
 
@@ -386,7 +434,7 @@ async def _hold_on_error(run_id: str, invoice_id: str, reason: str, stats: Stats
             s.add(Payment(id=pid, run_id=run_id, invoice_id=invoice_id, amount_usd=inv.amount_usd or 0.0, status=PaymentStatus.held))
             write_audit("payment", pid, "agent", "held", {"reason": reason}, session=s)
             msg = s.get(Message, inv.message_id) if inv.message_id else None
-            atk = _attack_for(s, msg, False, None, PaymentStatus.held)  # held counts as caught: an attack that could not move money
+            atk = _attack_for(s, msg, False, None, PaymentStatus.held, inv.amount_usd or 0.0, [reason[:160]])  # held counts as caught: it could not move money
             s.commit()
             if atk:
                 s.refresh(atk)
@@ -477,8 +525,8 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
         for f in findings:
             await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, message_id=None if f.invoice_id else f.message_id,
                                                technique=f.technique, snippet=f.snippet))
-        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=a.signals[:4]))
-        await ev.emit(ev.PaymentBlocked(run_id=run_id, payment_id=pid, reason=reason))
+        await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=_pub_signals(ld, a.signals[:4])))
+        await ev.emit(ev.PaymentBlocked(run_id=run_id, payment_id=pid, reason=_pub(ld, reason)))
         if atk:
             await _emit_attack(run_id, atk)
         return
@@ -498,8 +546,8 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
     for f in findings:  # low-confidence findings are still recorded and shown
         await ev.emit(ev.InjectionDetected(run_id=run_id, invoice_id=f.invoice_id, message_id=None if f.invoice_id else f.message_id,
                                            technique=f.technique, snippet=f.snippet))
-    await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=a.signals[:4]))
-    await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=reasons))
+    await ev.emit(ev.RiskScored(run_id=run_id, payment_id=pid, score=a.score, decision=a.decision, top_signals=_pub_signals(ld, a.signals[:4])))
+    await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=_pub_list(ld, reasons)))
     if atk:
         await _emit_attack(run_id, atk)
     if decision != Decision.hold_and_verify:
@@ -513,7 +561,7 @@ async def _process(run_id: str, invoice_id: str, stats: Stats, marks: dict) -> N
             note = f"verification_unavailable: {type(exc).__name__}"
             _release(pid, run_id, None, PaymentStatus.held, note, "verification_unavailable")
             stats.notes[pid] = note
-            await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=[note] + reasons))
+            await ev.emit(ev.PaymentHeld(run_id=run_id, payment_id=pid, reasons=_pub_list(ld, [note] + reasons)))
             return
 
     if result.outcome == CallOutcome.denied:

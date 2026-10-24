@@ -268,6 +268,10 @@ async def start_verification(payment_id: str, session: Optional[Session] = None)
             session.add(message)
             for atk in session.exec(select(Attack).where(Attack.payload_ref == message.id)):
                 atk.result = AttackResult.caught
+                snap = dict(atk.detail_json or {})
+                snap["outcome"] = "blocked"
+                snap["reasons"] = ["The vendor denied the bank change on the verification call"] + [r for r in snap.get("reasons", [])][:2]
+                atk.detail_json = snap
                 session.add(atk)
         write_audit("payment", payment.id, "agent", "blocked_by_verification", {"call_id": call.id, "outcome": "denied"}, session=session)
     elif outcome == CallOutcome.confirmed:

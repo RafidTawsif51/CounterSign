@@ -139,7 +139,7 @@ def test_a_poisoned_pdf_attack_is_quarantined(env):
 @pytest.mark.parametrize("pdf", ["../../etc/passwd.pdf", "nope.pdf", "/etc/passwd.pdf", "a/b.pdf", "x.exe"])
 def test_pdf_names_cannot_escape_the_seed_folder(env, pdf):
     client, _ = env
-    body = {**CLASSIC, "payload": {**CLASSIC["payload"], "pdf": pdf}}
+    body = {"attacker_name": "x", "card": "poisoned_invoice", "payload": {**CLASSIC["payload"], "pdf": pdf}}
     assert client.post("/api/attacks", json=body).status_code == 422
 
 
@@ -343,16 +343,21 @@ def test_a_bounty_email_goes_through_the_pipeline_pending_moderation(env, bounty
     pay = payment_for(eng, a)
     assert pay.status in (PaymentStatus.blocked, PaymentStatus.held) and pay.nessie_transfer_id is None
     board = client.get("/api/attacks/leaderboard").json()
-    assert board["attempts"] == [] and board["totals"]["attempts"] == 0  # nothing on screen before moderation
-    assert [x["id"] for x in client.get("/api/attacks/leaderboard?include_pending=true").json()["attempts"]] == [a["attack_id"]]
-    m = client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "approved", "moderator": "Dev"})
-    assert m.status_code == 200
+    (row,) = board["attempts"]
+    assert row["moderation_status"] == "pending" and row["text"] is None  # shown as an attempt, but the attack text waits for a person
+    assert row["handle"] == "hu***" and "hunter@example.com" not in str(board)  # the hunter's address is never shown
+    assert row["result"] == "caught" and row["outcome"] in ("blocked", "held") and row["top_reasons"]
+    assert board["totals"]["attempts"] == 1 and board["totals"]["unique_attackers"] == 1
+    assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "approved", "moderator": "Dev"}).status_code == 200
     board = client.get("/api/attacks/leaderboard").json()
-    assert [x["id"] for x in board["attempts"]] == [a["attack_id"]] and board["totals"]["caught"] == 1 and board["attempts"][0]["outcome"] in ("blocked", "held")
+    (row,) = board["attempts"]
+    assert row["text"]["subject"] == "Invoice from Summit Concrete" and "Hunter Bank" in row["text"]["body"] and row["text"]["from_addr"] == "hu***@example.com"
+    assert "hunter@example.com" not in str(board) and "hunter@example.com" not in str(evs(eng, a["run_id"]))  # not in the events either
     logged = [p for ty, _, p in evs(eng, a["run_id"]) if ty == "attack.logged"]
-    assert logged[-1]["moderation_status"] == "approved"
+    assert logged[-1]["moderation_status"] == "approved" and logged[-1]["attacker_name"] == "hu***"
     assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "hidden", "moderator": "Dev"}).status_code == 200
-    assert client.get("/api/attacks/leaderboard").json()["attempts"] == []
+    assert client.get("/api/attacks/leaderboard").json()["attempts"] == []  # hidden rows are left out
+    assert len(client.get("/api/attacks/leaderboard?include_hidden=true").json()["attempts"]) == 1
     assert client.post("/api/attacks/atk_nope/moderation", json={"status": "hidden", "moderator": "Dev"}).status_code == 404
 
 
@@ -419,7 +424,88 @@ def test_leaderboard_totals(env):
     for a in ids:
         wait(client, a["run_id"])
     board = client.get("/api/attacks/leaderboard").json()
-    assert board["totals"] == {"attempts": 4, "caught": 4, "missed": 0, "pending_result": 0, "unique_attackers": 4,
+    assert board["totals"] == {"attempts": 4, "caught": 4, "missed": 0, "pending_result": 0, "unique_attackers": 4, "sandbox_usd_moved": 0.0,
                                "by_card": {"classic_bank_change": 1, "ceo_pressure": 3}}
-    assert board["attempts"][0]["attacker_name"] == "Judge Priya" and {x["outcome"] for x in board["attempts"]} <= {"blocked", "held"}
+    assert board["attempts"][0]["handle"] == "Judge Priya" and {x["outcome"] for x in board["attempts"]} <= {"blocked", "held"}
+    assert [x["created_at"] for x in board["attempts"]] == sorted((x["created_at"] for x in board["attempts"]), reverse=True)  # newest first
+    first = board["attempts"][0]
+    assert first["text"]["subject"] == "Re: Invoice SUM-1253" and "Harborline Bank" in first["text"]["body"]  # console attacks are approved at once
+    assert first["top_reasons"] and any("destination_changed" in r or "verification call" in r for r in first["top_reasons"])
     assert len(client.get("/api/attacks/leaderboard?limit=2").json()["attempts"]) == 2
+
+
+# ================================================================ cards, PDFs, results and dollars
+
+
+@pytest.mark.parametrize("card", ["classic_bank_change", "poisoned_invoice", "ceo_pressure", "freestyle"])
+def test_the_four_cards_are_accepted(env, card):
+    client, _ = env
+    r = client.post("/api/attacks", json={"attacker_name": "x", "card": card, "source": "judge", "payload": CLASSIC["payload"]})
+    assert r.status_code == 201 and set(r.json()) >= {"attack_id", "message_id", "run_id"}
+
+
+@pytest.mark.parametrize("card", ["bounty", "classic", "", "Freestyle", "poisoned"])
+def test_other_cards_are_rejected(env, card):
+    assert env[0].post("/api/attacks", json={"attacker_name": "x", "card": card, "payload": CLASSIC["payload"]}).status_code == 422
+
+
+def test_source_is_console_or_judge(env):
+    client, eng = env
+    a = client.post("/api/attacks", json={**CLASSIC, "source": "judge"}).json()
+    with Session(eng) as s:
+        assert s.get(Attack, a["attack_id"]).source.value == "judge"
+    assert client.post("/api/attacks", json={**CLASSIC, "source": "bounty_email"}).status_code == 422
+
+
+def test_only_the_pdf_cards_take_a_pdf(env):
+    client, _ = env
+    for card in ("classic_bank_change", "ceo_pressure"):
+        r = client.post("/api/attacks", json={"attacker_name": "x", "card": card, "payload": {**CLASSIC["payload"], "pdf": "poisoned_white_text.pdf"}})
+        assert r.status_code == 422
+    ok = client.post("/api/attacks", json={"attacker_name": "x", "card": "freestyle", "payload": {**CLASSIC["payload"], "pdf": "poisoned_white_text.pdf"}})
+    assert ok.status_code == 201
+
+
+def test_poisoned_invoice_accepts_an_uploaded_pdf(env):
+    client, eng = env
+    pdf = (seedmod.PDF_DIR / "poisoned_tiny_font.pdf").read_bytes()
+    payload = {**CLASSIC["payload"], "thread_id": seedmod.PLANTED["poisoned_pdf"]["thread"], "from_addr": "ar@keystonesteel.com", "body": "Attached.",
+               "pdf_base64": base64.b64encode(pdf).decode()}
+    a = client.post("/api/attacks", json={"attacker_name": "Upload Una", "card": "poisoned_invoice", "payload": payload}).json()
+    wait(client, a["run_id"])
+    with Session(eng) as s:
+        inv = s.get(Invoice, a["invoice_id"])
+        assert inv.extracted_json["quarantined"] is True and inv.pdf_path.endswith(f"{inv.id}.pdf")
+        assert s.get(Attack, a["attack_id"]).detail_json["has_pdf"] is True
+    assert payment_for(eng, a).status == PaymentStatus.blocked
+    for bad in ("not base64!!", base64.b64encode(b"hello").decode(), base64.b64encode(b"%PDF-" + b"0" * (5 * 1024 * 1024)).decode()):
+        r = client.post("/api/attacks", json={"attacker_name": "x", "card": "poisoned_invoice", "payload": {**payload, "pdf_base64": bad}})
+        assert r.status_code == 422, bad[:20]
+    both = client.post("/api/attacks", json={"attacker_name": "x", "card": "poisoned_invoice", "payload": {**payload, "pdf": "poisoned_white_text.pdf"}})
+    assert both.status_code == 422
+
+
+def test_an_attack_that_gets_paid_is_missed_and_the_dollars_are_counted(env):
+    client, eng = env
+    benign = {"attacker_name": "Sneaky", "card": "freestyle", "payload": {"thread_id": "thr_summit_0919", "from_addr": "ar@summitconcrete.com", "subject": "Invoice", "body": "Hello, invoice attached."}}
+    a = client.post("/api/attacks", json=benign).json()
+    wait(client, a["run_id"])
+    pay = payment_for(eng, a)
+    assert pay.status == PaymentStatus.paid  # nothing about it is suspicious, so the pipeline pays it
+    with Session(eng) as s:
+        atk = s.get(Attack, a["attack_id"])
+        assert atk.result.value == "missed" and atk.detail_json["outcome"] == "paid" and atk.detail_json["paid_usd"] == pay.amount_usd
+    logged = [p for ty, _, p in evs(eng, a["run_id"]) if ty == "attack.logged"]
+    assert logged[-1]["result"] == "missed"
+    board = client.get("/api/attacks/leaderboard").json()
+    assert board["totals"]["missed"] == 1 and board["totals"]["sandbox_usd_moved"] == pay.amount_usd and board["attempts"][0]["paid_usd"] == pay.amount_usd
+
+
+def test_held_counts_as_caught_and_the_leaderboard_row_survives_in_the_attack_row(env):
+    client, eng = env
+    a = client.post("/api/attacks", json=ceo()).json()
+    wait(client, a["run_id"])
+    with Session(eng) as s:
+        d = s.get(Attack, a["attack_id"]).detail_json
+        assert d["outcome"] == "blocked" and d["paid_usd"] == 0.0 and d["body"].startswith("Maria") and d["reasons"]
+        assert s.get(Attack, a["attack_id"]).result.value == "caught"

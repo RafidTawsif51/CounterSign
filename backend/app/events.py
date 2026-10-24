@@ -139,6 +139,14 @@ class AttackQueued(EventBase):
     waiting_for: Optional[str] = None  # the run it is waiting behind, if any
 
 
+class DemoReset(EventBase):
+    """The demo was reset to the seeded state. Leaderboard channel only: clients should reload everything."""
+
+    type: Literal["demo.reset"] = "demo.reset"
+    run_id: Optional[str] = None
+    kept_leaderboard: bool
+
+
 class PaymentReviewed(EventBase):
     """A person decided a held payment. Followed by payment.paid (approved) or payment.blocked (rejected)."""
 
@@ -200,6 +208,7 @@ EVENT_MODELS: dict[str, type[EventBase]] = {
         PaymentBlocked,
         PaymentReviewed,
         AttackQueued,
+        DemoReset,
         RunCompleted,
         RunReport,
         AttackLogged,
@@ -262,7 +271,7 @@ class Broadcaster:
             log.exception("could not persist event %s", event.type)
         if event.run_id:
             self._publish(event.run_id, msg)
-        if isinstance(event, (AttackLogged, AttackQueued)):
+        if isinstance(event, (AttackLogged, AttackQueued, DemoReset)):
             self._publish(LEADERBOARD, msg)
         return msg
 

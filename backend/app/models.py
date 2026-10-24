@@ -271,6 +271,9 @@ class Attack(SQLModel, table=True):
     moderation_status: ModerationStatus = Field(
         default=ModerationStatus.pending, sa_column=enum_col(ModerationStatus)
     )
+    # What the leaderboard shows, kept on the row so it survives a demo reset that keeps the leaderboard:
+    # subject, from_addr, body, has_pdf, amount_usd, outcome, reasons, paid_usd. Not part of the spec's table.
+    detail_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
 
 class AuditLog(SQLModel, table=True):
