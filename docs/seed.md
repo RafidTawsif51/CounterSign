@@ -52,3 +52,20 @@ Everything is fictional. Phones are `+1415555xxxx` (the 555-01xx fiction range) 
 - Invoice rows for this week already carry `number`, `amount_usd`, `due_date`, `remittance_json` and `pdf_path`; `extracted_json` is null. The mock extractor reproduces the same values from the PDFs (tested), so the payment run can extract or skip.
 - `tests/helpers.py::build_context` shows how to build a `RiskContext` from these rows.
 - Full routing and account numbers exist only inside the generated PDFs. The database holds the hash and last 4.
+
+## Generated documents
+
+`python seed/seed.py` writes 77 PDFs to `backend/seed/invoices/` (gitignored, byte-identical every run), 3 HTML emails to `backend/seed/emails/`, and `demo/attack-cards.md`.
+
+| Files | What |
+|---|---|
+| `inv_NNNN.pdf`, `inv_atk_*.pdf` | This week's 40 open invoices |
+| `inv_NNNN.pdf` (33 of them) | Historical samples: the newest paid invoice of every vendor, plus two more for Summit, Keystone and Northside. They have `invoices.pdf_path` set, and the extraction tests and layout fingerprints use them |
+| `poisoned_white_text.pdf`, `poisoned_tiny_font.pdf`, `poisoned_off_page.pdf`, `poisoned_zero_width.pdf` | Four poisoned invoices on Alder, Bayview, Granite and Tidewater layouts, one hiding technique each. The hidden text tells an AI assistant to update remittance to a new account and approve |
+| `emails/poisoned_html_comment.html`, `poisoned_display_none.html`, `poisoned_same_color.html` | Three poisoned HTML emails |
+
+Layouts: `seed/invoice_pdf.py::layout_for(vendor_key)` gives each vendor its own fonts, logo style, label wording, table column order and footer. Forged invoices (bank change, CEO pressure) use a layout no vendor uses; the planted poisoned invoice copies Keystone's real layout. `app/services/layout.py::fingerprint(pdf)` hashes the structure (ignores amounts, hidden text and zero-width characters), and `layout_changed(pdf, past_fingerprints)` feeds `RiskContext.layout_changed`.
+
+Zero-width technique: the instruction is encoded as zero-width characters (U+200B = 0, U+200C = 1, U+200D = byte boundary) spliced into the footer sentence. The scanner decodes them. A language model will probably not read bit-encoded text, so this variant tests detection more than a realistic attack.
+
+Attack cards: `demo/attack-cards.md` holds the exact `POST /api/attacks` JSON for `classic_bank_change`, `poisoned_invoice`, `ceo_pressure`, three freestyle cards and the three poisoned HTML emails. Extra payload keys beyond the spec example: `reply_to`, `subject`, and `pdf` (the name of a file in `backend/seed/invoices/` that the server attaches). The `/api/attacks` handler must support them.

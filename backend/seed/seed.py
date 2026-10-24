@@ -20,10 +20,8 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from reportlab.lib.colors import white  # noqa: E402
-from reportlab.lib.pagesizes import letter  # noqa: E402
-from reportlab.pdfgen import canvas  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 from sqlmodel import Session, SQLModel  # noqa: E402
 
@@ -46,6 +44,8 @@ from app.models import (  # noqa: E402
 )
 from app.services.contacts import MOCK_PHONE  # noqa: E402
 from app.services.extract import hash_routing  # noqa: E402
+from invoice_pdf import hidden_instruction, layout_for, render_invoice  # noqa: E402
+from poison_emails import html_email  # noqa: E402
 
 SEED = 20261023
 UTC = timezone.utc
@@ -55,6 +55,7 @@ CURRENT_RUN = date(2026, 10, 22)
 HISTORY_START = date(2025, 10, 23)
 SEED_DIR = Path(__file__).resolve().parent
 PDF_DIR = SEED_DIR / "invoices"
+EMAIL_DIR = SEED_DIR / "emails"
 PDF_REL = "seed/invoices"  # stored in invoices.pdf_path, relative to backend/
 
 COMPANY = "Ridgeline Builders"
@@ -218,6 +219,11 @@ class SeedSummary:
     elapsed: float
     pdfs: int
     clean_invoice_ids: list[str] = field(default_factory=list)
+    sample_invoice_ids: list[str] = field(default_factory=list)  # historical invoices that also have a PDF
+    poisoned_pdfs: dict[str, str] = field(default_factory=dict)  # technique -> filename in PDF_DIR
+    poisoned_emails: dict[str, str] = field(default_factory=dict)  # technique -> filename in EMAIL_DIR
+    last_threads: dict[str, str] = field(default_factory=dict)  # vendor key -> latest thread id
+    summit_sept_number: str = ""
 
 
 def _wipe(session: Session, keep_attacks: bool) -> None:
@@ -226,45 +232,6 @@ def _wipe(session: Session, keep_attacks: bool) -> None:
         if keep_attacks and table.name == "attacks":
             continue
         session.execute(table.delete())
-
-
-# ---------------------------------------------------------------- PDFs
-
-
-def make_pdf(v: V, number: str, inv_date: date, due: date, items: list[tuple[str, float]], total: float,
-             bank: str, routing: str, acct: str, hidden: Optional[str] = None) -> bytes:
-    import io
-
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=letter, invariant=1)  # invariant: identical bytes every run (cache keys)
-    lines = [
-        f"Vendor: {v.name}",
-        f"{v.trade.title()} services and supply",
-        f"Bill to: {COMPANY}",
-        f"Invoice #: {number}",
-        f"Invoice date: {inv_date.isoformat()}",
-        f"Due date: {due.isoformat()}",
-        "",
-        *[f"{i + 1}. {d}    ${a:,.2f}" for i, (d, a) in enumerate(items)],
-        "",
-        f"Total due: ${total:,.2f}",
-        "",
-        "Payment instructions",
-        f"Bank: {bank}",
-        f"Routing number: {routing}",
-        f"Account number: {acct}",
-    ]
-    y = 740
-    for line in lines:
-        c.setFont("Helvetica-Bold" if line.startswith(("Vendor", "Total")) else "Helvetica", 12)
-        c.drawString(72, y, line)
-        y -= 20
-    if hidden:  # invisible to a human: white text near the bottom margin
-        c.setFillColor(white)
-        c.setFont("Helvetica", 9)
-        c.drawString(72, 48, hidden)
-    c.save()
-    return buf.getvalue()
 
 
 # ---------------------------------------------------------------- the seed
@@ -381,6 +348,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     run_totals: dict[date, list[float]] = {}
     history_amounts: dict[str, list[float]] = {}
     last_thread: dict[str, str] = {}
+    hist_rec: dict[str, list] = {}
     used_addrs: dict[str, set[str]] = {}
     obs_hours: dict[str, set[int]] = {}
     sept_summit: Optional[Draft] = None
@@ -430,6 +398,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
                       status=PaymentStatus.paid, nessie_transfer_id=f"nes_seed_{n:04d}")
         rows += [msg, inv, pay]
         history_amounts.setdefault(key, []).append(d.amount)
+        hist_rec.setdefault(key, []).append((inv, d, due, a))
 
         if d.trigger:
             contact = f"con_{key}_1"
@@ -554,31 +523,71 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
     rows.append(AuditLog(id="aud_seed", at=ANCHOR, entity="seed", entity_id="countersign", actor=AuditActor.system, action="seeded",
                          detail_json={"seed": SEED, "vendors": len(VENDORS), "history_invoices": len(drafts), "open_invoices": len(current)}))
 
-    session.add_all(rows)
-    session.commit()
-
-    # ---- PDFs for this week's 40 invoices
+    # ---- PDFs: this week's 40, historical samples (for extraction tests and layout fingerprints), poisoned variants
     pdfs = 0
+    samples: list[str] = []
+    poisoned_pdfs: dict[str, str] = {}
+    poisoned_emails: dict[str, str] = {}
     if write_pdfs:
         PDF_DIR.mkdir(parents=True, exist_ok=True)
-        for old in PDF_DIR.glob("*.pdf"):
+        EMAIL_DIR.mkdir(parents=True, exist_ok=True)
+        for old in list(PDF_DIR.glob("*.pdf")) + list(EMAIL_DIR.glob("*.html")):
             old.unlink()
-        pr = random.Random(SEED + 1)
-        for inv_id, _msg, v, day, amount, number, a, hid in current:
-            due = day + timedelta(days=v.terms) if not inv_id.startswith("inv_atk") else (
-                {"inv_atk_bank_change": s_due, "inv_atk_poisoned_pdf": k_due, "inv_atk_ceo_pressure": n_due}[inv_id])
-            items_desc = LINE_ITEMS.get(v.trade, DEFAULT_ITEMS)
-            k = len(items_desc)
-            shares = [pr.uniform(0.2, 0.5) for _ in range(k - 1)]
+
+        def items_for(inv_id: str, v: V, amount: float) -> list[tuple[str, float]]:
+            pr = random.Random(inv_id)
+            descs = LINE_ITEMS.get(v.trade, DEFAULT_ITEMS)
             parts, left = [], amount
-            for s in shares:
-                p = round(left * s, 2)
+            for _ in descs[:-1]:
+                p = round(left * pr.uniform(0.2, 0.5), 2)
                 parts.append(p)
                 left = round(left - p, 2)
             parts.append(round(left, 2))
-            data = make_pdf(v, number, day, due, list(zip(items_desc, parts)), amount, a.row.bank_name, a.routing, a.number, hid)
-            (PDF_DIR / f"{inv_id}.pdf").write_bytes(data)
+            return list(zip(descs, parts))
+
+        def write(name: str, v: V, layout_key: str, number: str, day: date, due: date, amount: float, a: Acct,
+                  hidden: Optional[str] = None, technique: Optional[str] = None, seed_id: Optional[str] = None) -> None:
+            data = render_invoice(
+                layout_for(layout_key, v.trade), vendor=v.name, number=number, inv_date=day, due=due, items=items_for(seed_id or name, v, amount),
+                total=amount, bank=a.row.bank_name, routing=a.routing, account=a.number, hidden=hidden, technique=technique)
+            (PDF_DIR / f"{name}.pdf").write_bytes(data)
+
+        atk_routing, atk_account = "992718460", "5512907781"
+        attack_text = hidden_instruction(atk_routing, atk_account)
+        attacker_layout = {"inv_atk_bank_change": "attacker_a", "inv_atk_ceo_pressure": "attacker_b"}
+        for inv_id, _msg, v, day, amount, number, a, hid in current:
+            due = day + timedelta(days=v.terms) if not inv_id.startswith("inv_atk") else (
+                {"inv_atk_bank_change": s_due, "inv_atk_poisoned_pdf": k_due, "inv_atk_ceo_pressure": n_due}[inv_id])
+            write(inv_id, v, attacker_layout.get(inv_id, v.key), number, day, due, amount, a, hid, "white_text" if hid else None)
             pdfs += 1
+
+        # historical samples: the most recent paid invoice of every vendor, two more for the attacked vendors
+        for v in VENDORS:
+            picks = [hist_rec[v.key][-1]] + ([hist_rec[v.key][-4]] if v.key in ("summit", "keystone", "northside") else [])
+            for inv, d, due, a in picks:
+                inv.pdf_path = f"{PDF_REL}/{inv.id}.pdf"
+                write(inv.id, v, v.key, d.number, d.day, due, d.amount, a)
+                samples.append(inv.id)
+                pdfs += 1
+
+        # four poisoned PDFs, one hiding technique each, on four vendors' real layouts
+        for key, technique in (("alder", "white_text"), ("bayview", "tiny_font"), ("granite", "off_page"), ("tidewater", "zero_width")):
+            v, a = BY_KEY[key], accts[key][-1]
+            number = f"{key[:3].upper()}-9001"
+            write(f"poisoned_{technique}", v, key, number, date(2026, 10, 19), date(2026, 10, 19) + timedelta(days=v.terms),
+                  round(v.base * 0.9, 2), a, attack_text, technique)
+            poisoned_pdfs[technique] = f"poisoned_{technique}.pdf"
+            pdfs += 1
+
+        # three poisoned HTML emails
+        for key, technique in (("alder", "html_comment"), ("bayview", "display_none"), ("granite", "same_color")):
+            v = BY_KEY[key]
+            html = html_email(technique, vendor=v.name, number=f"{key[:3].upper()}-9101", amount=round(v.base * 0.9, 2), terms=v.terms, hidden=attack_text)
+            (EMAIL_DIR / f"poisoned_{technique}.html").write_text(html)
+            poisoned_emails[technique] = f"poisoned_{technique}.html"
+
+    session.add_all(rows)
+    session.commit()
 
     counts = {t.name: session.execute(select(func.count()).select_from(t)).scalar_one() for t in SQLModel.metadata.sorted_tables}
     return SeedSummary(
@@ -588,6 +597,11 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         elapsed=round(time.perf_counter() - started, 2),
         pdfs=pdfs,
         clean_invoice_ids=clean_ids,
+        sample_invoice_ids=samples,
+        poisoned_pdfs=poisoned_pdfs,
+        poisoned_emails=poisoned_emails,
+        last_threads=dict(last_thread),
+        summit_sept_number=sept_summit.number,
     )
 
 
@@ -597,7 +611,10 @@ def main() -> None:
     create_all()
     with Session(engine) as session:
         s = seed_database(session)
-    print(f"Seeded in {s.elapsed}s, {s.pdfs} PDFs in {PDF_DIR}")
+    from attack_cards import write_attack_cards
+
+    cards = write_attack_cards(s)
+    print(f"Seeded in {s.elapsed}s, {s.pdfs} PDFs in {PDF_DIR}, {len(s.poisoned_emails)} poisoned emails in {EMAIL_DIR}, cards in {cards}")
     for name, n in s.counts.items():
         print(f"  {name:22} {n}")
 

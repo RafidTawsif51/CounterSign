@@ -57,14 +57,27 @@ INSTRUCTION_PATTERNS = [
 ]
 _INSTRUCTION_RE = re.compile("|".join(INSTRUCTION_PATTERNS), re.I)
 _ZERO_WIDTH_RE = re.compile("[​-‏⁠﻿‪-‮]+")
+_ZW_PAYLOAD_RE = re.compile("[​‌‍]{16,}")  # 200B = bit 0, 200C = bit 1, 200D = byte boundary
+_BG_RE = re.compile(r"background(?:-color)?\s*:\s*(#[0-9a-f]{3,6}|white|\w+)", re.I)
+_COLOR_RE = re.compile(r"(?<![-\w])color\s*:\s*(#[0-9a-f]{3,6}|white|\w+)", re.I)
 _HTML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.S)
 _HIDDEN_STYLE = r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0|color\s*:\s*(?:#fff(?:fff)?|white)\b"
-_HIDDEN_EL_RE = re.compile(rf"<(\w+)[^>]*style\s*=\s*[\"'][^\"']*(?:{_HIDDEN_STYLE})[^\"']*[\"'][^>]*>(.*?)</\1>", re.S | re.I)
+_HIDDEN_STYLE_RE = re.compile(_HIDDEN_STYLE, re.I)
+_STYLED_OPEN_RE = re.compile(r"<(\w+)\b[^>]*\bstyle\s*=\s*[\"']([^\"']*)[\"'][^>]*>", re.I)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 HIDDEN_WITH_INSTRUCTION = 0.95
 HIDDEN_ONLY = 0.5
+MIN_HIDDEN_CHARS = 4
 VISIBLE_INSTRUCTION = 0.7
+
+
+def _styled_elements(body: str):
+    """Yield (tag, style, inner_text) for every element with a style attribute, nested ones included."""
+    for m in _STYLED_OPEN_RE.finditer(body):
+        close = re.search(rf"</{m.group(1)}\s*>", body[m.end():], re.I)
+        inner = body[m.end(): m.end() + close.start()] if close else ""
+        yield m.group(1), m.group(2), _TAG_RE.sub(" ", inner)
 
 
 def _clip(s: str, n: int = 200) -> str:
@@ -79,6 +92,31 @@ def _is_white(color) -> bool:
     if len(vals) == 4:  # CMYK: all zero is white
         return all(v <= 0.05 for v in vals)
     return len(vals) > 0 and all(v >= 0.95 for v in vals)
+
+
+def _zw_decode(run: str) -> str:
+    """Decode a zero-width bit string back to text; empty if it is not our scheme."""
+    bits, out = "", bytearray()
+    for ch in run:
+        if ch == "‍":
+            if len(bits) == 8:
+                out.append(int(bits, 2))
+            bits = ""
+        else:
+            bits += "0" if ch == "​" else "1"
+    try:
+        return out.decode()
+    except UnicodeDecodeError:
+        return ""
+
+
+def _norm_color(c: str) -> str:
+    c = c.lower()
+    if c == "white":
+        return "#ffffff"
+    if re.fullmatch(r"#[0-9a-f]{3}", c):
+        return "#" + "".join(ch * 2 for ch in c[1:])
+    return c
 
 
 def _hidden_finding(technique: str, text: str) -> Finding:
@@ -98,9 +136,13 @@ class MockScanner:
 
     def _text_findings(self, text: str, already_hidden: bool) -> list[Finding]:
         out: list[Finding] = []
-        for m in _ZERO_WIDTH_RE.finditer(text):
-            out.append(Finding(technique="zero_width", snippet=f"{len(m.group())} zero-width characters", confidence=0.8))
-            break
+        payload = next((_zw_decode(m.group()) for m in _ZW_PAYLOAD_RE.finditer(text) if _zw_decode(m.group())), "")
+        if payload:  # hidden text carried in zero-width characters
+            out.append(_hidden_finding("zero_width", payload))
+        else:
+            for m in _ZERO_WIDTH_RE.finditer(text):
+                out.append(Finding(technique="zero_width", snippet=f"{len(m.group())} zero-width characters", confidence=0.8))
+                break
         if not already_hidden:
             m = _INSTRUCTION_RE.search(text)
             if m:
@@ -122,16 +164,23 @@ class MockScanner:
                         hidden["tiny_font"].append(ch["text"])
                     elif _is_white(ch.get("non_stroking_color")):
                         hidden["white_text"].append(ch["text"])
-        findings = [_hidden_finding(t, "".join(chars)) for t, chars in hidden.items() if "".join(chars).strip()]
+        # A couple of characters touching the page edge is layout noise, not hidden text.
+        findings = [_hidden_finding(t, "".join(chars)) for t, chars in hidden.items() if len("".join(chars).replace(" ", "")) >= MIN_HIDDEN_CHARS]
         return findings + self._text_findings("\n".join(all_text), already_hidden=bool(findings))
 
     def _email(self, item: ScanItem) -> list[Finding]:
         body = item.text or ""
         findings = [_hidden_finding("html_comment", m.group(1)) for m in _HTML_COMMENT_RE.finditer(body) if m.group(1).strip()]
-        for m in _HIDDEN_EL_RE.finditer(body):
-            inner = _TAG_RE.sub(" ", m.group(2))
-            if inner.strip():
+        for tag, style, inner in _styled_elements(body):
+            if tag.lower() != "body" and _HIDDEN_STYLE_RE.search(style) and inner.strip():
                 findings.append(_hidden_finding("hidden_element", inner))
+        # text whose color equals the page background, e.g. <body style="background:#f7f7f7"> ... color:#f7f7f7
+        backgrounds = {_norm_color(m.group(1)) for m in _BG_RE.finditer(body)} | {"#ffffff"}
+        seen = {f.snippet for f in findings}
+        for tag, style, inner in _styled_elements(body):
+            color = _COLOR_RE.search(style)
+            if tag.lower() != "body" and color and _norm_color(color.group(1)) in backgrounds and inner.strip() and _clip(inner) not in seen:
+                findings.append(_hidden_finding("same_color_text", inner))
         return findings + self._text_findings(_TAG_RE.sub(" ", body), already_hidden=bool(findings))
 
 

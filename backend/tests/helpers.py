@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.models import Invoice, Message, Payment, PaymentStatus, Vendor, VendorBankAccount
-from app.services import injection
+from app.services import injection, layout
 from app.services.injection import ScanItem
 from app.services.risk import Destination, RiskContext
 
@@ -29,6 +29,14 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         .where(Invoice.vendor_id == vendor.id, Payment.status == PaymentStatus.paid)
     ).all()
 
+    # past layouts: this vendor's other paid invoices that have a PDF
+    past = session.exec(
+        select(Invoice.pdf_path).join(Payment, Payment.invoice_id == Invoice.id)
+        .where(Invoice.vendor_id == vendor.id, Invoice.pdf_path.is_not(None), Payment.status == PaymentStatus.paid)
+    ).all()
+    past_fps = {layout.fingerprint((BACKEND / pth).read_bytes()) for pth in past}
+    layout_changed = bool(invoice.pdf_path) and layout.layout_changed((BACKEND / invoice.pdf_path).read_bytes(), past_fps)
+
     findings = []
     if invoice.pdf_path:
         findings += injection.scan(ScanItem(kind="pdf", pdf_bytes=(BACKEND / invoice.pdf_path).read_bytes(), invoice_id=invoice.id))
@@ -44,6 +52,7 @@ def build_context(session: Session, invoice: Invoice) -> tuple[Payment, RiskCont
         prior_payment_count=len(paid),
         known_sender_addresses={p[1] for p in paid},
         usual_send_hours={p[2].hour for p in paid},
+        layout_changed=layout_changed,
         injection_findings=findings,
         now=msg.received_at if msg else None or vendor.created_at,
     )

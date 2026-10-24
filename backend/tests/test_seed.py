@@ -178,7 +178,7 @@ def test_this_week_is_40_open_invoices_37_clean_3_attacks(world):
     attacks = s.exec(select(Message).where(Message.is_attack.is_(True))).all()
     assert {m.id for m in attacks} == {p["message"] for p in seedmod.PLANTED.values()}
     assert {i.id for i in opened} - set(summary.clean_invoice_ids) == {p["invoice"] for p in seedmod.PLANTED.values()}
-    assert len(list(seedmod.PDF_DIR.glob("*.pdf"))) == 40
+    assert all((seedmod.PDF_DIR / f"{i.id}.pdf").exists() for i in opened)
     assert s.exec(select(func.count()).select_from(Attack)).one() == 0
 
 
@@ -278,7 +278,7 @@ def test_two_runs_are_identical(tmp_path):
     pb = pdf_hashes()
     assert sa.counts == sb.counts
     assert digest(a) == digest(b)  # same rows, same ids, same values
-    assert pa == pb and len(pa) == 40  # PDF bytes identical, so the extraction cache keeps hitting
+    assert pa == pb and len(pa) == 77  # PDF bytes identical, so the extraction cache keeps hitting
     ids = lambda s, m: sorted(x for x in s.exec(select(m.id)))  # noqa: E731
     assert ids(a, Invoice) == ids(b, Invoice) and ids(a, Payment) == ids(b, Payment)
 
