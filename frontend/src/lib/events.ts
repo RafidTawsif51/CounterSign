@@ -80,7 +80,9 @@ export interface RunEventsState {
 
 /**
  * Every event of one run. Stored events replay first, so connecting late is fine. A reconnect replays the run from the
- * start; events are de-duplicated by id. The stream closes itself after run.report. Pass null for no run.
+ * start; events are de-duplicated by id. Pass null for no run. The stream stays open after run.report (the server keeps
+ * it open too): a controller's approve or reject arrives later on the same run, as payment.reviewed then payment.paid
+ * or payment.blocked. Status stays "complete" from run.report on, except while reconnecting.
  */
 export function useRunEvents(runId: string | null): RunEventsState {
   const [state, setState] = useState<RunEventsState>({ events: [], status: runId ? "connecting" : "idle" });
@@ -94,19 +96,20 @@ export function useRunEvents(runId: string | null): RunEventsState {
 
     const seen = new Set<string>();
     let closed = false;
+    let done = false;
     const close = transport.open(
       runPath(runId),
       (event) => {
         if (closed || seen.has(event.id)) return;
         seen.add(event.id);
-        const done = event.type === "run.report";
+        if (event.type === "run.report") done = true;
         setState((s) => ({ events: [...s.events, event], status: done ? "complete" : "live" }));
-        if (done) {
-          closed = true;
-          queueMicrotask(close);
-        }
       },
-      (status) => !closed && setState((s) => (s.status === status ? s : { ...s, status })),
+      (status) => {
+        if (closed) return;
+        const next = done && status === "live" ? "complete" : status;
+        setState((s) => (s.status === next ? s : { ...s, status: next }));
+      },
     );
 
     return () => {

@@ -146,7 +146,7 @@ function MessageItem({
       {detection && (
         <p className="mx-4 flex flex-wrap items-center gap-x-2 border-t border-rule py-2 text-sm text-blocked-ink">
           <ShieldAlert {...iconProps} />
-          <span className="font-medium">{detection.status === "blocked" ? "Payment blocked" : "Payment held"}:</span>
+          <span className="font-medium">{detectionLabel(detection)}:</span>
           <span>{detection.reason}.</span>
           <Link to={`/payments/${detection.paymentId}`} className="text-accent underline-offset-4 hover:underline">
             Open payment
@@ -191,6 +191,13 @@ function Address({ address, flags, marks }: { address: string; flags: HeaderFlag
       ))}
     </>
   );
+}
+
+/** What happened to the caught payment, in the order it happened. */
+function detectionLabel(d: Detection) {
+  if (d.reviewed?.decision === "approved") return `Held, then approved by ${d.reviewed.by} to the verified account`;
+  if (d.reviewed?.decision === "rejected") return `Held, then rejected by ${d.reviewed.by}`;
+  return d.status === "blocked" ? "Payment blocked" : "Payment held";
 }
 
 const domainKey = (f: HeaderFlag) => f.diff!.fake.map((p) => p.text).join("");

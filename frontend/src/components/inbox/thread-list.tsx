@@ -54,9 +54,10 @@ export function ThreadList({
               {(det || (t.attachment_count ?? 0) > 0) && (
                 <div className="mt-1.5 flex items-center gap-3 text-xs">
                   {det && (
-                    <span className="inline-flex items-center gap-1 font-medium text-blocked-ink" title={det.reason}>
-                      <ShieldAlert {...iconProps} size={14} />
-                      Attack
+                    <span className="inline-flex items-center gap-1" title={det.reviewed ? `${det.reason}. Reviewed by ${det.reviewed.by}.` : det.reason}>
+                      <ShieldAlert {...iconProps} size={14} className="text-blocked-ink" />
+                      <span className="font-medium text-blocked-ink">Attack</span>
+                      {det.reviewed && <span className="text-ink-muted">reviewed</span>}
                     </span>
                   )}
                   {(t.attachment_count ?? 0) > 0 && (

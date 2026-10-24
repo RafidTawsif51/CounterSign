@@ -69,6 +69,8 @@ export interface Detection {
   status: PaymentDetail["payment"]["status"];
   /** Short, evidence-first. */
   reason: string;
+  /** The controller decided the held payment. The attack was still caught: the marker stays, marked reviewed. */
+  reviewed: { decision: "approved" | "rejected"; by: string } | null;
 }
 
 /** What the run caught on this payment, or null if nothing did. Built from the payment record, never the seed's is_attack. */
@@ -83,6 +85,13 @@ export function detectionFor(d: PaymentDetail): Detection | null {
         : d.risk?.hard_rules_fired.includes("destination_changed")
           ? "New bank account, verifying by phone"
           : null;
-  if (!reason || (d.payment.status !== "held" && d.payment.status !== "blocked")) return null;
-  return { paymentId: d.payment.id, messageId: d.message?.id ?? null, status: d.payment.status, reason };
+  // review.py audits the decision as actor human, action approved or rejected, with the approver in the detail.
+  const decided = [...d.audit].reverse().find((a) => a.actor === "human" && (a.action === "approved" || a.action === "rejected"));
+  const reviewed = decided
+    ? { decision: decided.action as "approved" | "rejected", by: typeof decided.detail?.approver === "string" ? decided.detail.approver : "the controller" }
+    : null;
+  // Caught means held or blocked by the run. An approved payment is paid now, but only because a person reviewed the hold.
+  const caught = d.payment.status === "held" || d.payment.status === "blocked" || reviewed !== null;
+  if (!reason || !caught) return null;
+  return { paymentId: d.payment.id, messageId: d.message?.id ?? null, status: d.payment.status, reason, reviewed };
 }

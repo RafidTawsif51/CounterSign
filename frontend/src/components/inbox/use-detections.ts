@@ -21,8 +21,8 @@ export function useDetections(): Map<string, Detection & { threadId: string }> {
     }
     return [...ids].sort();
   }, [events]);
-  // Refetch when the run moves on (a call ending turns "held" into "blocked").
-  const settled = events.filter((e) => e.type === "payment.blocked" || e.type === "call.outcome").length;
+  // Refetch when a payment's state moves on: a call ending turns held into blocked, a controller's review decides it.
+  const settled = events.filter((e) => e.type === "payment.blocked" || e.type === "call.outcome" || e.type === "payment.reviewed").length;
 
   const results = useQueries({
     queries: flagged.map((id) => ({

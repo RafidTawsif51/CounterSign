@@ -139,7 +139,8 @@ function PaymentRow({ row, mountedAt }: { row: BoardRow; mountedAt: number }) {
 function DetailCells({ row }: { row: BoardRow }) {
   const { data, isError } = useQuery({
     // Its own key: the drawer's ["payment", id] refetches on every event, and a row only needs the static fields.
-    queryKey: ["payment-row", row.paymentId],
+    // A review changes where the money went, so it is part of the key.
+    queryKey: ["payment-row", row.paymentId, row.reviewed?.decision ?? null],
     queryFn: () => api.payment(row.paymentId),
     // run.py creates the payment just before risk.scored; asking at invoice.parsed would race it into a 404.
     enabled: row.stage !== "parsed",
@@ -147,7 +148,9 @@ function DetailCells({ row }: { row: BoardRow }) {
     retry: 2,
   });
   const requested = data ? requestedAccount(data) : null;
-  const last4 = row.changedTo ?? requested?.account_last4 ?? data?.payment.last_verified_account?.account_last4 ?? null;
+  // Once paid, show where the money went; before that, the account the invoice asks for.
+  const paidTo = row.status === "paid" ? data?.payment.destination?.account_last4 : null;
+  const last4 = paidTo ?? row.changedTo ?? requested?.account_last4 ?? data?.payment.last_verified_account?.account_last4 ?? null;
   // A row's lookup failing is not worth a retry button in every cell; the drawer has one.
   const missing = isError ? <span title="Could not load from the server">–</span> : <Placeholder w="w-16" />;
 

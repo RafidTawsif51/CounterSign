@@ -21,6 +21,8 @@ export interface BoardRow {
   changedTo: string | null;
   technique: InjectionTechnique | null;
   callOutcome: CallOutcome | null;
+  /** The controller's decision on a held payment, from payment.reviewed. */
+  reviewed: { decision: "approved" | "rejected"; by: string } | null;
   updatedAt: string;
 }
 
@@ -104,6 +106,7 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         changedTo: null,
         technique: null,
         callOutcome: null,
+        reviewed: null,
         updatedAt: e.at,
       });
       continue;
@@ -131,10 +134,23 @@ export function foldBoard(events: RunEvent[], opts: { attack?: boolean } = {}): 
         row.changedTo = bank?.detail.match(/ending (\d{4})/)?.[1] ?? null;
         break;
       }
+      case "payment.reviewed":
+        row.reviewed = { decision: e.decision, by: e.approver };
+        log(
+          e,
+          e.decision === "approved"
+            ? `${e.approver} approved ${money(row)}; it pays the verified account, not the one requested`
+            : `${e.approver} rejected ${money(row)}`,
+          "neutral",
+          row.paymentId,
+        );
+        break;
       case "payment.paid":
         row.status = "paid";
         row.stage = "decided";
-        log(e, `Paid ${money(row)}`, "paid", row.paymentId);
+        // An approved hold pays the verified account (review.py), so the requested change no longer describes the payment.
+        if (row.reviewed?.decision === "approved") row.changedTo = null;
+        if (!row.reviewed) log(e, `Paid ${money(row)}`, "paid", row.paymentId);
         break;
       case "payment.held":
         row.status = "held";
@@ -181,8 +197,9 @@ function blockedBecause(row: BoardRow, reason: string) {
 export function decisionLabel(row: BoardRow): string {
   if (row.stage === "parsed") return row.technique ? "Quarantining" : "Scoring";
   if (row.stage === "calling") return "Calling vendor…";
-  if (row.status === "paid") return row.decision === "auto_pay" || !row.decision ? "Auto-paid" : "Paid after review";
+  if (row.status === "paid") return row.reviewed ? `Approved by ${row.reviewed.by}` : row.decision === "auto_pay" || !row.decision ? "Auto-paid" : "Paid after review";
   if (row.status === "blocked") {
+    if (row.reviewed?.decision === "rejected") return `Rejected by ${row.reviewed.by}`;
     if (row.callOutcome === "denied") return "Denied on call";
     if (row.technique) return "Quarantined";
     return "Blocked";
