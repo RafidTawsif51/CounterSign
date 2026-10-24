@@ -18,7 +18,8 @@ export type AttackResult = "caught" | "missed";
 export type ModerationStatus = "pending" | "approved" | "hidden";
 export type AuditActor = "agent" | "human" | "system";
 export type Speaker = "agent" | "vendor";
-export type AttackCard = "classic_bank_change" | "ai_hijack" | "ceo_pressure" | "freestyle";
+// Card names from demo/attack-cards.md and run.py::_attack_for.
+export type AttackCard = "classic_bank_change" | "poisoned_invoice" | "ceo_pressure" | "freestyle";
 export type InjectionTechnique =
   | "white_text"
   | "tiny_font"
@@ -71,13 +72,14 @@ export interface Message {
   is_attack: boolean;
 }
 
+// vendor_id, number, amount_usd and due_date are null for an uploaded PDF until extraction runs.
 export interface Invoice {
   id: string;
-  vendor_id: string;
+  vendor_id: string | null;
   message_id: string | null;
-  number: string;
-  amount_usd: number;
-  due_date: ISODate;
+  number: string | null;
+  amount_usd: number | null;
+  due_date: ISODate | null;
   remittance_json: Record<string, unknown> | null;
   pdf_path: string | null;
   extracted_json: Record<string, unknown> | null;
@@ -115,12 +117,15 @@ export interface Signal {
   evidence_id: string;
 }
 
+// Hard rules from risk.py. amount_over_max is the spec's "more than 50% above the 12-month max".
+export type HardRule = "destination_changed" | "new_vendor" | "hidden_instructions" | "amount_over_max";
+
 export interface RiskAssessment {
   id: string;
   payment_id: string;
   score: number;
   decision: Decision;
-  hard_rules_fired: string[];
+  hard_rules_fired: (HardRule | string)[];
   signals_json: Signal[];
   model_version: string;
 }
@@ -160,7 +165,7 @@ export interface Attack {
   moderation_status: ModerationStatus;
 }
 
-export interface AuditEntry {
+export interface AuditLogEntry {
   id: string;
   at: ISODateTime;
   entity: string;
@@ -288,7 +293,7 @@ export interface PaymentDetail {
   risk: RiskAssessment | null;
   findings: InjectionFinding[];
   calls: VerificationCall[];
-  audit: AuditEntry[];
+  audit: AuditLogEntry[];
 }
 
 export interface VendorHistory {

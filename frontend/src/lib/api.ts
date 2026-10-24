@@ -1,6 +1,7 @@
 // HTTP client for the FastAPI backend. Routes mirror the API table in CLAUDE.md.
 // With VITE_USE_MOCKS=true every call is answered by lib/mock instead of the network.
 
+import { ApiError } from "@/lib/api-error";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
@@ -20,17 +21,6 @@ import type {
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly path: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
 
 type Method = "GET" | "POST";
 
@@ -58,6 +48,8 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 
 const get = <T>(path: string) => request<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
+
+export { ApiError };
 
 export const api = {
   resetDemo: (keepLeaderboard = false) => post<void>(`/api/demo/reset?keep_leaderboard=${keepLeaderboard}`),

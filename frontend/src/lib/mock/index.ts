@@ -1,7 +1,10 @@
-// Mock backend for VITE_USE_MOCKS=true. Data must stay fictional (Ridgeline Builders and its vendors).
+// Mock backend for VITE_USE_MOCKS=true. Data is fictional and mirrors the backend seed (see seed.ts).
 // Routes that are not mocked yet fail loudly so a screen never silently renders made-up shapes.
 
-import type { RunEvent, SystemComponentStatus } from "@/lib/types";
+import { getMockRun, startMockRun, subscribeMockLeaderboard, subscribeMockRun } from "@/lib/mock/run";
+import { vendors } from "@/lib/mock/seed";
+import { ApiError } from "@/lib/api-error";
+import type { AttackLoggedEvent, RunEvent, StartRunResponse, SystemComponentStatus } from "@/lib/types";
 
 export class MockNotImplementedError extends Error {
   constructor(method: string, path: string) {
@@ -20,20 +23,56 @@ const systemStatus: SystemComponentStatus[] = [
   { name: "Independent phone lookup (Apify)", mode: "mock" },
 ];
 
-type Handler = (body: unknown) => unknown;
+type Handler = (params: Record<string, string>, body: unknown) => unknown;
 
-const routes: Record<string, Handler> = {
-  "GET /api/system/status": () => systemStatus,
-};
+// "METHOD /path/:param" patterns, matched in order.
+const routes: [string, Handler][] = [
+  ["GET /api/system/status", () => systemStatus],
+  ["GET /api/vendors", () => vendors],
+  [
+    "POST /api/payment-runs",
+    (): StartRunResponse => {
+      const run_id = startMockRun();
+      return { run_id, events_url: `/api/payment-runs/${run_id}/events` };
+    },
+  ],
+  [
+    "GET /api/payment-runs/:runId",
+    ({ runId }) => getMockRun(runId) ?? notFound(`/api/payment-runs/${runId}`),
+  ],
+];
 
-export async function mockRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const key = `${method} ${path.split("?")[0]}`;
-  const handler = routes[key];
-  if (!handler) throw new MockNotImplementedError(method, path);
-  return structuredClone(handler(body)) as T;
+function match(pattern: string, method: string, path: string): Record<string, string> | null {
+  const [pMethod, pPath] = pattern.split(" ");
+  if (pMethod !== method) return null;
+  const want = pPath.split("/");
+  const got = path.split("/");
+  if (want.length !== got.length) return null;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < want.length; i++) {
+    if (want[i].startsWith(":")) params[want[i].slice(1)] = decodeURIComponent(got[i]);
+    else if (want[i] !== got[i]) return null;
+  }
+  return params;
 }
 
-export function mockSubscribe(_path: string, _onEvent: (event: RunEvent) => void): () => void {
-  // The mock event player lands with the board. Until then a mock stream is silent.
-  return () => {};
+function notFound(path: string): never {
+  throw new ApiError(404, path, `GET ${path} failed (404): not found`);
+}
+
+export async function mockRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const bare = path.split("?")[0];
+  for (const [pattern, handler] of routes) {
+    const params = match(pattern, method, bare);
+    if (params) return structuredClone(handler(params, body)) as T;
+  }
+  throw new MockNotImplementedError(method, path);
+}
+
+/** Same paths as the real SSE endpoints. */
+export function mockSubscribe(path: string, onEvent: (event: RunEvent) => void): () => void {
+  const run = path.match(/^\/api\/payment-runs\/([^/]+)\/events$/);
+  if (run) return subscribeMockRun(decodeURIComponent(run[1]), onEvent);
+  if (path === "/api/leaderboard/events") return subscribeMockLeaderboard(onEvent as (e: AttackLoggedEvent) => void);
+  throw new MockNotImplementedError("STREAM", path);
 }
