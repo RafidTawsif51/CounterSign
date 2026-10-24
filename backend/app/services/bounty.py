@@ -9,6 +9,7 @@
 #   * Authenticated with BOUNTY_WEBHOOK_SECRET. Postmark does not sign inbound mail, so the secret travels in the webhook URL
 #     (https://anything:SECRET@host/api/bounty/inbound, sent as HTTP Basic auth); the header x-webhook-secret is accepted too.
 #     Anything without the secret is rejected before the body is read; with no secret configured the inbox is closed (503).
+#   * At most BOUNTY_GLOBAL_LIMIT_PER_HOUR (60) accepted submissions per hour across all senders, then 429.
 #   * At most 5 accepted submissions per sender per hour (a +tag or Gmail dots do not make a new sender). Request at most 8 MB,
 #     email text at most 50 KB, PDF attachments only, each at most 5 MB, at most 3 of them.
 #   * Postmark retries a delivery, so a MessageID that was already accepted answers 200 with duplicate: true and creates nothing.
@@ -17,6 +18,7 @@
 #     A vendor named in the email is only a hint, recorded as unverified; money can only ever go to the vendor's verified account,
 #     a changed account triggers a call, and calls only go to numbers on ALLOWED_CALL_NUMBERS. Transfers are Nessie sandbox money.
 #   * Until a moderator approves it, the leaderboard shows only the handle and the result (attacks.leaderboard_row).
+#   The queue and moderation routes need BOUNTY_MODERATOR_TOKEN once the inbox is live (secret set): blank means 503, never open.
 #   Email text, subjects and attachments are untrusted data: render them as text.
 
 import base64
@@ -68,9 +70,12 @@ def require_secret(request: Request) -> None:
 
 
 def require_moderator(request: Request) -> None:
-    """BOUNTY_MODERATOR_TOKEN guards the queue and moderation when it is set (header x-moderator-token). Unset = open, for local dev."""
-    token = get_settings().bounty_moderator_token
-    if token and not hmac.compare_digest(request.headers.get("x-moderator-token", "").encode(), token.encode()):
+    """The queue and moderation need BOUNTY_MODERATOR_TOKEN (header x-moderator-token). Once the inbox is live (BOUNTY_WEBHOOK_SECRET set)
+    a blank token closes these routes with a 503 instead of leaving them open. With no inbox configured (local dev) they stay open."""
+    s = get_settings()
+    if s.bounty_webhook_secret and not s.bounty_moderator_token:
+        raise HTTPException(503, "moderation is not configured (BOUNTY_MODERATOR_TOKEN); the bounty inbox is live, so it stays closed")
+    if s.bounty_moderator_token and not hmac.compare_digest(request.headers.get("x-moderator-token", "").encode(), s.bounty_moderator_token.encode()):
         raise HTTPException(401, "moderator token required")
 
 
@@ -154,8 +159,14 @@ async def bounty_inbound(request: Request, session: Session = Depends(get_sessio
     sender = _sender(data)
     key = sender_key(sender)
     now = utcnow()
-    recent = [a for a in session.exec(select(Attack).where(Attack.source == AttackSource.bounty_email, Attack.created_at >= now - BOUNTY_WINDOW))
-              if sender_key(a.attacker_name) == key]
+    in_window = session.exec(select(Attack).where(Attack.source == AttackSource.bounty_email, Attack.created_at >= now - BOUNTY_WINDOW)).all()
+    cap = get_settings().bounty_global_limit_per_hour
+    if len(in_window) >= cap:  # across all senders
+        oldest_any = min((a.created_at for a in in_window), default=now)
+        retry = max(1, int((oldest_any + BOUNTY_WINDOW - now).total_seconds()))
+        raise HTTPException(429, detail={"error": f"the bounty inbox accepts at most {cap} submissions per hour in total", "retry_after_seconds": retry},
+                            headers={"Retry-After": str(retry)})
+    recent = [a for a in in_window if sender_key(a.attacker_name) == key]
     if len(recent) >= BOUNTY_LIMIT:
         oldest = min(a.created_at for a in recent)
         retry = max(1, int((oldest + BOUNTY_WINDOW - now).total_seconds()))

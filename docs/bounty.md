@@ -5,7 +5,7 @@ Source: `backend/app/services/bounty.py`. Provider: Postmark inbound email.
 ## Setup
 
 1. In Postmark, set the inbound webhook URL of the inbound stream to `https://anything:<BOUNTY_WEBHOOK_SECRET>@<backend host>/api/bounty/inbound`. Postmark does not sign inbound mail; it sends the URL's credentials as HTTP Basic auth, and the password is the secret. (`x-webhook-secret: <secret>` also works, for a forwarder or curl.)
-2. Set `BOUNTY_WEBHOOK_SECRET` (the inbox is closed with a 503 while it is blank). Set `BOUNTY_MODERATOR_TOKEN` to protect the queue and moderation routes with the header `x-moderator-token`; blank leaves them open (local dev only).
+2. Set `BOUNTY_WEBHOOK_SECRET` (the inbox is closed with a 503 while it is blank). Set `BOUNTY_MODERATOR_TOKEN`: the queue and moderation routes need it as the header `x-moderator-token`, and they answer 503 while it is blank once the secret is set. `BOUNTY_GLOBAL_LIMIT_PER_HOUR` (default 60) caps accepted submissions per hour across all senders.
 3. Do not advertise the address until the organizers have said yes (#ask-directors).
 
 ## `POST /api/bounty/inbound`
@@ -13,6 +13,7 @@ Source: `backend/app/services/bounty.py`. Provider: Postmark inbound email.
 | Rule | Behavior |
 |---|---|
 | No or wrong secret | 401, nothing read, nothing stored |
+| Global cap | `BOUNTY_GLOBAL_LIMIT_PER_HOUR` (60) accepted per hour across all senders, then 429 with `Retry-After` |
 | Rate limit | 5 accepted per sender per hour, else 429 with `Retry-After`. `+tags` and Gmail dots count as the same sender |
 | Size | request at most 8 MB (413); email text at most 50 KB (413) |
 | Attachments | PDF only, judged by content type and the `%PDF-` bytes (415); each at most 5 MB, at most 3 (413). One bad file rejects the email |

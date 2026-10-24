@@ -384,7 +384,14 @@ class ModerationIn(BaseModel):
     moderator: str = Field(min_length=1, max_length=100)
 
 
-@router.post("/attacks/{attack_id}/moderation")
+def _moderator_guard(request: Request) -> None:
+    """Same guard as the /bounty/{id}/moderate route: this older route must not be a way around the moderator token."""
+    from app.services import bounty  # lazy: bounty imports this module
+
+    bounty.require_moderator(request)
+
+
+@router.post("/attacks/{attack_id}/moderation", dependencies=[Depends(_moderator_guard)])
 async def moderate(attack_id: str, body: ModerationIn, session: Session = Depends(get_session)) -> dict:
     a = session.get(Attack, attack_id)
     if a is None:

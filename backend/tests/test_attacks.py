@@ -304,11 +304,12 @@ def test_a_crashing_attack_run_does_not_stop_the_queue(env, monkeypatch):
 
 
 SECRET = "s3cret"
+MOD = {"x-moderator-token": "mod-token"}
 
 
 @pytest.fixture()
 def bounty(monkeypatch):
-    s = Settings(bounty_webhook_secret=SECRET)
+    s = Settings(bounty_webhook_secret=SECRET, bounty_moderator_token="mod-token")
     monkeypatch.setattr(bounty_mod, "get_settings", lambda: s)
     return {"x-webhook-secret": SECRET}
 
@@ -348,17 +349,17 @@ def test_a_bounty_email_goes_through_the_pipeline_pending_moderation(env, bounty
     assert row["handle"] == "hu***" and "hunter@example.com" not in str(board)  # the hunter's address is never shown
     assert row["result"] == "caught" and row["outcome"] is None and row["top_reasons"] == [] and row["amount_usd"] is None  # only the handle and the result until approved
     assert board["totals"]["attempts"] == 1 and board["totals"]["unique_attackers"] == 1
-    assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "approved", "moderator": "Dev"}).status_code == 200
+    assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "approved", "moderator": "Dev"}, headers=MOD).status_code == 200
     board = client.get("/api/attacks/leaderboard").json()
     (row,) = board["attempts"]
     assert row["text"]["subject"] == "Invoice from Summit Concrete" and "Hunter Bank" in row["text"]["body"] and row["text"]["from_addr"] == "hu***@example.com"
     assert "hunter@example.com" not in str(board) and "hunter@example.com" not in str(evs(eng, a["run_id"]))  # not in the events either
     logged = [p for ty, _, p in evs(eng, a["run_id"]) if ty == "attack.logged"]
     assert logged[-1]["moderation_status"] == "approved" and logged[-1]["attacker_name"] == "hu***"
-    assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "hidden", "moderator": "Dev"}).status_code == 200
+    assert client.post(f"/api/attacks/{a['attack_id']}/moderation", json={"status": "hidden", "moderator": "Dev"}, headers=MOD).status_code == 200
     assert client.get("/api/attacks/leaderboard").json()["attempts"] == []  # hidden rows are left out
     assert len(client.get("/api/attacks/leaderboard?include_hidden=true").json()["attempts"]) == 1
-    assert client.post("/api/attacks/atk_nope/moderation", json={"status": "hidden", "moderator": "Dev"}).status_code == 404
+    assert client.post("/api/attacks/atk_nope/moderation", json={"status": "hidden", "moderator": "Dev"}, headers=MOD).status_code == 404
 
 
 def test_bounty_rate_limit_is_five_per_sender_per_hour(env, bounty):

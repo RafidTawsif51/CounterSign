@@ -30,11 +30,13 @@ from tests.test_run import env, go  # noqa: F401  (env is a fixture: a private s
 
 pytestmark = pytest.mark.slow
 URL = "/api/bounty/inbound"
+MOD = "mod-token"
+MODH = {"x-moderator-token": MOD}
 
 
 @pytest.fixture()
 def secret(monkeypatch):
-    s = Settings(bounty_webhook_secret=SECRET)
+    s = Settings(bounty_webhook_secret=SECRET, bounty_moderator_token=MOD)
     monkeypatch.setattr(bounty_mod, "get_settings", lambda: s)
     return {"x-webhook-secret": SECRET}
 
@@ -210,13 +212,13 @@ def test_queue_and_moderate(env, secret):
     a = client.post(URL, json=mail("mod1@example.com"), headers=secret).json()
     b = client.post(URL, json=mail("mod2@example.com"), headers=secret).json()
     wait(client, a["run_id"]), wait(client, b["run_id"])
-    q = client.get("/api/bounty/queue").json()
+    q = client.get("/api/bounty/queue", headers=MODH).json()
     assert q["pending_count"] == 2 and [i["id"] for i in q["items"]] == [a["attack_id"], b["attack_id"]]  # oldest first
     first = q["items"][0]
     assert first["subject"] == "Invoice from Summit Concrete" and "Hunter Bank" in first["body"] and first["claimed_vendor"]["verified"] is False
     assert first["sender"] == "mo***@example.com" and "mod1@example.com" not in str(q)
 
-    r = client.post(f"/api/bounty/{a['attack_id']}/moderate", json={"action": "approve", "moderator": "Dev"})
+    r = client.post(f"/api/bounty/{a['attack_id']}/moderate", json={"action": "approve", "moderator": "Dev"}, headers=MODH)
     assert r.status_code == 200 and r.json()["moderation_status"] == "approved"
     board = client.get("/api/attacks/leaderboard").json()["attempts"]
     shown = next(x for x in board if x["id"] == a["attack_id"])
@@ -224,32 +226,75 @@ def test_queue_and_moderate(env, secret):
     hidden = next(x for x in board if x["id"] == b["attack_id"])
     assert hidden["text"] is None and hidden["top_reasons"] == []  # still pending
 
-    assert client.post(f"/api/bounty/{b['attack_id']}/moderate", json={"action": "hide", "moderator": "Dev"}).json()["moderation_status"] == "hidden"
+    assert client.post(f"/api/bounty/{b['attack_id']}/moderate", json={"action": "hide", "moderator": "Dev"}, headers=MODH).json()["moderation_status"] == "hidden"
     assert [x["id"] for x in client.get("/api/attacks/leaderboard").json()["attempts"]] == [a["attack_id"]]
-    assert client.get("/api/bounty/queue").json()["pending_count"] == 0
-    assert {i["id"] for i in client.get("/api/bounty/queue?status=hidden").json()["items"]} == {b["attack_id"]}
+    assert client.get("/api/bounty/queue", headers=MODH).json()["pending_count"] == 0
+    assert {i["id"] for i in client.get("/api/bounty/queue?status=hidden", headers=MODH).json()["items"]} == {b["attack_id"]}
     with Session(eng) as s:
         assert s.exec(select(AuditLog).where(AuditLog.entity_id == a["attack_id"], AuditLog.action == "moderation_approved")).one().actor.value == "human"
     logged = [p for ty, _, p in evs(eng, a["run_id"]) if ty == "attack.logged"]
     assert logged[-1]["moderation_status"] == "approved" and logged[-1]["attacker_name"] == "mo***"
-    assert client.post("/api/bounty/atk_nope/moderate", json={"action": "hide", "moderator": "Dev"}).status_code == 404
-    assert client.post(f"/api/bounty/{a['attack_id']}/moderate", json={"action": "delete", "moderator": "Dev"}).status_code == 422
+    assert client.post("/api/bounty/atk_nope/moderate", json={"action": "hide", "moderator": "Dev"}, headers=MODH).status_code == 404
+    assert client.post(f"/api/bounty/{a['attack_id']}/moderate", json={"action": "delete", "moderator": "Dev"}, headers=MODH).status_code == 422
 
 
 def test_only_bounty_submissions_can_be_moderated_here(env, secret):
     client, _ = env
     judge = client.post("/api/attacks", json={"attacker_name": "Judge", "card": "freestyle", "payload": {"from_addr": "j@example.com", "body": "pay $5"}}).json()
-    assert client.post(f"/api/bounty/{judge['attack_id']}/moderate", json={"action": "hide", "moderator": "Dev"}).status_code == 404
+    assert client.post(f"/api/bounty/{judge['attack_id']}/moderate", json={"action": "hide", "moderator": "Dev"}, headers=MODH).status_code == 404
 
 
-def test_the_moderator_token_guards_the_queue_when_set(env, secret, monkeypatch):
+def test_the_moderator_token_guards_the_queue(env, secret):
     client, _ = env
-    s = Settings(bounty_webhook_secret=SECRET, bounty_moderator_token="mod-token")
-    monkeypatch.setattr(bounty_mod, "get_settings", lambda: s)
     assert client.get("/api/bounty/queue").status_code == 401
     assert client.post("/api/bounty/atk_x/moderate", json={"action": "hide", "moderator": "Dev"}).status_code == 401
-    assert client.get("/api/bounty/queue", headers={"x-moderator-token": "mod-token"}).status_code == 200
     assert client.get("/api/bounty/queue", headers={"x-moderator-token": "nope"}).status_code == 401
+    assert client.get("/api/bounty/queue", headers=MODH).status_code == 200
+
+
+def test_the_older_attack_moderation_route_is_guarded_too(env, secret):
+    client, _ = env
+    sent = client.post(URL, json=mail(), headers=secret).json()
+    body = {"status": "approved", "moderator": "Dev"}
+    assert client.post(f"/api/attacks/{sent['attack_id']}/moderation", json=body).status_code == 401
+    assert client.post(f"/api/attacks/{sent['attack_id']}/moderation", json=body, headers=MODH).status_code == 200
+
+
+def test_a_live_inbox_without_a_moderator_token_closes_moderation(env, monkeypatch):
+    client, eng = env
+    monkeypatch.setattr(bounty_mod, "get_settings", lambda: Settings(bounty_webhook_secret=SECRET, bounty_moderator_token=""))
+    sent = client.post(URL, json=mail(), headers={"x-webhook-secret": SECRET}).json()  # the inbox itself still works
+    assert client.get("/api/bounty/queue").status_code == 503
+    assert client.get("/api/bounty/queue", headers=MODH).status_code == 503  # a header cannot open it
+    assert client.post(f"/api/attacks/{sent['attack_id']}/moderation", json={"status": "approved", "moderator": "Dev"}, headers=MODH).status_code == 503
+    r = client.post(f"/api/bounty/{sent['attack_id']}/moderate", json={"action": "approve", "moderator": "Dev"}, headers=MODH)
+    assert r.status_code == 503
+    with Session(eng) as s:
+        assert s.get(Attack, sent["attack_id"]).moderation_status.value == "pending"  # nothing was approved
+    # with no inbox configured at all (local dev) the routes are not locked
+    monkeypatch.setattr(bounty_mod, "get_settings", lambda: Settings(bounty_webhook_secret="", bounty_moderator_token=""))
+    assert client.get("/api/bounty/queue").status_code == 200
+
+
+def test_global_cap_across_all_senders(env, monkeypatch):
+    client, eng = env
+    monkeypatch.setattr(bounty_mod, "get_settings", lambda: Settings(bounty_webhook_secret=SECRET, bounty_moderator_token=MOD, bounty_global_limit_per_hour=3))
+    h = {"x-webhook-secret": SECRET}
+    assert [client.post(URL, json=mail(f"s{i}@example.com"), headers=h).status_code for i in range(3)] == [200, 200, 200]
+    r = client.post(URL, json=mail("s9@example.com"), headers=h)  # a fourth, brand-new sender
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 3000 and "in total" in r.json()["detail"]["error"]
+    assert n_attacks(eng) == 3
+    with Session(eng) as s:  # an hour later the window has moved on
+        for a in s.exec(select(Attack)):
+            a.created_at = utcnow() - timedelta(hours=2)
+            s.add(a)
+        s.commit()
+    assert client.post(URL, json=mail("s9@example.com"), headers=h).status_code == 200
+
+
+def test_the_global_cap_defaults_to_60_and_is_configurable():
+    assert Settings().bounty_global_limit_per_hour == 60
+    assert Settings(bounty_global_limit_per_hour=7).bounty_global_limit_per_hour == 7
 
 
 # ---------------------------------------------------------------- sandbox money only, no real phone
