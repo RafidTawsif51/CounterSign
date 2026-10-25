@@ -30,6 +30,7 @@ twilio>=9
 cartesia>=2
 deepgram-sdk>=3
 apify-client==3.3.0
+mcp>=2.3,<3          # read-only auditor MCP server (app/mcp_server.py)
 
 # Tests
 pytest>=8
