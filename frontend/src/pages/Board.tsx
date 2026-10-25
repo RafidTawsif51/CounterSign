@@ -113,7 +113,7 @@ function StartPrompt({ starting, onStart }: { starting: boolean; onStart: () => 
       <p className="text-base">This week's 40 open invoices for Ridgeline Builders are ready to pay.</p>
       <Button variant="primary" onClick={onStart} disabled={starting}>
         <Play {...iconProps} />
-        Start payment run
+        {starting ? "Starting run…" : "Start payment run"}
       </Button>
     </div>
   );
