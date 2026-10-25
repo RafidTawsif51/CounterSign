@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/shared/app-shell";
+import { About } from "@/pages/About";
 import { AttackConsole } from "@/pages/AttackConsole";
 import { Board } from "@/pages/Board";
 import { DesignCheck } from "@/pages/DesignCheck";
@@ -24,6 +25,8 @@ export function App() {
           <Route path="/status" element={<SystemStatus />} />
           <Route path="*" element={<NotFound />} />
         </Route>
+        {/* Full screen, no shell: the project page for judges and sponsors (DESIGN.md, Project page). */}
+        <Route path="/about" element={<About />} />
         {/* Full screen, no shell: second display. */}
         <Route path="/leaderboard" element={<Leaderboard />} />
         {/* A developer page: the design tokens rendered. Not in the product build. */}

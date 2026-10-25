@@ -256,6 +256,7 @@ React, Vite and TypeScript with Tailwind CSS, in `frontend/`. `frontend/DESIGN.m
 | `/leaderboard` | Rob Countersign leaderboard for the second screen, always dark; `?tv=1` for the TV |
 | `/red-team` | Red-team results: catch rate by attack family, baseline agent against Countersign |
 | `/status` | System status: what is real, sandboxed or simulated, and how we know |
+| `/about` | About Countersign: the project page for judges and sponsors, with the real call, how it works, the proof, defenses, auditor access, sponsors and limits, and links into every screen |
 
 ### Run and build
 

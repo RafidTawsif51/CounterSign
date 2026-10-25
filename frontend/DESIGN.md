@@ -18,7 +18,7 @@ These are hard rules. A screen that breaks one is not done.
 
 - No purple or blue gradients. No gradient text. No glassmorphism, backdrop blur, glow effects or blurred blobs.
 - No emoji as icons. No sparkle icons for AI. AI output is labeled by what it did ("Held by risk check"), not decorated.
-- No hero sections or marketing copy inside the app.
+- No hero sections or marketing copy inside the app. The one exception is the project page at `/about`, outside the app shell; see Project page.
 - No cards inside cards inside cards. Prefer tables, lists and hairline dividers. One panel level, maximum.
 - No "Welcome back!" or similar fluff. No lorem ipsum. No generic placeholders ("Item 1", "John Doe", "Acme"). All copy is specific to AP work and uses the demo data (Ridgeline Builders, its vendors, Maria, Dev).
 - No centered-everything layouts. Content is left-aligned on a grid. Numbers are right-aligned.
@@ -147,6 +147,17 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `CallStrip` | `call/call-strip.tsx` | Compact call for the board's activity rail: vendor, masked number, timer, last line, outcome. |
 
 Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four only), `formatRelativeTime`, `formatScore`. Never format money, accounts or scores inline.
+
+## Project page
+
+`/about` (`pages/About.tsx`) is the one page for a judge or sponsor who arrives without a guide. It sits outside the app shell, like the leaderboard, and links into every screen. It explains; it does not sell. Same tokens, type, hairlines and tables as the app, in light.
+
+- Opens with one statement in `text-xl` (the pitch line) and three sentences on what Countersign is and who it is for, then the three ways in: "Try to rob us" (primary), "Open the payment run", "Leaderboard". No hero image, no illustration.
+- A section index sits under the title bar on one hairline row: plain links to in-page anchors, scrolling sideways on a phone. Sections are separated by hairlines and headed in `text-md`.
+- Facts are tables and lists, not card grids. The one headline figure is "$0 lost to scammers" in the red-team section (`text-2xl`, mono). Every number on the page is one we measured and says where it came from.
+- The real call is shown as a ledger: elapsed time in mono, right-aligned, one row per step, ending in the payment's status badge.
+- Real vs simulated comes from `GET /api/system/status`, falling back to the documented list, labeled as such.
+- Still never: gradients, glass, blobs, shadows, centered layouts, pills, emoji, animation on load or on scroll.
 
 ## Motion
 
