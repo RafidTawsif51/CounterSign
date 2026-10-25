@@ -2,7 +2,7 @@
 // See DESIGN.md, Project page. Every number here was measured; each section says where it came from.
 
 import { useQuery } from "@tanstack/react-query";
-import { Banknote, Crosshair, ExternalLink, ListOrdered } from "lucide-react";
+import { Banknote, Crosshair, ExternalLink, FileText, Fingerprint, Gauge, Globe, ListOrdered, type LucideIcon, MessageSquareText, Phone, ScanSearch } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +11,11 @@ import { CountersignMark } from "@/components/shared/countersign-mark";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TableOfContents, useActiveSection, useScrollToSection } from "@/components/shared/table-of-contents";
 import { api } from "@/lib/api";
 import { DOCUMENTED_STATUS, MODE_LABEL } from "@/lib/system-status";
 import type { SystemComponentStatus } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const REPO = "https://github.com/aayushswami123/Countersign";
 
@@ -38,15 +40,15 @@ const CALL: { t: string; step: string; detail: ReactNode; by: string }[] = [
   { t: "31.5", step: "Vendor answered", detail: <>"No, we never changed banks."</>, by: "Twilio speech, Claude" },
 ];
 
-const STEPS: { step: string; what: string; by: string }[] = [
-  { step: "Read", what: "Every invoice PDF and vendor email is read into one fixed form: vendor, amount, due date, remittance. The document is data, never instructions.", by: "Claude Sonnet 5.5" },
-  { step: "Scan", what: "White text, tiny fonts, text off the page, zero-width characters and hidden HTML are found in code; a classifier flags text that gives orders to an AI.", by: "Our code, Claude Haiku 5.5" },
-  { step: "Score", what: "Hard rules always hold: new bank account, new vendor, hidden instructions, changed contacts, 30% over the vendor's 12-month maximum. Weighted signals cover the rest.", by: "Risk engine" },
-  { step: "Find the number", what: "For a changed account, the vendor's phone number is read from the vendor's own website, with the page as proof.", by: "Apify" },
-  { step: "Check identity", what: "Reverse phone, email risk and identity verification on the vendor and on whoever asked for the change. A failed check keeps the money held even after a yes.", by: "CRS" },
-  { step: "Call", what: "An automated, disclosed call asks one question. Denied blocks the payment; confirmed saves the new account as verified; anything else goes to the controller.", by: "Twilio, Cartesia" },
-  { step: "Pay", what: "Only verified destinations are paid, through two independent guards that re-read the account right before money moves.", by: "Capital One Nessie" },
-  { step: "Explain", what: "Every decision is in the audit log, and Ask answers why a payment was paid, held or blocked, citing stored evidence.", by: "Claude Haiku 5.5" },
+const STEPS: { step: string; icon: LucideIcon; what: string; by: string }[] = [
+  { step: "Read", icon: FileText, what: "Every invoice PDF and vendor email is read into one fixed form: vendor, amount, due date, remittance. The document is data, never instructions.", by: "Claude Sonnet 5.5" },
+  { step: "Scan", icon: ScanSearch, what: "White text, tiny fonts, text off the page, zero-width characters and hidden HTML are found in code; a classifier flags text that gives orders to an AI.", by: "Our code, Claude Haiku 5.5" },
+  { step: "Score", icon: Gauge, what: "Hard rules always hold: new bank account, new vendor, hidden instructions, changed contacts, 30% over the vendor's 12-month maximum. Weighted signals cover the rest.", by: "Risk engine" },
+  { step: "Find the number", icon: Globe, what: "For a changed account, the vendor's phone number is read from the vendor's own website, with the page as proof.", by: "Apify" },
+  { step: "Check identity", icon: Fingerprint, what: "Reverse phone, email risk and identity verification on the vendor and on whoever asked for the change. A failed check keeps the money held even after a yes.", by: "CRS" },
+  { step: "Call", icon: Phone, what: "An automated, disclosed call asks one question. Denied blocks the payment; confirmed saves the new account as verified; anything else goes to the controller.", by: "Twilio, Cartesia" },
+  { step: "Pay", icon: Banknote, what: "Only verified destinations are paid, through two independent guards that re-read the account right before money moves.", by: "Capital One Nessie" },
+  { step: "Explain", icon: MessageSquareText, what: "Every decision is in the audit log, and Ask answers why a payment was paid, held or blocked, citing stored evidence.", by: "Claude Haiku 5.5" },
 ];
 
 const ATTACKS: { name: string; does: string; caught: string; to: string }[] = [
@@ -92,6 +94,8 @@ const LIMITS = [
 ];
 
 export function About() {
+  const active = useActiveSection(SECTIONS.map((s) => s.id));
+  const go = useScrollToSection();
   return (
     <div className="min-h-screen bg-paper text-ink">
       <header className="sticky top-0 z-10 border-b border-rule bg-paper">
@@ -108,10 +112,22 @@ export function About() {
             </Button>
           </div>
         </div>
-        <nav aria-label="Sections" className="border-t border-rule">
+        <nav aria-label="Sections" className="border-t border-rule lg:hidden">
           <div className="mx-auto flex max-w-[1120px] gap-5 overflow-x-auto px-4 sm:px-6">
             {SECTIONS.map((s) => (
-              <a key={s.id} href={`#${s.id}`} className="whitespace-nowrap py-2 text-sm text-ink-muted hover:text-ink">
+              <a
+                key={s.id}
+                href={`#${s.id}`}
+                aria-current={active === s.id ? "location" : undefined}
+                onClick={(e) => {
+                  e.preventDefault();
+                  go(s.id);
+                }}
+                className={cn(
+                  "-mb-px whitespace-nowrap border-b-2 py-2 text-sm transition-colors",
+                  active === s.id ? "border-accent text-ink" : "border-transparent text-ink-muted hover:text-ink",
+                )}
+              >
                 {s.label}
               </a>
             ))}
@@ -148,6 +164,15 @@ export function About() {
           </dl>
         </section>
 
+        <div className="lg:grid lg:grid-cols-[176px_minmax(0,1fr)] lg:gap-10">
+          <aside className="hidden lg:block">
+            <TableOfContents
+              className="sticky top-20 pt-10"
+              items={SECTIONS.map((s) => ({ id: s.id, title: s.label }))}
+              active={active}
+            />
+          </aside>
+          <div className="min-w-0">
         <Section id="moment" title="The moment" lead="A real call from our rehearsal on Oct 24, every service live. A judge sends the classic scam; the vendor answers on a real phone.">
           <div className="relative overflow-x-auto rounded-lg border border-rule bg-surface">
             <table className="w-full min-w-[640px] text-left">
@@ -186,16 +211,7 @@ export function About() {
         </Section>
 
         <Section id="how" title="How it works" lead="One payment's journey, and the service behind each step.">
-          <ol className="divide-y divide-rule rounded-lg border border-rule bg-surface">
-            {STEPS.map((s, i) => (
-              <li key={s.step} className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[32px_160px_minmax(0,1fr)_200px] sm:gap-4">
-                <span className="figure text-ink-muted">{i + 1}</span>
-                <span className="font-medium">{s.step}</span>
-                <span>{s.what}</span>
-                <span className="text-sm text-ink-muted sm:text-right">{s.by}</span>
-              </li>
-            ))}
-          </ol>
+          <StepRail />
         </Section>
 
         <Section id="attacks" title="Attacks it stops" lead="The four cards on the attack console. Every attempt runs through the same pipeline as a real invoice and lands on the leaderboard.">
@@ -342,8 +358,33 @@ export function About() {
           <Link to="/status" className="text-accent hover:underline">System status</Link>
           <a href={REPO} target="_blank" rel="noreferrer" className="text-accent hover:underline">Source on GitHub</a>
         </footer>
+          </div>
+        </div>
       </main>
     </div>
+  );
+}
+
+/** How it works as a rail of numbered steps. Adapted from the Vertical How It Works Timeline by ln-dev7 on 21st.dev
+ *  (https://21st.dev/@ln-dev7/components/how-it-works-02): a hairline rail with a square numbered node per step, no cards or shadows. */
+function StepRail() {
+  return (
+    <ol className="relative ml-4 border-l border-dashed border-rule-strong pl-8">
+      {STEPS.map((s, i) => (
+        <li key={s.step} className="relative pb-6 last:pb-0">
+          <span className="figure absolute -left-8 top-0 grid -translate-x-1/2 size-7 place-items-center rounded-sm border border-rule-strong bg-surface text-sm text-ink-muted">
+            {String(i + 1).padStart(2, "0")}
+          </span>
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,1fr)_200px] sm:gap-6">
+            <div>
+              <p className="flex items-center gap-2 font-medium"><s.icon {...iconProps} className="text-ink-muted" />{s.step}</p>
+              <p className="mt-1 max-w-[640px]">{s.what}</p>
+            </div>
+            <p className="text-sm text-ink-muted sm:text-right">{s.by}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 

@@ -153,7 +153,8 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 `/about` (`pages/About.tsx`) is the one page for a judge or sponsor who arrives without a guide. It sits outside the app shell, like the leaderboard, and links into every screen. It explains; it does not sell. Same tokens, type, hairlines and tables as the app, in light.
 
 - Opens with one statement in `text-xl` (the pitch line) and three sentences on what Countersign is and who it is for, then the three ways in: "Try to rob us" (primary), "Open the payment run", "Leaderboard". No hero image, no illustration.
-- A section index sits under the title bar on one hairline row: plain links to in-page anchors, scrolling sideways on a phone. Sections are separated by hairlines and headed in `text-md`.
+- Navigation follows the reader: from `lg` up, a sticky "On this page" rail (`shared/table-of-contents.tsx`) sits left of the sections, a hairline with an accent edge on the section in view. Below `lg`, the same sections are one hairline row under the title bar, scrolling sideways, the current one underlined in accent. Clicking scrolls smoothly unless the reader prefers reduced motion. Sections are separated by hairlines and headed in `text-md`.
+- How it works is a step rail: a dashed `rule-strong` line with a square numbered node per step (`rounded-sm`, mono `01`), the step's icon and name, what happens, and the service right-aligned. Rows, not cards.
 - Facts are tables and lists, not card grids. The one headline figure is "$0 lost to scammers" in the red-team section (`text-2xl`, mono). Every number on the page is one we measured and says where it came from.
 - The real call is shown as a ledger: elapsed time in mono, right-aligned, one row per step, ending in the payment's status badge.
 - Real vs simulated comes from `GET /api/system/status`, falling back to the documented list, labeled as such.
