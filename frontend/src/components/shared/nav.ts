@@ -1,5 +1,5 @@
 import { useDataMode } from "@/lib/data-mode";
-import { Activity, Banknote, Crosshair, FlaskConical, Inbox, ListOrdered, type LucideIcon } from "lucide-react";
+import { Activity, Banknote, BookOpen, Crosshair, FlaskConical, Inbox, ListOrdered, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   to: string;
@@ -20,6 +20,7 @@ export const NAV: NavItem[] = [
   { to: "/leaderboard", label: "Leaderboard", icon: ListOrdered, key: "L", newTab: true },
   { to: "/red-team", label: "Red team", icon: FlaskConical, key: "T" },
   { to: "/status", label: "System status", icon: Activity, key: "S" },
+  { to: "/about", label: "About Countersign", icon: BookOpen, key: "O" },
 ];
 
 /** The screens to offer: in a replay, only the ones that can run from the recording. */
