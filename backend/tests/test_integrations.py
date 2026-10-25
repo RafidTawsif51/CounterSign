@@ -648,7 +648,7 @@ def test_real_mode_start_verification_returns_at_once(fdb, monkeypatch, tmp_path
                        f"https://pub.example/api/webhooks/twilio/status/{new.id}/{tok}")]
     with Session(eng) as s:
         assert tok not in " ".join(str(a.detail_json) for a in s.exec(select(AuditLog))) and not any(tok in c for c in clips)
-    assert len(clips) == 8 and any("9999" in c for c in clips)
+    assert len(clips) == 12 and any("9999" in c for c in clips)  # every line, including the listening cue and the repeats
 
 
 def test_real_mode_refuses_a_number_off_the_allow_list(fdb, monkeypatch):
@@ -788,7 +788,7 @@ def _gather(client, speech, r=0):
 
 def test_unclear_answer_is_re_asked_once_then_finalizes_unclear(fdb):
     client, eng = fdb
-    first = _gather(client, "who is this?")
+    first = _gather(client, "I'm not sure")
     assert "ending 9999" in first and "<Gather" in first and "<Hangup/>" not in first and "gather/cal_t?r=1" in first
     assert _call_row(eng)[0].outcome is None
     second = _gather(client, "what account?", r=1)
@@ -800,7 +800,7 @@ def test_unclear_answer_is_re_asked_once_then_finalizes_unclear(fdb):
 
 def test_re_ask_then_clear_answer_resolves(fdb):
     client, eng = fdb
-    _gather(client, "who is this?")
+    _gather(client, "I'm not sure")
     assert _gather(client, "No, never", r=1).endswith("<Hangup/></Response>")
     assert _call_row(eng)[0].outcome == CallOutcome.denied
 
@@ -824,8 +824,11 @@ def test_silence_after_a_re_ask_ends_the_call_unclear(fdb):
 
 
 def test_decide_rules():
-    assert voice.decide("who is this", "unclear", False) == "reask"
-    assert voice.decide("who is this", "unclear", True) == "close"
+    assert voice.decide("I'm not sure", "unclear", False) == "reask"
+    assert voice.decide("I'm not sure", "unclear", True) == "close"
+    assert voice.decide("who is this", "unclear", False) == "repeat"  # not an answer: the question again, re-ask kept
+    assert voice.decide("who is this", "unclear", True) == "repeat"
+    assert voice.decide("who is this", "unclear", True, repeats=voice.MAX_REPEATS) == "close"
     assert voice.decide("", "unclear", False) == "close"
     assert voice.decide("one moment please", "unclear", False) == "hold"
     assert voice.decide("wait, no we never did", "denied", False) == "hold"  # asked to wait: let them finish
@@ -946,7 +949,7 @@ def test_web_decline_is_no_answer(web):
 def test_web_re_ask_once_then_unclear(web):
     client, eng, res = web
     tok = _pending(client).json()["call"]["token"]
-    first = _answer(client, res, "who is this?", tok).json()
+    first = _answer(client, res, "I'm not sure", tok).json()
     assert first["action"] == "reask" and not first["final"] and "ending 9999" in first["text"]
     assert _web_state(eng, res.call_id)[0].outcome is None
     second = _answer(client, res, "what account?", tok).json()
@@ -1085,7 +1088,7 @@ def test_logs_for_the_softphone_carry_no_token(web, caplog):
 def test_web_re_ask_keeps_the_call_open_then_no_is_denied_and_blocked(web):
     client, eng, res = web
     tok = _pending(client).json()["call"]["token"]
-    first = _answer(client, res, "Who is this", tok)
+    first = _answer(client, res, "I'm not sure", tok)
     assert first.status_code == 200 and first.json()["action"] == "reask" and not first.json()["final"]
     assert res.call_id in voice.web_calls and _web_state(eng, res.call_id)[0].outcome is None
     second = _answer(client, res, "No", tok)  # exactly one more answer, and no 410
@@ -1106,7 +1109,7 @@ def test_web_hold_keeps_the_call_open_then_yes_is_confirmed_and_paid(web):
     assert call.outcome == CallOutcome.confirmed and pay.status == PaymentStatus.paid
 
 
-@pytest.mark.parametrize("speech,action", [("Who is this", "reask"), ("hold on", "hold"), ("No we never did", "close"), ("Yes we did", "close")])
+@pytest.mark.parametrize("speech,action", [("I'm not sure", "reask"), ("Who is this", "repeat"), ("hold on", "hold"), ("No we never did", "close"), ("Yes we did", "close")])
 def test_web_answer_always_names_the_clip_to_play(web, speech, action):
     client, _, res = web
     body = _answer(client, res, speech).json()

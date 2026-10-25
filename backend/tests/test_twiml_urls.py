@@ -79,7 +79,7 @@ def test_the_question_twiml_has_only_urls_under_public_base_url_even_from_a_host
         r = client.post(path_of(given["twiml_url"]), headers=hdrs)
         assert r.status_code == 200 and r.headers["content-type"].startswith("application/xml")
         urls = urls_in(r.text)
-        assert len(urls) == 4  # intro clip, Gather action, question clip, Redirect
+        assert len(urls) == 5  # intro clip, question clip, Gather action, listening cue clip, Redirect
         assert all(under_base(u) for u in urls), urls
         assert "evil.example" not in r.text and "internal.local" not in r.text and "http://" not in r.text
 
@@ -129,8 +129,11 @@ def test_the_gather_listens_for_speech_long_enough_and_posts_to_our_answer_route
     assert int(g.attrib["timeout"]) >= 10  # seconds of waiting for the vendor to start talking, after the question
     assert g.attrib["speechModel"] == "phone_call" and "yes" in g.attrib["hints"] and "no" in g.attrib["hints"]
     assert urlparse(g.attrib["action"]).path == f"/api/voice/gather/{given['call_id']}"
-    assert [c.tag for c in root] == ["Play", "Gather", "Redirect"]  # silence falls through to the retry
-    assert next(g.iter("Play")).text.startswith(BASE + "/api/voice/audio/")  # the question plays inside the Gather: speech is heard while it plays
+    # Intro and question play in full before the Gather, so talking over them can neither cut them off nor be taken as the
+    # answer. The Gather holds only the short cue, which the vendor may talk over. Silence falls through to the retry.
+    assert [c.tag for c in root] == ["Play", "Play", "Gather", "Redirect"]
+    inside = list(g.iter("Play"))
+    assert len(inside) == 1 and inside[0].text.startswith(BASE + "/api/voice/audio/")
 
 
 def test_the_worst_case_call_stays_inside_the_60_second_rule(call):
