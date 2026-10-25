@@ -42,3 +42,8 @@ demo/backup-run.mp4
 *.db-shm
 *.db-wal
 frontend/.21st/
+
+# Launch video: raw recordings and voice auditions stay local (large files)
+demo/raw/
+demo/launch-video/vo-samples/
+demo/launch-video/build/

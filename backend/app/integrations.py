@@ -156,12 +156,15 @@ async def call_twiml(call_id: str, request: Request, background: BackgroundTasks
         call, payment, script = _context(s, call_id)
         if call.outcome is not None:
             return _xml(voice.twiml_close(script.closing(call.outcome.value)))
+        asked = script.question in [l.get("text") for l in (call.transcript or [])]
         if end:
-            transcript = await _record_lines(s, call, payment, ([] if r else [{"speaker": "agent", "text": script.question}]) + [
+            transcript = await _record_lines(s, call, payment, ([] if (r or asked) else [{"speaker": "agent", "text": script.question}]) + [
                 {"speaker": "vendor", "text": "(no response)"}, {"speaker": "agent", "text": script.unclear}])
             background.add_task(verify.handle_outcome, call_id, CallOutcome.unclear, transcript, None, True,
                                 {"classifier": "silence", "reason": "nothing was heard after two prompts"})
             return _xml(voice.twiml_close(script.unclear))
+        if not retry and not asked:  # the vendor picked up: the question is on the board and the call view while it is asked
+            await _record_lines(s, call, payment, [{"speaker": "agent", "text": script.question}])
     verify.arm_answer_watchdog(call_id)  # the 60 s rule starts when the vendor picks up
     voice.log_state(call_id, "answered", channel="twilio")
     gather = _url(f"/api/voice/gather/{call_id}", request)

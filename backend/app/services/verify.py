@@ -955,7 +955,8 @@ async def finish_answer(call_id: str, answer: str, reasked: bool, repeats: int =
         script = voice.call_script(vendor.name, (invoice.remittance_json or {})["account_last4"])
         answer = (answer or "").strip()
         kind = voice.interjection(answer)
-        first = not reasked and repeats == 0  # the question goes into the transcript once, before the first thing the vendor said
+        # The question goes into the transcript once: at pickup (Twilio), or here before the first thing the vendor said (softphone).
+        first = not reasked and repeats == 0 and script.question not in [l.get("text") for l in (call.transcript or [])]
         history = list(call.transcript or []) + ([{"speaker": "agent", "text": script.question}] if first else [])
         # Claude's reading and reply, fetched alongside the classifier so the turn stays inside Twilio's wait. It never sets the outcome.
         talk = (asyncio.create_task(conversation.respond(script, history, answer))
