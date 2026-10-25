@@ -1,0 +1,331 @@
+{
+ "_note": "Times are seconds. 'from'/'to' are in the take's own clock (call-take2: from the microphone start). 'hold' freezes the last frame. 'vo' plays a narration line at 'at' seconds into the segment. 'mic' plays the take's microphone audio for this segment at 'gain'. Captions and labels show from 'at' for 'for' seconds within the segment.",
+ "segments": [
+  {
+   "id": "cold_call",
+   "take": "call-take2",
+   "from": 23.0,
+   "to": 31.4,
+   "mic": {
+    "gain": 2.2
+   },
+   "captions": [
+    {
+     "at": 0.0,
+     "for": 4.9,
+     "who": "Countersign (automated voice)",
+     "text": "Did your company make this change? A simple yes or no is all I need."
+    },
+    {
+     "at": 5.0,
+     "for": 3.4,
+     "who": "The vendor (a teammate playing Summit Concrete), on a real phone",
+     "text": "No, we never changed our banks."
+    }
+   ],
+   "labels": [
+    {
+     "at": 0.0,
+     "for": 8.4,
+     "text": "Real call. Voice by Cartesia, call by Twilio"
+    }
+   ]
+  },
+  {
+   "id": "cold_blocked",
+   "take": "call-take2",
+   "from": 38.3,
+   "to": 41.0,
+   "hold": 2.4,
+   "vo": {
+    "file": "01_cold_open",
+    "at": 0.3
+   },
+   "captions": [
+    {
+     "at": 0.3,
+     "for": 4.8,
+     "text": "That phone call just stopped an eighteen thousand dollar scam. No person made it."
+    }
+   ]
+  },
+  {
+   "id": "stat",
+   "card": "stat",
+   "dur": 4.6,
+   "vo": {
+    "file": "02_problem",
+    "at": 0.3
+   },
+   "captions": [
+    {
+     "at": 0.3,
+     "for": 4.3,
+     "text": "Seventy-four percent of organizations were hit by business email fraud last year."
+    }
+   ]
+  },
+  {
+   "id": "poisoned",
+   "take": "inbox-take1",
+   "from": 8.6,
+   "to": 14.6,
+   "hold": 0.0,
+   "blur_pdf_numbers": true,
+   "captions": [
+    {
+     "at": 0.0,
+     "for": 5.8,
+     "text": "Now AI agents are paying the bills, and scammers hide instructions that only an AI will read.",
+     "pos": "top"
+    }
+   ],
+   "labels": [
+    {
+     "at": 0.6,
+     "for": 5.2,
+     "text": "Hidden text revealed by our scanner",
+     "pos": "bottom"
+    }
+   ]
+  },
+  {
+   "id": "intro",
+   "take": "call-take2",
+   "from": 0.2,
+   "to": 3.4,
+   "hold": 4.8,
+   "vo": {
+    "file": "03_intro",
+    "at": 0.2
+   },
+   "captions": [
+    {
+     "at": 0.2,
+     "for": 7.6,
+     "text": "This is Countersign. It runs your weekly vendor payments, and it never sends money to a new account without proof from outside the email."
+    }
+   ]
+  },
+  {
+   "id": "run",
+   "take": "screens-take1",
+   "from": 8.2,
+   "to": 16.6,
+   "hold": 0.0,
+   "vo": {
+    "file": "04_run",
+    "at": 0.3
+   },
+   "captions": [
+    {
+     "at": 0.3,
+     "for": 7.0,
+     "text": "Forty invoices. Thirty-seven paid through Capital One's Nessie sandbox in under seven seconds. Three stopped."
+    }
+   ],
+   "labels": [
+    {
+     "at": 1.0,
+     "for": 7.4,
+     "text": "Payments by Capital One Nessie (sandbox)"
+    }
+   ]
+  },
+  {
+   "id": "scam",
+   "take": "call-take2",
+   "from": 5.2,
+   "to": 14.2,
+   "hold": 3.6,
+   "vo": {
+    "file": "05_scam",
+    "at": 0.2
+   },
+   "captions": [
+    {
+     "at": 0.2,
+     "for": 4.2,
+     "text": "A scam email asks to change banks. Held."
+    },
+    {
+     "at": 4.4,
+     "for": 4.6,
+     "text": "Apify finds the real number on the vendor's own website. We never use the number in the email."
+    },
+    {
+     "at": 9.0,
+     "for": 3.6,
+     "text": "CRS checks the vendor's identity, and the request fails."
+    }
+   ],
+   "labels": [
+    {
+     "at": 4.4,
+     "for": 4.6,
+     "text": "Phone number found by Apify"
+    },
+    {
+     "at": 9.0,
+     "for": 3.6,
+     "text": "Identity check by CRS (sandbox)"
+    }
+   ]
+  },
+  {
+   "id": "call",
+   "take": "call-take2",
+   "from": 14.2,
+   "to": 23.0,
+   "mic": {
+    "gain": 2.2,
+    "duck": [
+     0.0,
+     3.3,
+     0.25
+    ]
+   },
+   "vo": {
+    "file": "06_call",
+    "at": 0.1
+   },
+   "captions": [
+    {
+     "at": 0.1,
+     "for": 3.1,
+     "text": "Then it calls the vendor, with a voice by Cartesia."
+    },
+    {
+     "at": 3.4,
+     "for": 5.4,
+     "who": "Countersign (automated voice)",
+     "text": "We received a request to change where we send Summit Concrete's payments, to an account ending 6213."
+    }
+   ],
+   "labels": [
+    {
+     "at": 0.0,
+     "for": 8.8,
+     "text": "Real call. Voice by Cartesia, call by Twilio"
+    }
+   ]
+  },
+  {
+   "id": "ask",
+   "take": "call-take2",
+   "from": 44.6,
+   "to": 52.6,
+   "vo": {
+    "file": "07_ask",
+    "at": 0.6
+   },
+   "captions": [
+    {
+     "at": 0.6,
+     "for": 4.4,
+     "text": "Ask it to break its own rules. It refuses, and shows its evidence."
+    }
+   ],
+   "labels": [
+    {
+     "at": 1.5,
+     "for": 6.5,
+     "text": "Answered by Claude, from stored evidence"
+    }
+   ]
+  },
+  {
+   "id": "redteam",
+   "take": "screens-take1",
+   "from": 91.8,
+   "to": 98.8,
+   "vo": {
+    "file": "08_proof",
+    "at": 0.2
+   },
+   "captions": [
+    {
+     "at": 0.2,
+     "for": 2.6,
+     "text": "Nine of nine poisoned documents caught."
+    },
+    {
+     "at": 2.8,
+     "for": 4.2,
+     "text": "Across two hundred red-team attacks, it caught one hundred eighty-six and lost nothing."
+    }
+   ]
+  },
+  {
+   "id": "status",
+   "take": "screens-take1",
+   "from": 0.0,
+   "to": 7.6,
+   "captions": [
+    {
+     "at": 0.0,
+     "for": 3.6,
+     "text": "A plain AI agent lost four hundred seventy-one thousand dollars."
+    },
+    {
+     "at": 3.6,
+     "for": 4.0,
+     "text": "Here's exactly what's real and what's sandboxed."
+    }
+   ]
+  },
+  {
+   "id": "close",
+   "take": "screens-take1",
+   "from": 15.0,
+   "to": 21.0,
+   "hold": 6.0,
+   "vo": {
+    "file": "09_close",
+    "at": 0.3
+   },
+   "captions": [
+    {
+     "at": 0.3,
+     "for": 6.2,
+     "text": "Countersign fills the accounts payable seat for the weekly payment run, for small finance teams paying fifty or more vendors a week."
+    },
+    {
+     "at": 6.5,
+     "for": 5.3,
+     "text": "It never has the power to change where money goes. Countersign. Try to rob it."
+    }
+   ]
+  },
+  {
+   "id": "close_short",
+   "only": "30s",
+   "take": "screens-take1",
+   "from": 15.0,
+   "to": 20.2,
+   "hold": 0.0,
+   "vo": {
+    "file": "10_close_short",
+    "at": 0.3
+   },
+   "captions": [
+    {
+     "at": 0.3,
+     "for": 5.5,
+     "text": "It never has the power to change where money goes. Countersign. Try to rob it."
+    }
+   ]
+  },
+  {
+   "id": "end",
+   "card": "end",
+   "dur": 5.0
+  },
+  {
+   "id": "end_short",
+   "only": "30s",
+   "card": "end",
+   "dur": 3.0
+  }
+ ]
+}
