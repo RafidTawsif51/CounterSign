@@ -19,6 +19,8 @@ export interface NumberFinding {
   /** The website's number and the on-file number are the same number. Null when the website gave no number. */
   sourcesAgree: boolean | null;
   holdReasons: string[];
+  /** The mock finder produced this, not an Apify run. Null when the record does not say (an event); the server's flags then decide. */
+  simulated: boolean | null;
 }
 
 export interface CallView {
@@ -31,6 +33,8 @@ export interface CallView {
   lines: TranscriptLine[];
   outcome: CallOutcome | null;
   finding: NumberFinding | null;
+  /** The call was scripted (no phone). Null when not known yet; see callSimulated in lib/services.ts. */
+  simulated: boolean | null;
 }
 
 /** verify.py hangs up at 60 seconds. */
@@ -75,7 +79,7 @@ export function foldCalls(events: RunEvent[]): CallView[] {
 }
 
 function blank(paymentId: string, vendor: string): CallView {
-  return { paymentId, vendor, phase: "queued", contactSource: null, startedAt: null, endedAt: null, lines: [], outcome: null, finding: null };
+  return { paymentId, vendor, phase: "queued", contactSource: null, startedAt: null, endedAt: null, lines: [], outcome: null, finding: null, simulated: null };
 }
 
 /** The number check as call.started reports it. Null when the event predates the check (mock runs, old records). */
@@ -88,6 +92,7 @@ function findingFromEvent(e: CallStartedEvent): NumberFinding | null {
     agreement: e.agreement ?? null,
     sourcesAgree: e.sources_agree ?? null,
     holdReasons: e.hold_reasons ?? [],
+    simulated: null,
   };
 }
 
@@ -102,6 +107,7 @@ function findingFromDetail(d: PaymentDetail): NumberFinding | null {
     agreement: c.agreement,
     sourcesAgree: c.sources_agree,
     holdReasons: c.hold_reasons.map((h) => h.reason),
+    simulated: c.simulated ?? null,
   };
 }
 
@@ -125,6 +131,7 @@ export function callFromDetail(d: PaymentDetail): CallView | null {
     lines,
     outcome: call.outcome,
     finding: findingFromDetail(d),
+    simulated: call.simulated ?? null,
   };
 }
 

@@ -14,7 +14,7 @@ import {
 import { ASK_PARAM } from "@/components/payment/ask-panel";
 import { iconProps } from "@/components/shared/icon";
 import { Kbd, modKey } from "@/components/shared/kbd";
-import { NAV } from "@/components/shared/nav";
+import { NAV, useVisibleNav } from "@/components/shared/nav";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { api } from "@/lib/api";
@@ -28,6 +28,7 @@ interface PaletteProps {
 
 export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const navigate = useNavigate();
+  const visibleNav = useVisibleNav();
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: api.vendors, enabled: open, staleTime: 60_000 });
   const payments = useRunPayments();
   const openPayment = useMatch("/payments/:paymentId")?.params.paymentId ?? null;
@@ -70,7 +71,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
         )}
 
         <CommandGroup heading="Pages">
-          {NAV.map((item) => (
+          {visibleNav.map((item) => (
             <CommandItem key={item.to} value={`page ${item.label}`} onSelect={() => go(item.to, item.newTab)}>
               <item.icon {...iconProps} />
               {item.label}

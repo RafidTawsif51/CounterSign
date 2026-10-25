@@ -4,7 +4,8 @@
 import { ApiError, detailText, statusText } from "@/lib/api-error";
 import { API_URL } from "@/lib/api-url";
 import { reportFailure } from "@/lib/connection";
-import { isMock } from "@/lib/data-mode";
+import { isMock, isReplay } from "@/lib/data-mode";
+import { replayRequest } from "@/lib/replay";
 import { mockRequest } from "@/lib/mock";
 import type {
   AskAnswer,
@@ -33,6 +34,7 @@ export const BOUNTY_EMAIL = (import.meta.env.VITE_BOUNTY_EMAIL ?? "").trim();
 type Method = "GET" | "POST";
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  if (isReplay()) return replayRequest<T>(method, path);
   if (isMock()) return mockRequest<T>(method, path, body);
 
   const isForm = body instanceof FormData;
@@ -89,6 +91,8 @@ export const api = {
   /** 202; 409 while another full run is in progress. */
   startRun: () => post<StartRunResponse>("/api/payment-runs"),
   run: (runId: string) => get<RunStatusResponse>(`/api/payment-runs/${runId}`),
+  /** The newest full payment run on the server (404 when there is none), so a second tab or a phone can follow it. */
+  latestRun: () => get<{ run_id: string; status: string; started_at: string; completed_at: string | null; invoice_count: number }>("/api/payment-runs/latest"),
 
   payment: (paymentId: string) => get<PaymentDetail>(`/api/payments/${paymentId}`),
   /** Held payments only. Pays the vendor's last verified account, never the requested one. */

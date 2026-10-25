@@ -734,6 +734,17 @@ async def start_run() -> dict:
     return {"run_id": run_id, "invoice_count": len(ids), "events_url": f"/api/payment-runs/{run_id}/events"}
 
 
+@router.get("/payment-runs/latest")
+def latest_run(session: Session = Depends(get_session)) -> dict:
+    """The newest full payment run, so a second tab or a phone can follow a run it did not start. Not an attack's one-invoice run, a red-team
+    batch, or one of the seed's historical runs (those carry no invoice_count). Registered before /payment-runs/{run_id}, which would take it."""
+    for r in session.exec(select(PaymentRun).order_by(PaymentRun.started_at.desc()).limit(50)).all():
+        saved = r.totals_json or {}
+        if "invoice_count" in saved and saved.get("kind") not in ("attack", "redteam"):
+            return {"run_id": r.id, "status": r.status.value, "started_at": r.started_at, "completed_at": r.completed_at, "invoice_count": saved["invoice_count"]}
+    raise HTTPException(404, "no payment run yet")
+
+
 @router.get("/payment-runs/{run_id}")
 def get_run(run_id: str, session: Session = Depends(get_session)) -> dict:
     run = session.get(PaymentRun, run_id)

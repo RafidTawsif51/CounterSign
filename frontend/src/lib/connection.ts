@@ -88,7 +88,7 @@ export function useConnectionMonitor() {
     // Each mode starts fresh: a silence measured while live says nothing about the offline demo, and back.
     set({ reachable: null, downSince: null, unreachable: false });
     // A mock build has no live mode to go back to, so it never probes (and never fills the console with refusals).
-    if (mode === "mock" && BUILT_MOCK) return;
+    if (mode === "replay" || (mode === "mock" && BUILT_MOCK)) return;
     wake = () => void tick();
     void tick();
     return () => {

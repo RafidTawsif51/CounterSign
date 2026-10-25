@@ -71,9 +71,9 @@ export function VendorRail({ history, hasVendor }: { history: VendorHistory | un
               </div>
               <div className="text-xs text-ink-muted">
                 {c.source_url ? (
-                  <a href={c.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent underline-offset-4 hover:underline">
-                    {shortUrl(c.source_url)}
-                    <ExternalLink {...iconProps} size={12} />
+                  <a href={c.source_url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-start gap-1 text-accent underline-offset-4 hover:underline">
+                    <span className="min-w-0 break-all">{shortUrl(c.source_url)}</span>
+                    <ExternalLink {...iconProps} size={12} className="mt-0.5 shrink-0" />
                   </a>
                 ) : c.last_verified ? (
                   `Verified ${formatDate(c.last_verified)}`

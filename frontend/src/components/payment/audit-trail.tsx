@@ -45,7 +45,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
         <span className="sr-only">{ACTORS[entry.actor]}</span>
       </span>
       <div {...source} className={cn(source.className, "-mx-1 min-w-0 px-1")}>
-        <div className="text-sm font-medium">{AUDIT_ACTIONS[entry.action] ?? entry.action.replace(/_/g, " ")}</div>
+        <div className="text-sm font-medium">{auditLabel(entry)}</div>
         {describe(entry.action, d) && <div className="text-xs break-words text-ink-muted">{describe(entry.action, d)}</div>}
       </div>
       <time dateTime={entry.at} className="figure pt-0.5 text-xs text-ink-muted">
@@ -55,12 +55,19 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   );
 }
 
+/** `created` is written for the email and for the invoice; say which. Everything else comes from the catalog. */
+function auditLabel(entry: AuditEntry): string {
+  if (entry.action === "created") return entry.entity === "message" ? "Email received" : entry.entity === "invoice" ? "Invoice created" : "Created";
+  const label = AUDIT_ACTIONS[entry.action] ?? entry.action.replace(/_/g, " ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 function describe(action: string, d: Record<string, unknown>): string | null {
   switch (action) {
     case "risk_assessed":
       return `Score ${formatScore(d.score as number)}, ${DECISIONS[d.decision as Decision]?.toLowerCase() ?? d.decision}`;
     case "paid":
-      return d.transfer_id ? `Nessie transfer ${d.transfer_id}` : null;
+      return d.transfer_id ? `${String(d.transfer_id).startsWith("mock") ? "Simulated transfer" : "Nessie transfer"} ${d.transfer_id}` : null;
     case "verification_call":
       return `${OUTCOME[d.outcome as string] ?? d.outcome}. Called the ${CONTACT_SOURCES[d.contact_source as ContactSource] ?? "vendor"}.`;
     case "approved":

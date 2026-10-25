@@ -65,7 +65,7 @@ function ServerLine({
   const mode = useDataMode();
   if (error && !health) return <InlineError what="The server's health check" error={error} onRetry={onRetry} retrying={retrying} />;
   if (!health) return <Skeleton className="h-4 w-96" />;
-  const where = mode === "mock" ? "Offline demo: built-in data in this browser" : `Connected to ${API_URL || window.location.origin}`;
+  const where = mode === "replay" ? "Replay: the status recorded with the run, not the live system" : mode === "mock" ? "Offline demo: built-in data in this browser" : `Connected to ${API_URL || window.location.origin}`;
   const mocks = Object.entries(health.mocks).filter(([, on]) => on).length;
   return (
     <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-muted">

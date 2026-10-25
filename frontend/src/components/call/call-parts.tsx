@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { CALL_LIMIT_S, numberTrust, type CallPhase, type ContactLike, type NumberFinding, type NumberTrust } from "@/lib/calls";
+import { Badge } from "@/components/ui/badge";
+import { useDataMode } from "@/lib/data-mode";
+import { callSimulated, useServiceModes } from "@/lib/services";
+import { CALL_LIMIT_S, numberTrust, type CallPhase, type CallView, type ContactLike, type NumberFinding, type NumberTrust } from "@/lib/calls";
 import type { CallOutcome, ContactSource, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +56,10 @@ export const PHASE_LABEL: Record<CallPhase, string> = {
 export function useElapsed(startedAt: string | null, endedAt: string | null): number {
   const [now, setNow] = useState(() => Date.now());
   const running = Boolean(startedAt) && !endedAt;
+  // In a replay the recorded clock time is minutes old: a live-looking timer counts from when the call showed up instead.
+  const replay = useDataMode() === "replay";
+  const appeared = useRef<number | null>(null);
+  if (replay && startedAt && appeared.current === null) appeared.current = Date.now();
 
   useEffect(() => {
     if (!running) return;
@@ -63,7 +70,8 @@ export function useElapsed(startedAt: string | null, endedAt: string | null): nu
 
   if (!startedAt) return 0;
   const end = endedAt ? Date.parse(endedAt) : now;
-  return Math.max(0, (end - Date.parse(startedAt)) / 1000);
+  const start = replay && !endedAt && appeared.current !== null ? appeared.current : Date.parse(startedAt);
+  return Math.max(0, (end - start) / 1000);
 }
 
 /** Square status mark. Pulses (slowly, opacity only) while the call is live; DESIGN.md allows this one loop. */
@@ -124,12 +132,17 @@ const CONFIDENCE_LABEL = { high: "high confidence", medium: "medium confidence",
  * would sit inside a link.
  */
 export function NumberFindingLine({ finding, compact = false }: { finding: NumberFinding | null; compact?: boolean }) {
+  const modes = useServiceModes();
   if (!finding) return null;
+  // The mock finder reads the website record we already hold. Saying Apify found it would be false.
+  const simulated = finding.simulated ?? modes.apify;
   const agree = finding.sourcesAgree == null ? null : finding.sourcesAgree ? "same as the number on file" : "differs from the number on file";
   if (compact) {
     return (
       <p className="mt-0.5 truncate text-xs text-ink-muted">
-        {finding.found
+        {simulated
+          ? "Simulated lookup: Apify is off, the website record on file was used"
+          : finding.found
           ? `Found by Apify Vendor Contact Verifier, ${finding.confidence ? CONFIDENCE_LABEL[finding.confidence] : "confidence unknown"}${agree ? `, ${agree}` : ""}`
           : (finding.holdReasons[0] ?? "No independent number from the vendor's website")}
       </p>
@@ -138,9 +151,14 @@ export function NumberFindingLine({ finding, compact = false }: { finding: Numbe
   return (
     <div className="mt-2 border-t border-rule pt-2 text-sm">
       <p className="font-medium">
-        {finding.found ? "Number found by Apify Vendor Contact Verifier" : "Apify Vendor Contact Verifier: no number from the vendor's website"}
+        {simulated
+          ? "Simulated lookup: Apify is off"
+          : finding.found
+            ? "Number found by Apify Vendor Contact Verifier"
+            : "Apify Vendor Contact Verifier: no number from the vendor's website"}
       </p>
-      {finding.found && (
+      {simulated && <p className="mt-0.5 text-ink-muted">The number comes from the vendor website record already on file. No Apify run happened.</p>}
+      {finding.found && !simulated && (
         <p className="mt-0.5 text-ink-muted">
           {finding.sourceUrl && (
             <>
@@ -163,6 +181,30 @@ export function NumberFindingLine({ finding, compact = false }: { finding: Numbe
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * Who made the call. A scripted call says so, in plain words; a real one names the two services behind it. Never both, and
+ * never "Twilio" for a call that no phone was part of.
+ */
+export function CallProvenance({ call, compact = false }: { call: CallView; compact?: boolean }) {
+  const modes = useServiceModes();
+  if (call.phase === "queued") return null;
+  const simulated = callSimulated(call, modes);
+  if (compact)
+    return <p className="mt-0.5 truncate text-xs text-ink-muted">{simulated ? "Simulated call: no phone, scripted words" : "Voice by Cartesia, call by Twilio"}</p>;
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+      {simulated ? (
+        <>
+          <Badge>Simulated call</Badge>
+          No phone was dialed and no voice was made. The words below are scripted.
+        </>
+      ) : (
+        <>Voice by Cartesia, call by Twilio.</>
+      )}
+    </p>
   );
 }
 

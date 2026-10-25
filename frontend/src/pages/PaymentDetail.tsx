@@ -7,20 +7,33 @@ import { AskPanel } from "@/components/payment/ask-panel";
 import { AuditTrail } from "@/components/payment/audit-trail";
 import { CallSlot } from "@/components/payment/call-slot";
 import { DecisionFooter } from "@/components/payment/decision-footer";
+import { DecisionTimeline } from "@/components/payment/decision-timeline";
 import { Destination } from "@/components/payment/destination";
 import { EvidenceProvider } from "@/components/payment/evidence";
 import { HardRules } from "@/components/payment/hard-rules";
 import { InjectionFindings } from "@/components/payment/injection-findings";
+import { LiveProcessing } from "@/components/payment/live-processing";
 import { PaymentHeader } from "@/components/payment/payment-header";
 import { RiskBreakdown } from "@/components/payment/risk-breakdown";
 import { InlineError } from "@/components/shared/inline-error";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { ApiError, api } from "@/lib/api";
+import { CARDS } from "@/lib/attack-cards";
+
+const CARD_LABEL: Record<string, string> = Object.fromEntries(CARDS.map((c) => [c.id, c.title]));
 
 export function PaymentDetail() {
   const { paymentId = "" } = useParams<{ paymentId: string }>();
   const navigate = useNavigate();
-  const query = useQuery({ queryKey: ["payment", paymentId], queryFn: () => api.payment(paymentId), retry: false });
+  const { pinned } = useCurrentRun();
+  // The judge's own attack: its payment row appears a moment after launch, so keep asking until it does.
+  const processing = pinned?.paymentId === paymentId;
+  const query = useQuery({
+    queryKey: ["payment", paymentId],
+    queryFn: () => api.payment(paymentId),
+    retry: false,
+    refetchInterval: (q) => (processing && q.state.error instanceof ApiError && q.state.error.status === 404 ? 700 : false),
+  });
   useLiveRefresh(paymentId);
   // Closing navigates away and unmounts the drawer before Radix can restore focus, so a keyboard user would land on
   // the page body. Put them back on the row they opened, unless focus already went somewhere on purpose.
@@ -35,6 +48,7 @@ export function PaymentDetail() {
   );
 
   const detail = query.data;
+  const hasCall = Boolean(detail && (detail.calls.length > 0 || (detail.payment.status === "held" && detail.risk?.decision === "hold_and_verify")));
 
   return (
     <Sheet open onOpenChange={(open) => !open && navigate("/")}>
@@ -43,16 +57,21 @@ export function PaymentDetail() {
           <EvidenceProvider>
             <div className="flex-1 overflow-y-auto">
               <PaymentHeader detail={detail} />
+              <DecisionTimeline detail={detail} />
+              {/* A payment with a call: the call sits right under the steps, so the judge watches it without scrolling. */}
+              {hasCall && <CallSlot detail={detail} />}
               <AskPanel key={detail.payment.id} detail={detail} />
               <HardRules risk={detail.risk} />
               <RiskBreakdown risk={detail.risk} />
               <Destination detail={detail} />
               <InjectionFindings findings={detail.injection_findings} />
-              <CallSlot detail={detail} />
+              {!hasCall && <CallSlot detail={detail} />}
               <AuditTrail entries={detail.audit} />
             </div>
             <DecisionFooter detail={detail} />
           </EvidenceProvider>
+        ) : query.isError && processing && query.error instanceof ApiError && query.error.status === 404 ? (
+          <LiveProcessing who={`${pinned.attackerName}, ${CARD_LABEL[pinned.card] ?? pinned.card}`} />
         ) : query.isError ? (
           <div className="px-5 pt-4">
             {query.error instanceof ApiError && query.error.status === 404 ? (

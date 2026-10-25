@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CallStrip } from "@/components/call/call-strip";
+import { CallTrouble } from "@/components/call/call-trouble";
 import { VerificationCallPanel } from "@/components/call/verification-call-panel";
 import type { CallView, NumberTrust } from "@/lib/calls";
 import { iconProps } from "@/components/shared/icon";
@@ -536,7 +537,8 @@ const FIXTURE_CALLS: CallView[] = [
       { speaker: "agent", text: "Thank you. The change is confirmed and recorded. Goodbye." },
     ],
     outcome: "confirmed",
-    finding: { found: true, sourceUrl: "https://aayushswami123.github.io/Countersign/summit-concrete/contact.html", confidence: "high", agreement: "consistent", sourcesAgree: true, holdReasons: [] },
+    finding: { found: true, sourceUrl: "https://aayushswami123.github.io/Countersign/summit-concrete/contact.html", confidence: "high", agreement: "consistent", sourcesAgree: true, holdReasons: [], simulated: false },
+    simulated: false,
   },
   {
     paymentId: "pay_fixture_no_answer",
@@ -548,6 +550,7 @@ const FIXTURE_CALLS: CallView[] = [
     lines: [],
     outcome: "no_answer",
     finding: null,
+    simulated: true,
   },
 ];
 
@@ -560,6 +563,10 @@ function CallFixtures() {
             <VerificationCallPanel call={call} trust={FIXTURE_TRUST[call.paymentId]} />
           </div>
         ))}
+        {/* The notice a live call that does not connect shows: a real call (not simulated) near the 60 second limit, or with no answer. */}
+        <div className="rounded-lg border border-rule bg-surface px-5 py-4">
+          <CallTrouble call={{ ...FIXTURE_CALLS[0], phase: "dialing", outcome: null, endedAt: null, simulated: false }} vendorId="ven_summit" />
+        </div>
       </div>
       <div className="space-y-2">
         {FIXTURE_CALLS.map((call) => (

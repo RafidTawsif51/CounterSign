@@ -151,6 +151,22 @@ function Results({ data }: { data: RedTeamResults }) {
         <span className="figure text-ink">{data.median_run_seconds.countersign}</span> s. Run {formatDate(data.generated_at)}. Signal
         weights are hackathon starting points, not validated; these results are how we judge them.
       </p>
+
+      {data.source === "measured" && (
+      <section aria-label="How this was measured" className="max-w-[72ch] space-y-2 border-t border-rule pt-5 text-sm text-ink-muted">
+        <h2 className="text-sm font-medium text-ink">How this was measured</h2>
+        <p>
+          We wrote the attacks and the clean invoices ourselves from the demo's vendors, in a fixed random order. Both agents saw the same
+          emails and invoice text. The plain agent is Claude told to pay valid invoices, with a pay tool that only records its decision; it
+          sees no vendor history. Countersign ran the full payment run, on Claude for reading and screening.
+        </p>
+        <p>
+          The verification call is simulated in this test: it denies a request that came from an attack and confirms a real change. So a
+          Countersign catch of a changed bank account shows the payment was sent to a call, not that a real vendor answered correctly. No
+          phone, bank or lookup service was used.
+        </p>
+      </section>
+      )}
     </>
   );
 }

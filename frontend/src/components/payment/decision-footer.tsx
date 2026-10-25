@@ -41,6 +41,8 @@ export function DecisionFooter({ detail }: { detail: PaymentDetail }) {
   const vendor = detail.vendor?.name ?? "this vendor";
   const { can_approve, approve_blocked_reason, can_reject } = detail.actions;
   if (payment.status !== "held") return null;
+  if (dataMode === "replay")
+    return <div className="border-t border-rule bg-surface px-5 py-3 text-sm text-ink-muted">This is a replay. Held payments can be approved or rejected on the live system only.</div>;
   // The mock plays one call per run and has no manual call route, so the offline demo does not offer another.
   const canCall = dataMode === "live" && destinationChanged(detail);
   const sentence = can_approve ? approveSentence(detail) : null;

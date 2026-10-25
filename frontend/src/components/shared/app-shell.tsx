@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { CommandPalette } from "@/components/shared/command-palette";
 import { DemoShortcuts } from "@/components/shared/demo-shortcuts";
 import { OfflineBanner } from "@/components/shared/offline-demo";
+import { ReplayBanner } from "@/components/shared/replay-banner";
 import { RunProvider } from "@/components/shared/run-context";
 import { Sidebar } from "@/components/shared/sidebar";
 import { TopBar } from "@/components/shared/top-bar";
@@ -28,6 +29,7 @@ export function AppShell() {
             onResetOpenChange={setResetOpen}
           />
           <OfflineBanner />
+          <ReplayBanner />
           <main className="flex-1">
             <Outlet />
           </main>

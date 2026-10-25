@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck } from "lucide-react";
-import { CallMark, LimitLine, NumberFindingLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, shortUrl, useElapsed } from "@/components/call/call-parts";
+import { CallTrouble, useCallTrouble } from "@/components/call/call-trouble";
+import { CallMark, CallProvenance, LimitLine, NumberFindingLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, shortUrl, useElapsed } from "@/components/call/call-parts";
 import { iconProps } from "@/components/shared/icon";
 import { useEvidenceSource } from "@/components/payment/evidence";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -18,8 +19,9 @@ import { cn } from "@/lib/utils";
 const SPEAKER = { agent: "Countersign", vendor: "Vendor" } as const;
 
 /** `evidenceId` (the stored call id) registers each transcript line as `<id>#<n>`, so an /ask citation can point at it. */
-export function VerificationCallPanel({ call, trust, evidenceId }: { call: CallView; trust: NumberTrust; evidenceId?: string }) {
+export function VerificationCallPanel({ call, trust, evidenceId, vendorId = null }: { call: CallView; trust: NumberTrust; evidenceId?: string; vendorId?: string | null }) {
   const elapsed = useElapsed(call.startedAt, call.endedAt);
+  const trouble = useCallTrouble(call, elapsed);
   const root = useRef<HTMLDivElement>(null);
   const active = call.phase !== "ended";
 
@@ -27,13 +29,14 @@ export function VerificationCallPanel({ call, trust, evidenceId }: { call: CallV
   useEffect(() => {
     if (!active) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    root.current?.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+    root.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });  // as little as it takes: the steps above stay in view
   }, [active, call.phase === "dialing"]);
 
   return (
     <div ref={root} className="scroll-mt-4 space-y-4">
       <TrustedNumber call={call} trust={trust} />
       <CallState call={call} elapsed={elapsed} />
+      {trouble && <CallTrouble call={call} vendorId={vendorId} />}
       {call.phase !== "queued" && <Transcript call={call} evidenceId={evidenceId} />}
       {call.outcome && <OutcomeBar outcome={call.outcome} />}
     </div>
@@ -73,6 +76,7 @@ function TrustedNumber({ call, trust }: { call: CallView; trust: NumberTrust }) 
       {trust.crossCheck && !trust.crossCheck.matches && (
         <p className="mt-1 text-sm text-ink-muted">The sources disagree, so the agent dials the number verified longest ago and flags it.</p>
       )}
+      <CallProvenance call={call} />
       <NumberFindingLine finding={call.finding} />
     </div>
   );
