@@ -11,7 +11,9 @@ import { InlineError } from "@/components/shared/inline-error";
 import { BOUNTY_EMAIL, api } from "@/lib/api";
 import { useDataMode } from "@/lib/data-mode";
 import { subscribeLeaderboard } from "@/lib/events";
-import { formatClock, formatUSD } from "@/lib/format";
+import { replayLabel } from "@/lib/replay";
+import { formatClock, formatRelativeTime, formatUSD } from "@/lib/format";
+import { useServiceModes } from "@/lib/services";
 import type { AttackLoggedEvent, LeaderboardRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +38,10 @@ export function Leaderboard() {
   // Attempts seen on the stream before the next fetch includes them, by attack id.
   const [live, setLive] = useState<Map<string, AttackLoggedEvent>>(new Map());
   const idle = useIdleCursor(tv);
+  const scale = useDisplayScale(tv);
+  const modes = useServiceModes();
+  const simulated = modes.known && (modes.twilio || modes.cartesia || modes.apify || modes.crs || modes.nessie);
+  const now = useTick(15_000);
   // The offline-demo switch in the main window flips this window too; attempts from the other source do not carry over.
   const mode = useDataMode();
 
@@ -69,12 +75,23 @@ export function Leaderboard() {
       data-theme="dark"
       className={cn("min-h-screen bg-paper text-ink", idle && "cursor-none")}
       // zoom scales the px-based type scale and spacing together, which a root font size would not.
-      style={tv ? { zoom: 1.5 } : undefined}
+      style={scale !== 1 ? { zoom: scale } : undefined}
     >
       <header className="flex flex-wrap items-start justify-between gap-x-10 gap-y-6 border-b border-rule px-8 pt-8 pb-7">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">Rob Countersign</h1>
-          <p className="mt-1 text-md text-ink-muted">Try to get our AI to pay the wrong account. Every attempt runs live, in sandbox money.</p>
+          <h1 className="flex items-center gap-3 text-xl font-semibold">
+            Rob Countersign
+            {mode === "replay" && <span className="rounded-sm border border-ink-muted px-2 py-0.5 text-sm font-medium">{replayLabel()}</span>}
+          </h1>
+          <p className="mt-1 text-md text-ink-muted">
+            Try to get our AI to pay the wrong account. All money is sandbox money.
+            {modes.known &&
+              (simulated ? (
+                <> Some services are simulated in this setup; <a href="/status" className="underline underline-offset-4">System status</a> says which.</>
+              ) : (
+                <> Every attempt runs live.</>
+              ))}
+          </p>
           <dl className="mt-6 flex flex-wrap items-stretch gap-x-10 gap-y-4">
             <Stat label="Money moved to attackers">
               <NumberTicker value={totals?.sandbox_usd_moved ?? 0} format={formatUSD} className="text-2xl font-medium" />
@@ -96,9 +113,11 @@ export function Leaderboard() {
         ) : board.isError && rows.length === 0 ? (
           <InlineError what="The leaderboard" error={board.error} onRetry={() => void board.refetch()} retrying={board.isFetching} className="py-8 text-md" />
         ) : rows.length === 0 ? (
-          <p className="py-8 text-md text-ink-muted">No attempts yet. Open the attack console{BOUNTY_EMAIL ? " or email the bounty inbox" : ""} and try.</p>
+          <p className="py-8 text-md text-ink-muted">
+            {mode === "replay" ? "Attempts are not part of the replay." : `No attempts yet. Open the attack console${BOUNTY_EMAIL ? " or email the bounty inbox" : ""} and try.`}
+          </p>
         ) : (
-          <AttemptTable rows={rows} />
+          <AttemptTable rows={rows} now={now} />
         )}
       </main>
     </div>
@@ -144,7 +163,7 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function AttemptTable({ rows }: { rows: LeaderboardRow[] }) {
+function AttemptTable({ rows, now }: { rows: LeaderboardRow[]; now: Date }) {
   return (
     <table className="mt-2 w-full border-collapse text-left">
       <thead>
@@ -173,7 +192,9 @@ function AttemptTable({ rows }: { rows: LeaderboardRow[] }) {
               <td className="px-4 py-3.5">
                 <Result row={r} />
               </td>
-              <td className="figure py-3.5 pl-4 text-right text-ink-muted">{formatClock(r.created_at)}</td>
+              <td className="figure py-3.5 pl-4 text-right text-ink-muted" title={formatClock(r.created_at)}>
+                {Date.parse(r.created_at) > now.getTime() - 3_600_000 ? formatRelativeTime(r.created_at, now) : formatClock(r.created_at)}
+              </td>
             </motion.tr>
           ))}
         </AnimatePresence>
@@ -221,6 +242,28 @@ function BountyCorner({ email }: { email: string }) {
       </div>
     </div>
   );
+}
+
+/** The leaderboard is meant for a second screen across a table. On a big display it scales up by itself; ?tv=1 forces the largest. */
+function useDisplayScale(tv: boolean): number {
+  const [w, setW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  if (tv) return 1.5;
+  return w >= 2200 ? 1.5 : w >= 1700 ? 1.3 : w >= 1400 ? 1.1 : 1;
+}
+
+/** A clock that re-renders every `ms`, so relative times keep moving. */
+function useTick(ms: number): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
 }
 
 /** On the TV, hide the cursor after 3 s without movement. */

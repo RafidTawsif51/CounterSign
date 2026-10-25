@@ -10,6 +10,7 @@ import { AttackCardPicker } from "@/components/attack/attack-card-picker";
 import { EmailEditor } from "@/components/attack/email-editor";
 import { PdfDropzone, type PdfChoice } from "@/components/attack/pdf-dropzone";
 import { iconProps } from "@/components/shared/icon";
+import { NotInReplay } from "@/components/shared/not-in-replay";
 import { PageHeader } from "@/components/shared/page-header";
 import { useCurrentRun } from "@/components/shared/run-context";
 import { api } from "@/lib/api";
@@ -19,7 +20,7 @@ import { CARDS, SAMPLE_PDFS, type AttackPayloadDraft } from "@/lib/attack-cards"
 import type { AttackCard, LaunchAttackRequest } from "@/lib/types";
 
 // The attack console. Judges arrive with no instructions: pick a card, edit if they like, launch. This page never says
-// whether an attack worked; it sends the judge to the board, where their payment is pinned and the result plays out.
+// whether an attack worked; it sends the judge to their payment, where each step plays out live.
 
 const NAME_KEY = "countersign-attacker-name";
 
@@ -31,7 +32,7 @@ function readName() {
   }
 }
 
-export function AttackConsole() {
+function AttackScreen() {
   const navigate = useNavigate();
   const mode = useDataMode();
   const { pinAttack } = useCurrentRun();
@@ -60,8 +61,9 @@ export function AttackConsole() {
         attackerName: req.attacker_name,
         card: req.card,
       });
-      toast("Your attack is in the run.", { description: res.queued ? "It goes right after the run in progress." : "Watch it on the board." });
-      navigate("/");
+      // Straight to the payment: its steps play out there, live. The board behind it keeps the attack pinned.
+      if (res.queued) toast("Your attack is queued.", { description: "It goes right after the run in progress." });
+      navigate(`/payments/${res.payment_id}`);
     },
   });
 
@@ -104,6 +106,7 @@ export function AttackConsole() {
               onChange={(e) => setName(e.target.value)}
               maxLength={80}
               autoComplete="nickname"
+              className="touch-target"
               placeholder="Judge Priya"
               aria-invalid={tried && !name.trim() ? true : undefined}
             />
@@ -143,7 +146,7 @@ export function AttackConsole() {
           )}
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button type="submit" variant="primary" disabled={!def || launch.isPending}>
+            <Button type="submit" variant="primary" className="touch-target" disabled={!def || launch.isPending}>
               <Crosshair {...iconProps} />
               {launch.isPending ? "Launching" : "Launch attack"}
             </Button>
@@ -191,5 +194,13 @@ function VendorThreadPicker({ threadId, fallbackVendor, onChange }: { threadId: 
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+export function AttackConsole() {
+  return useDataMode() === "replay" ? (
+    <NotInReplay title="Try to rob us." what="Attacks run on the live system, and a replay cannot take one. Exit the replay to launch an attack." />
+  ) : (
+    <AttackScreen />
   );
 }

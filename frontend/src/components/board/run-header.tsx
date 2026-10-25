@@ -3,6 +3,7 @@ import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/board/number-ticker";
 import { iconProps } from "@/components/shared/icon";
+import { useDataMode } from "@/lib/data-mode";
 import { formatDate, formatUSD } from "@/lib/format";
 import type { BoardRow } from "@/lib/board";
 import type { PaymentStatus } from "@/lib/types";
@@ -27,6 +28,7 @@ export function RunHeader({
   starting: boolean;
   onStart: () => void;
 }) {
+  const replay = useDataMode() === "replay";
   const sum = (s: PaymentStatus) => rows.filter((r) => r.status === s).reduce((t, r) => t + r.amount, 0);
   const n = (s: PaymentStatus) => rows.filter((r) => r.status === s).length;
   const decided = rows.filter((r) => r.status !== "pending");
@@ -42,7 +44,7 @@ export function RunHeader({
         {hasRun && (
           <Button variant="primary" onClick={onStart} disabled={starting || running}>
             <Play {...iconProps} />
-            {running ? "Run in progress" : "Start payment run"}
+            {running ? (replay ? "Replay in progress" : "Run in progress") : replay ? "Replay again" : "Start payment run"}
           </Button>
         )}
       </div>

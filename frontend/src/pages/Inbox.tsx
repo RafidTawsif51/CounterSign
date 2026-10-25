@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { ThreadList } from "@/components/inbox/thread-list";
 import { ThreadView } from "@/components/inbox/thread-view";
+import { NotInReplay } from "@/components/shared/not-in-replay";
+import { useDataMode } from "@/lib/data-mode";
 import { useDetections } from "@/components/inbox/use-detections";
 import { VendorRail } from "@/components/inbox/vendor-rail";
 import { iconProps } from "@/components/shared/icon";
@@ -16,7 +18,7 @@ import { cn } from "@/lib/utils";
 // There is no inbox event stream, so the list and the open thread poll; 1.5 s keeps a new message under 2 s.
 const POLL_MS = 1500;
 
-export function Inbox() {
+function InboxScreen() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("thread");
   const vendorParam = params.get("vendor");
@@ -123,4 +125,8 @@ export function Inbox() {
       </div>
     </div>
   );
+}
+
+export function Inbox() {
+  return useDataMode() === "replay" ? <NotInReplay title="AP inbox" what="The inbox reads the live server's mail. Exit the replay to open it." /> : <InboxScreen />;
 }

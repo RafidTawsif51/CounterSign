@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CallMark, LimitLine, NumberFindingLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, useElapsed, useNumberTrust } from "@/components/call/call-parts";
+import { CallMark, CallProvenance, LimitLine, NumberFindingLine, OUTCOME, OUTCOME_TINT, PHASE_LABEL, useElapsed, useNumberTrust } from "@/components/call/call-parts";
 import { api } from "@/lib/api";
 import { CALL_LIMIT_S, type CallView } from "@/lib/calls";
 import { formatDuration, formatPhoneMasked } from "@/lib/format";
@@ -55,6 +55,7 @@ export function CallStrip({ call }: { call: CallView }) {
           <span className="figure">{formatPhoneMasked(trust.phone)}</span>
           {trust.source === "on_file" && " on file"}, not from the email
         </p>
+        <CallProvenance call={call} compact />
         <NumberFindingLine finding={call.finding} compact />
         {call.phase !== "queued" && <LimitLine elapsed={elapsed} className="mt-2" />}
         {last && (

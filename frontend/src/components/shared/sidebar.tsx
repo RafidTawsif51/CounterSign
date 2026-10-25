@@ -4,7 +4,7 @@ import { ArrowUpRight, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CountersignMark } from "@/components/shared/countersign-mark";
 import { iconProps } from "@/components/shared/icon";
-import { NAV, type NavItem } from "@/components/shared/nav";
+import { useVisibleNav, type NavItem } from "@/components/shared/nav";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "countersign-sidebar-collapsed";
@@ -19,6 +19,7 @@ function readCollapsed() {
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const nav = useVisibleNav();
 
   useEffect(() => {
     try {
@@ -44,7 +45,7 @@ export function Sidebar() {
       </div>
 
       <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 p-2">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <SidebarLink key={item.to} item={item} collapsed={collapsed} />
         ))}
       </nav>

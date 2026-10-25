@@ -238,7 +238,14 @@ def _pdf_layer1(data: bytes) -> tuple[list[Finding], str]:
     where: dict[str, tuple[int, list[float], float, float]] = {}
     texts: list[str] = []
 
+    last_line: dict[str, tuple[int, float]] = {}  # per technique: page and top of the last flagged character
+
     def mark(technique: str, ch: dict, page) -> None:
+        # A wrapped line loses its space (it is not a character in the PDF), so a new line starts a new word: "992718460 account", not "992718460account".
+        prev = last_line.get(technique)
+        if prev is not None and hidden[technique] and (prev[0] != page.page_number or abs(ch["top"] - prev[1]) > 0.5 * max(ch["size"], 1)) and not hidden[technique][-1].isspace():
+            hidden[technique].append(" ")
+        last_line[technique] = (page.page_number, ch["top"])
         hidden[technique].append(ch["text"])
         box = [ch["x0"], ch["top"], ch["x1"], ch["bottom"]]
         seen = where.get(technique)

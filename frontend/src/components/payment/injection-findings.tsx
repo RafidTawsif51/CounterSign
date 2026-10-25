@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { iconProps } from "@/components/shared/icon";
 import { EvidenceRef, useEvidenceSource } from "@/components/payment/evidence";
 import { Section } from "@/components/payment/section";
-import { TECHNIQUES } from "@/lib/risk-catalog";
+import { isClassifierFinding, techniqueLabel } from "@/lib/timeline";
 import type { InjectionFinding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +25,12 @@ function Finding({ finding }: { finding: InjectionFinding }) {
   return (
     <div {...source} className={cn(source.className, "-m-2 p-2")}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge>{TECHNIQUES[finding.technique] ?? finding.technique}</Badge>
+        <Badge>{techniqueLabel(finding.technique)}</Badge>
         <span className="text-sm text-ink-muted">
           <span className="figure">{Math.round(finding.confidence * 100)}%</span> confidence
         </span>
         <span className="text-sm text-ink-muted">in the {finding.invoice_id ? "invoice PDF" : "email"}</span>
+        <span className="text-sm text-ink-muted">{isClassifierFinding(finding.technique) ? "found by Claude Haiku" : "found by the hidden-text scan, our code"}</span>
         <EvidenceRef id={finding.id} className="ml-auto" />
       </div>
       <div className="mt-3 flex items-center gap-1.5 text-xs text-ink-muted">

@@ -4,7 +4,8 @@
 import { useEffect, useState } from "react";
 import { streamUrl } from "@/lib/api";
 import { reportFailure } from "@/lib/connection";
-import { isMock, useDataMode } from "@/lib/data-mode";
+import { isMock, isReplay, useDataMode } from "@/lib/data-mode";
+import { replayTransport } from "@/lib/replay";
 import { mockSubscribe } from "@/lib/mock";
 import type { AttackLoggedEvent, RunEvent } from "@/lib/types";
 
@@ -71,8 +72,8 @@ const mockTransport: Transport = {
   },
 };
 
-// Chosen per subscription: the offline-demo switch closes live streams and reopens them on the mock.
-const transport = () => (isMock() ? mockTransport : sseTransport);
+// Chosen per subscription: the offline-demo switch closes live streams and reopens them on the mock; a replay plays the recording.
+const transport = () => (isReplay() ? (replayTransport as Transport) : isMock() ? mockTransport : sseTransport);
 
 const runPath = (runId: string) => `/api/payment-runs/${encodeURIComponent(runId)}/events`;
 

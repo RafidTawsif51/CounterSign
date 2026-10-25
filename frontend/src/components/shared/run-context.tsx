@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { ApiError, errorMessage } from "@/lib/api-error";
-import { getDataMode, isMock, useDataMode, type DataMode } from "@/lib/data-mode";
+import { getDataMode, useDataMode, type DataMode } from "@/lib/data-mode";
+import { getRecording } from "@/lib/replay";
 import { mergeEvents, useGlobalEvents, useRunEvents, type StreamStatus } from "@/lib/events";
 import { summarizeRun, type RunSummary } from "@/lib/run-summary";
 import type { RunEvent } from "@/lib/types";
@@ -44,9 +45,9 @@ const RunContext = createContext<CurrentRun | null>(null);
 const STORAGE_KEY = "countersign-run";
 const PIN_KEY = "countersign-pinned-attack";
 
-// A real run outlives a reload, so remember it. A mock run lives in memory and is gone after a reload.
+// A real run outlives a reload, so remember it. A mock or replay run lives in memory and is gone after a reload.
 function readStoredRun(): string | null {
-  if (isMock()) return null;
+  if (getDataMode() !== "live") return null;
   try {
     return sessionStorage.getItem(STORAGE_KEY);
   } catch {
@@ -55,7 +56,7 @@ function readStoredRun(): string | null {
 }
 
 function storeRun(runId: string | null) {
-  if (isMock()) return;
+  if (getDataMode() !== "live") return;
   try {
     if (runId) sessionStorage.setItem(STORAGE_KEY, runId);
     else sessionStorage.removeItem(STORAGE_KEY);
@@ -65,7 +66,7 @@ function storeRun(runId: string | null) {
 }
 
 function readPinned(): PinnedAttack | null {
-  if (isMock()) return null;
+  if (getDataMode() !== "live") return null;
   try {
     const raw = sessionStorage.getItem(PIN_KEY);
     return raw ? (JSON.parse(raw) as PinnedAttack) : null;
@@ -75,7 +76,7 @@ function readPinned(): PinnedAttack | null {
 }
 
 function storePinned(p: PinnedAttack | null) {
-  if (isMock()) return;
+  if (getDataMode() !== "live") return;
   try {
     if (p) sessionStorage.setItem(PIN_KEY, JSON.stringify(p));
     else sessionStorage.removeItem(PIN_KEY);
@@ -96,7 +97,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // mode: on the offline-demo switch the stream hook re-subscribes before the switch effect below clears the run, and a
   // live id handed to the mock would start a mock run under it.
   const mode = useDataMode();
-  const [run, setRun] = useState<Owned<string> | null>(() => owned(readStoredRun()));
+  // A replay (also after a reload in the middle of one) follows the recorded run from its first event.
+  const [run, setRun] = useState<Owned<string> | null>(() => owned(readStoredRun() ?? (getDataMode() === "replay" ? (getRecording()?.meta.run_id ?? null) : null)));
   const runId = run && run.mode === mode ? run.value : null;
   const setRunId = useCallback((id: string | null) => setRun(owned(id)), []);
   const { events: runEvents, status } = useRunEvents(runId);
@@ -151,7 +153,41 @@ export function RunProvider({ children }: { children: ReactNode }) {
     void queryClient.invalidateQueries({ queryKey: ["payment"] });
   }, [lateSettled, global.connections, queryClient]);
 
+  // A second tab, a phone, or a reload in a new tab has no run of its own. Follow the server's latest full run, so every screen
+  // shows the same board. While nothing is followed, ask every 3 seconds. A run this tab cleared or reset away is not adopted again.
+  const ignored = useRef<string | null>(null);
+  useEffect(() => {
+    if (runId || mode !== "live") return;
+    let stop = false;
+    const look = () => {
+      if (document.visibilityState === "hidden") return;
+      api
+        .latestRun()
+        .then(({ run }) => {
+          if (stop || !run || run.run_id === ignored.current) return;
+          storeRun(run.run_id);
+          setRunId(run.run_id);
+        })
+        .catch(() => {}); // the server is away: the board keeps offering a new run
+    };
+    look();
+    const id = setInterval(look, 3000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [runId, mode, setRunId]);
+
   const startRun = useCallback(async () => {
+    if (getDataMode() === "replay") {
+      // Replay again: close the stream and reopen it, which plays the recording from the top.
+      const rec = getRecording();
+      if (!rec) throw new Error("no recording");
+      setRunId(null);
+      await new Promise((r) => setTimeout(r, 60));
+      setRunId(rec.meta.run_id);
+      return rec.meta.run_id;
+    }
     const { run_id } = await api.startRun();
     storeRun(run_id);
     setRunId(run_id);
@@ -178,6 +214,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setFailedRun(null);
     if (mode === "mock" && hadRun)
       void startRun().catch((err) => toast.error("Offline payment run not started", { description: errorMessage(err) }));
+    // A replay follows the recorded run from its first event.
+    if (mode === "replay") {
+      const rec = getRecording();
+      if (rec) setRunId(rec.meta.run_id);
+    }
   }, [mode, startRun, setRunId, setPinned]);
 
   const pinAttack = useCallback((a: PinnedAttack) => {
@@ -191,6 +232,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [setPinned]);
 
   const clearRun = useCallback(() => {
+    ignored.current = runRef.current?.value ?? ignored.current;
     storeRun(null);
     setRunId(null);
     unpin();

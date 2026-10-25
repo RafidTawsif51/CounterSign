@@ -367,6 +367,8 @@ export interface PaymentCall {
   transcript: TranscriptLine[]; // untrusted (vendor speech)
   recording_url: string | null;
   contact: { id: string; source: ContactSource; source_url: string | null; phone: string } | null;
+  /** True when no phone was involved: a scripted call (MOCK_TWILIO or MOCK_CARTESIA, or a seeded planted attack). */
+  simulated?: boolean;
 }
 
 export interface AuditEntry {
@@ -407,6 +409,9 @@ export interface PaymentDetail {
     requested_account_differs_from_verified: boolean;
     quarantined: boolean;
     extraction_status: string | null;
+    /** What read the PDF: claude, cache (an earlier Claude result) or mock. Null for an email with no PDF. */
+    extraction_source?: "claude" | "cache" | "mock" | null;
+    extraction_model?: string | null;
   } | null;
   /** Null for an uploaded PDF that has no vendor yet. */
   vendor: (Vendor & { identity: IdentityResult | null }) | null;
@@ -456,6 +461,8 @@ export interface IndependentContact {
   cached: boolean | null;
   actor_run_id: string | null;
   hold_reasons: HoldReason[];
+  /** True when the number came from the mock finder, not an Apify run. */
+  simulated?: boolean;
 }
 
 export interface RemittanceDetails {

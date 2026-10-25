@@ -26,8 +26,8 @@ export function App() {
         </Route>
         {/* Full screen, no shell: second display. */}
         <Route path="/leaderboard" element={<Leaderboard />} />
-        {/* Hidden: not linked from any navigation. */}
-        <Route path="/design-check" element={<DesignCheck />} />
+        {/* A developer page: the design tokens rendered. Not in the product build. */}
+        {import.meta.env.DEV && <Route path="/design-check" element={<DesignCheck />} />}
       </Routes>
     </BrowserRouter>
   );

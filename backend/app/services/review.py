@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 
 from app import events as ev
 from app.audit import write_audit
+from app.config import get_settings
 from app.db import engine, get_session
 from app.models import (
     AuditActor,
@@ -139,8 +140,21 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
             "confidence": d.get("confidence"), "agreement": d.get("agreement"), "confidence_reason": d.get("confidence_reason"),
             "sources_agree": d.get("sources_agree"), "cached": d.get("cached"), "actor_run_id": d.get("actor_run_id"),
             "hold_reasons": d.get("hold_reasons") or [],
+            # The mock finder writes "Mock lookup" as its reason and nothing else does. The screen must not say Apify found it then.
+            "simulated": str(d.get("confidence_reason") or "").startswith("Mock lookup"),
         }
         reasons += [h["reason"] for h in independent["hold_reasons"] if h.get("reason") not in reasons]
+
+    # Was each call scripted? The call's own audit rows say how its answer was classified: "mock" means no phone was involved. A call that
+    # has not finished has no such row yet, so the current settings (or a seeded planted attack, which is always scripted) decide.
+    cfg = get_settings()
+    classifier_of = {(a.detail_json or {}).get("call_id"): (a.detail_json or {}).get("classifier") for a in audit if a.action in ("verification_call", "blocked_by_verification")}
+    scripted_now = cfg.mock_twilio or cfg.mock_cartesia or verify.is_seeded_call(pay.id)
+    call_views = []
+    for c in calls:
+        view = call_view(c, contacts.get(c.contact_id) if c.contact_id else None)
+        view["simulated"] = (classifier_of[c.id] == "mock") if classifier_of.get(c.id) else scripted_now
+        call_views.append(view)
 
     can_approve, approve_blocked = True, None
     if pay.status != PaymentStatus.held:
@@ -162,7 +176,8 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
         "invoice": None if inv is None else {
             "id": inv.id, "number": inv.number, "amount_usd": inv.amount_usd, "due_date": inv.due_date, "has_pdf": bool(inv.pdf_path),
             "requested_remittance": requested, "requested_account_differs_from_verified": requested_differs,
-            "quarantined": bool((inv.extracted_json or {}).get("quarantined")), "extraction_status": (inv.extracted_json or {}).get("status")},
+            "quarantined": bool((inv.extracted_json or {}).get("quarantined")), "extraction_status": (inv.extracted_json or {}).get("status"),
+            "extraction_source": (inv.extracted_json or {}).get("source"), "extraction_model": (inv.extracted_json or {}).get("model")},  # claude, cache (an earlier Claude result) or mock
         "vendor": None if vendor is None else {"id": vendor.id, "name": vendor.name, "trade": vendor.trade, "email_domain": vendor.email_domain,
                                                "status": vendor.status.value, "created_at": vendor.created_at, "identity": ident},
         "message": None if msg is None else {"id": msg.id, "thread_id": msg.thread_id, "from_addr": msg.from_addr, "reply_to": msg.reply_to,
@@ -175,7 +190,7 @@ async def get_payment(payment_id: str, session: Session = Depends(get_session)) 
                                 "invoice_id": f.invoice_id, "message_id": f.message_id,
                                 "page": f.page, "bbox": f.bbox_json, "page_width": f.page_width, "page_height": f.page_height} for f in findings],
         "identity": ident,
-        "calls": [call_view(c, contacts.get(c.contact_id) if c.contact_id else None) for c in calls],
+        "calls": call_views,
         "independent_contact": independent,
         "audit": [{"id": a.id, "at": a.at, "entity": a.entity, "entity_id": a.entity_id, "actor": a.actor.value, "action": a.action, "detail": a.detail_json} for a in audit],
         "actions": {"can_approve": can_approve, "approve_blocked_reason": approve_blocked, "can_reject": pay.status == PaymentStatus.held and not run.is_active(pay.run_id)},

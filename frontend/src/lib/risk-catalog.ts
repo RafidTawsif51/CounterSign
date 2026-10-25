@@ -78,7 +78,13 @@ export const AUDIT_ACTIONS: Record<string, string> = {
   paid: "Paid",
   blocked: "Blocked",
   blocked_by_verification: "Blocked after the verification call",
-  verification_call: "Verification call placed",
+  verification_call: "Verification call finished",
+  independent_contact_checked: "Phone number checked against the vendor's website",
+  request_marked_fraud: "Request marked as fraud",
+  held_after_verification: "Held after the verification call",
+  verification_in_progress: "Verification call in progress",
+  cleared_for_payment: "Cleared for payment",
+  totals_updated: "Run totals updated",
   verification_unclear: "Call unclear, sent to the controller",
   verification_no_answer: "No answer",
   verification_confirmed: "Vendor confirmed the change",
@@ -86,6 +92,8 @@ export const AUDIT_ACTIONS: Record<string, string> = {
   approved: "Approved by the controller",
   rejected: "Rejected by the controller",
   extraction_failed: "Extraction failed",
+  extracted: "Invoice read",
+  launched: "Attack launched",
 };
 
 export const ACTORS: Record<AuditActor, string> = { agent: "Agent", human: "Person", system: "System" };
