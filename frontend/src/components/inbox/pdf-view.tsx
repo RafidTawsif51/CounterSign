@@ -112,16 +112,19 @@ function Box({ finding, scale, pageWidth }: { finding: InjectionFinding; scale: 
   const right = Math.min(pageWidth + GUTTER, x1 * scale);
   const off = x1 * scale > pageWidth + GUTTER || x0 * scale > pageWidth;
   const label = TECHNIQUES[finding.technique] ?? finding.technique;
+  // The hidden words themselves, legible in ink on an opaque fill over the PDF (on the page they are white on white, tiny or off
+  // the edge). The box keeps the finding's position and width and grows downward to fit the text. Untrusted text: plain text only.
   return (
     <div
-      className="pointer-events-none absolute rounded-[2px] border-2 border-blocked bg-blocked/15"
-      style={{ left, top: top * scale - 2, width: Math.max(6, right - left), height: Math.max(6, (bottom - top) * scale + 4) }}
+      className="pointer-events-none absolute rounded-[2px] border-2 border-blocked bg-surface px-1.5 py-1"
+      style={{ left, top: top * scale - 2, width: Math.max(160, right - left), minHeight: Math.max(6, (bottom - top) * scale + 4) }}
       title={`${label}: ${finding.snippet}`}
     >
       <span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-blocked px-1 text-[10px] leading-4 font-medium text-white">
-        {label}
+        {label}, {Math.round(finding.confidence * 100)}% confidence
         {off ? " \u2192" : ""}
       </span>
+      <span className="block text-[11px] leading-[1.35] text-blocked-ink">{finding.snippet}</span>
     </div>
   );
 }
