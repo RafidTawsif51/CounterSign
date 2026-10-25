@@ -4,9 +4,10 @@ board before the real pipeline exists. Remove or gate before the public deploy."
 import asyncio
 import random
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app import events as ev
+from app.admin import require_admin
 from app.services import voice
 from app.models import (
     payment_id_for_invoice,
@@ -20,7 +21,7 @@ from app.models import (
     new_id,
 )
 
-router = APIRouter(prefix="/dev")
+router = APIRouter(prefix="/dev", dependencies=[Depends(require_admin)])
 
 _tasks: set[asyncio.Task] = set()  # keep references so tasks are not garbage collected
 

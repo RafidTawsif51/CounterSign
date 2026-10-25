@@ -5,7 +5,7 @@
 #                                       n is the number of attacks (5 to 300, default 200); clean invoices match it.
 #                                       409 if a job is already running, or if the server cannot run live (MOCK_CLAUDE true or no
 #                                       ANTHROPIC_API_KEY): a run spends Claude API money and measures nothing on mocks.
-#                                       401 if REDTEAM_TOKEN is set and the header x-redteam-token does not match.
+#                                       403 without the header X-Admin-Key (ADMIN_KEY on the server); see app/admin.py.
 #   GET  /api/redteam/jobs/{job_id}     {job_id, state: running | done | failed, phase, done, total, ...}
 #   GET  /api/redteam/results           the latest measured results, exactly the RedTeamResults shape in frontend/src/lib/types.ts.
 #                                       404 until a measured run has finished (the Red team page shows "no results yet" on a 404).
@@ -15,15 +15,15 @@
 
 import json
 import os
-import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.admin import require_admin
 from app.config import get_settings
 from app.redteam import evaluate
 
@@ -42,11 +42,9 @@ def _running() -> Optional[str]:
     return None
 
 
-@router.post("/redteam/run", status_code=202)
-def start_run(body: Optional[RunIn] = None, x_redteam_token: Optional[str] = Header(default=None)) -> dict:
+@router.post("/redteam/run", status_code=202, dependencies=[Depends(require_admin)])
+def start_run(body: Optional[RunIn] = None) -> dict:
     s = get_settings()
-    if s.redteam_token and not secrets.compare_digest(x_redteam_token or "", s.redteam_token):
-        raise HTTPException(401, "this route needs the x-redteam-token header")
     if s.mock_claude or not s.anthropic_api_key:
         raise HTTPException(409, "the red team runs live: set MOCK_CLAUDE=false and ANTHROPIC_API_KEY on this server")
     busy = _running()

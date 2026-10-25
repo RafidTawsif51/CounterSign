@@ -71,7 +71,7 @@ All under `/api`, JSON. One SSE stream drives the live board.
 
 | Method | Route | Purpose |
 |---|---|---|
-| POST | /api/demo/reset | Rebuild seeded state (clears attacks unless keep_leaderboard=true) |
+| POST | /api/demo/reset | Rebuild seeded state (clears attacks unless keep_leaderboard=true). Needs header X-Admin-Key |
 | GET | /api/vendors | List vendors with risk summary |
 | GET | /api/vendors/{id}/history | Invoices, bank history, contacts, calls |
 | GET | /api/inbox/threads | AP inbox threads |
@@ -92,7 +92,7 @@ All under `/api`, JSON. One SSE stream drives the live board.
 | POST | /api/attacks | Launch an attack card (body: attacker_name, card, payload) |
 | GET | /api/attacks/leaderboard | Attempts and catch results |
 | POST | /api/bounty/inbound | Inbound-email webhook for bounty submissions (rate-limited, sandbox only) |
-| POST | /api/redteam/run | Generate and run N attacks against baseline and Countersign |
+| POST | /api/redteam/run | Generate and run N attacks against baseline and Countersign. Needs header X-Admin-Key |
 | GET | /api/redteam/results | Catch rates by attack type |
 | GET | /api/system/status | Real vs simulated status of each component, for the status panel |
 

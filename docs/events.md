@@ -8,8 +8,8 @@ Source: `backend/app/events.py`. Models are Pydantic classes; `EVENT_MODELS` map
 |---|---|
 | `GET /api/payment-runs/{run_id}/events` | Every event of one run. Events already stored for the run are replayed first, then live ones. Safe to connect before, during or after the run. |
 | `GET /api/leaderboard/events` | The global channel. Live `attack.logged` (and `attack.queued`, `demo.reset`) events, plus the call events and `run.updated` described under "Late call outcomes". No replay; load history from `GET /api/attacks/leaderboard`. |
-| `POST /api/dev/mock-run` | Dev only. Starts a fake run in the background (`?delay_ms=300`), returns `{"run_id", "events_url"}`. |
-| `GET /api/dev/subscribers` | Dev only. Live subscriber count per channel. |
+| `POST /api/dev/mock-run` | Dev only: needs the header `X-Admin-Key` (403 without it) and does not exist when `APP_ENV=production`. Starts a fake run in the background (`?delay_ms=300`), returns `{"run_id", "events_url"}`. |
+| `GET /api/dev/subscribers` | Dev only, same rules. Live subscriber count per channel. |
 
 ## Late call outcomes (global channel)
 
@@ -46,7 +46,7 @@ Common fields on every message:
 | run_id | channel key. null only for an `attack.logged` that is not tied to a run |
 | at | ISO 8601 UTC timestamp |
 
-Comment lines (`: connected`, `: keepalive`) are sent on connect and every 15 seconds of silence. `EventSource` ignores them. The server sends `retry: 3000`. The stream stays open after `run.completed`; close it from the client.
+Comment lines (`: connected`, `: keepalive`) are sent on connect and every 15 seconds of silence. `EventSource` ignores them. The server sends `retry: 3000`. The stream stays open after `run.completed`; close it from the client. The frontend keeps one connection per stream URL for the whole app (browsers allow about six per origin over HTTP/1.1) and closes a run's stream after `run.report`: the global channel carries the later call, approval and final-status events.
 
 Slow clients: each subscriber has a queue of 1000. If it fills, the oldest message is dropped for that client only.
 

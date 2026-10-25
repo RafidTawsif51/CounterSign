@@ -11,6 +11,8 @@ VITE_API_URL=http://localhost:8000
 VITE_USE_MOCKS=false
 ```
 
+Also set `ADMIN_KEY` in `.env` to any long random value. Reset demo, Present and the red-team run need it (the app asks for it once per tab); while it is blank those routes answer 403.
+
 ### Backend (port 8000)
 
 ```sh
@@ -35,7 +37,7 @@ Open http://localhost:5173. Screens, modes and shortcuts are under [Frontend](#f
 
 ### At the venue
 
-- Between demos: "Reset demo" in the top bar (or press R) restores the seeded week in under a second (or `curl -X POST http://localhost:8000/api/demo/reset`).
+- Between demos: "Reset demo" in the top bar (or press R) restores the seeded week in under a second (or `curl -X POST -H "X-Admin-Key: $ADMIN_KEY" http://localhost:8000/api/demo/reset`). Reset, Present and the red-team run need `ADMIN_KEY` from `.env`: the app asks for it once per tab and keeps it in that tab's session storage only. With `ADMIN_KEY` blank those routes stay locked.
 - Leaderboard on the TV: http://localhost:5173/leaderboard?tv=1, or press L for a separate window to drag onto the second screen.
 - On the projector: press F for presentation mode.
 - Vite reads `.env` only when it starts: restart `npm run dev` after changing a `VITE_` value.

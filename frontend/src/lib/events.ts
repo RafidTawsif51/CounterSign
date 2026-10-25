@@ -25,45 +25,113 @@ interface Transport {
 export const RECONNECT_MAX_MS = 10_000;
 const backoff = (attempt: number) => Math.min(RECONNECT_MAX_MS, 1000 * 2 ** attempt);
 
+/**
+ * One EventSource per stream URL for the whole app. A browser allows about six connections per origin over HTTP/1.1 and every
+ * open stream holds one, so two components (or two tabs) listening to the same URL must share a connection, or a later request
+ * (an attack launch, a payment fetch) waits behind them. Listeners join and leave; the connection opens with the first and
+ * closes with the last.
+ *
+ * A run's stored events are replayed by the server only when a connection opens, so each shared run stream keeps what it has
+ * delivered and replays it to a listener that joins later. The global channel has no replay and no buffer. A run stream is
+ * closed after run.report: the global channel carries everything that can still happen to that run (calls, approvals, final
+ * statuses), and a listener that joins a finished run is served from the buffer without a new connection.
+ */
+const GLOBAL_PATH = "/api/leaderboard/events";
+
+interface Listener {
+  onEvent: (e: RunEvent) => void;
+  onStatus: (s: StreamStatus) => void;
+}
+
+interface SharedStream {
+  listeners: Set<Listener>;
+  status: StreamStatus;
+  /** Delivered events, for a late joiner; only for run streams. */
+  buffer: RunEvent[];
+  ids: Set<string>;
+  finished: boolean;
+  source: EventSource | null;
+  timer: ReturnType<typeof setTimeout> | null;
+  attempt: number;
+  closed: boolean;
+}
+
+const streams = new Map<string, SharedStream>();
+
+function startStream(path: string, s: SharedStream) {
+  const broadcast = (status: StreamStatus) => {
+    s.status = status;
+    for (const l of [...s.listeners]) l.onStatus(status);
+  };
+  // EventSource retries on its own, but gives up for good on some failures (a 5xx, a proxy error page) and never backs
+  // off. So every error closes it and this reopens on our schedule. The server replays a run's stored events on each
+  // connection; the buffer and useRunEvents drop the repeats by event id.
+  const connect = () => {
+    if (s.closed || s.finished) return;
+    const source = new EventSource(streamUrl(path));
+    s.source = source;
+    source.onopen = () => {
+      s.attempt = 0;
+      broadcast("live");
+    };
+    source.onmessage = (msg) => {
+      let event: RunEvent;
+      try {
+        event = JSON.parse(msg.data) as RunEvent;
+      } catch {
+        return; // A malformed frame is dropped; the next one still arrives.
+      }
+      if (path !== GLOBAL_PATH) {
+        if (s.ids.has(event.id)) return;
+        s.ids.add(event.id);
+        s.buffer.push(event);
+      }
+      for (const l of [...s.listeners]) l.onEvent(event);
+      if (event.type === "run.report" && path !== GLOBAL_PATH) {
+        s.finished = true;
+        source.close();
+        s.source = null;
+      }
+    };
+    source.onerror = () => {
+      source.close();
+      if (s.closed || s.finished) return;
+      reportFailure();
+      broadcast("reconnecting");
+      s.timer = setTimeout(connect, backoff(s.attempt++));
+    };
+  };
+  connect();
+}
+
 const sseTransport: Transport = {
   open(path, onEvent, onStatus) {
-    let source: EventSource | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-    let closed = false;
-
-    // EventSource retries on its own, but gives up for good on some failures (a 5xx, a proxy error page) and never backs
-    // off. So every error closes it and this reopens on our schedule. The server replays a run's stored events on each
-    // connection; useRunEvents drops the repeats by event id.
-    const connect = () => {
-      source = new EventSource(streamUrl(path));
-      source.onopen = () => {
-        attempt = 0;
-        onStatus("live");
-      };
-      source.onmessage = (msg) => {
-        try {
-          onEvent(JSON.parse(msg.data) as RunEvent);
-        } catch {
-          // A malformed frame is dropped; the next one still arrives.
-        }
-      };
-      source.onerror = () => {
-        source?.close();
-        if (closed) return;
-        reportFailure();
-        onStatus("reconnecting");
-        timer = setTimeout(connect, backoff(attempt++));
-      };
-    };
-    connect();
+    let s = streams.get(path);
+    const listener: Listener = { onEvent, onStatus };
+    if (!s) {
+      s = { listeners: new Set([listener]), status: "connecting", buffer: [], ids: new Set(), finished: false, source: null, timer: null, attempt: 0, closed: false };
+      streams.set(path, s);
+      startStream(path, s);
+    } else {
+      s.listeners.add(listener);
+      // Joined an existing stream: hand over what it has already delivered, then its state.
+      for (const e of s.buffer) onEvent(e);
+      if (s.status === "live" || s.finished) queueMicrotask(() => s!.listeners.has(listener) && onStatus("live"));
+    }
+    const joined = s;
     return () => {
-      closed = true;
-      if (timer) clearTimeout(timer);
-      source?.close();
+      joined.listeners.delete(listener);
+      if (joined.listeners.size > 0) return;
+      joined.closed = true;
+      if (joined.timer) clearTimeout(joined.timer);
+      joined.source?.close();
+      if (streams.get(path) === joined) streams.delete(path);
     };
   },
 };
+
+/** For tests and the connection indicator: how many real connections are open or being retried. */
+export const openStreamCount = () => [...streams.values()].filter((s) => !s.finished).length;
 
 const mockTransport: Transport = {
   open(path, onEvent, onStatus) {

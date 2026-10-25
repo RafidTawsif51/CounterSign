@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
+import { AdminKeyDialog } from "@/components/shared/admin-key-dialog";
 import { CommandPalette } from "@/components/shared/command-palette";
 import { DemoShortcuts } from "@/components/shared/demo-shortcuts";
 import { OfflineBanner } from "@/components/shared/offline-demo";
@@ -36,6 +37,7 @@ export function AppShell() {
         </div>
       </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <AdminKeyDialog />
       <DemoShortcuts helpOpen={shortcutsOpen} onHelpOpenChange={setShortcutsOpen} onReset={() => setResetOpen(true)} />
     </RunProvider>
   );

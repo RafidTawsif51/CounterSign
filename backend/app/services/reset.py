@@ -16,12 +16,13 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app import events as ev
+from app.admin import require_admin
 from app.config import get_settings
 from app.db import engine
 from app.models import Attack, AttackSource
@@ -80,7 +81,7 @@ def _clear_uploads() -> int:
     return n
 
 
-@router.post("/demo/reset")
+@router.post("/demo/reset", dependencies=[Depends(require_admin)])
 async def demo_reset(keep_leaderboard: bool = False, body: Optional[ResetIn] = Body(default=None)) -> dict:
     keep = keep_leaderboard or bool(body and body.keep_leaderboard)
     global _busy

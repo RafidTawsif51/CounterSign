@@ -85,8 +85,11 @@ class Settings(BaseSettings):
 
     frontend_url: str = ""
 
-    # POST /api/redteam/run spends Claude API money. When this is set the route needs the header x-redteam-token with this value.
-    redteam_token: str = ""
+    # Locks POST /api/demo/reset, POST /api/redteam/run (it spends Claude API money) and every /api/dev/* route: they need the header
+    # X-Admin-Key with this value, and answer 403 without it. Blank means locked for everyone. See app/admin.py.
+    admin_key: str = ""
+    # "production" does not register /api/dev/* at all. Anything else (the default) registers them, behind the admin key.
+    app_env: str = "development"
 
     # Where the generated vendor sites are published (GitHub Pages). Each vendor's website_url is <this>/<vendor-slug>/.
     pages_base_url: str = "https://aayushswami123.github.io/Countersign"

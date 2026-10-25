@@ -2,6 +2,7 @@
 // In mock mode (VITE_USE_MOCKS=true, or the offline-demo switch) every call is answered by lib/mock instead.
 
 import { ApiError, detailText, statusText } from "@/lib/api-error";
+import { askForAdminKey, clearAdminKey, getAdminKey } from "@/lib/admin-key";
 import { API_URL } from "@/lib/api-url";
 import { reportFailure } from "@/lib/connection";
 import { isMock, isReplay } from "@/lib/data-mode";
@@ -33,7 +34,7 @@ export const BOUNTY_EMAIL = (import.meta.env.VITE_BOUNTY_EMAIL ?? "").trim();
 
 type Method = "GET" | "POST";
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: Method, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   if (isReplay()) return replayRequest<T>(method, path);
   if (isMock()) return mockRequest<T>(method, path, body);
 
@@ -42,7 +43,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   try {
     res = await fetch(`${API_URL}${path}`, {
       method,
-      headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
+      headers: { ...(body && !isForm ? { "Content-Type": "application/json" } : {}), ...extraHeaders },
       body: body == null ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
@@ -69,10 +70,29 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const get = <T>(path: string) => request<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
 
+/**
+ * A POST that needs the admin key (reset, the red-team run). The key is asked for once and kept for this tab. If the server answers 403 the
+ * saved key is wrong or was changed: it is forgotten and asked for once more. Offline demo and replay need no key (nothing reaches the server).
+ */
+async function adminPost<T>(path: string, body?: unknown): Promise<T> {
+  if (isReplay() || isMock()) return post<T>(path, body);
+  const key = getAdminKey() ?? (await askForAdminKey(false));
+  if (!key) throw new ApiError(403, path, "The admin key is needed to do that");
+  try {
+    return await request<T>("POST", path, body, { "X-Admin-Key": key });
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 403) throw err;
+    clearAdminKey();
+    const again = await askForAdminKey(true);
+    if (!again) throw err;
+    return request<T>("POST", path, body, { "X-Admin-Key": again });
+  }
+}
+
 export { ApiError };
 
 export const api = {
-  resetDemo: (keepLeaderboard = false) => post<void>(`/api/demo/reset?keep_leaderboard=${keepLeaderboard}`),
+  resetDemo: (keepLeaderboard = false) => adminPost<void>(`/api/demo/reset?keep_leaderboard=${keepLeaderboard}`),
 
   vendors: () => get<VendorSummary[]>("/api/vendors"),
   vendorHistory: (vendorId: string) => get<VendorHistory>(`/api/vendors/${vendorId}/history`),
@@ -107,7 +127,7 @@ export const api = {
 
   /** backend/app/redteam/api.py. Starts a live run in its own process (202 {job_id, n, status_url}); it spends API money, so the page never calls it.
    *  Results are 404 until a measured run has finished (demo/redteam-results.json). */
-  runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
+  runRedTeam: (n: number) => adminPost<void>("/api/redteam/run", { n }),
   redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 
   /** What is real, simulated or on its mock right now. /status falls back to the documented list if it fails. */

@@ -63,7 +63,8 @@ api.include_router(attacks.router)
 api.include_router(bounty.router)
 api.include_router(reset.router)
 api.include_router(status.router)
-api.include_router(dev.router)
+if settings.app_env != "production":  # the fake-run helpers do not exist in production at all
+    api.include_router(dev.router)
 api.include_router(integrations.router)
 api.include_router(redteam_api.router)
 

@@ -16,6 +16,8 @@ os.environ["PAGES_BASE_URL"] = "https://aayushswami123.github.io/Countersign"  #
 # Tests never use the live .env: environment variables beat the .env file, so these pin every mock on and the key off.
 for _flag in ("NESSIE", "CRS", "APIFY", "TWILIO", "CARTESIA", "CLAUDE"):
     os.environ[f"MOCK_{_flag}"] = "true"
+os.environ["ADMIN_KEY"] = "test-admin-key"  # the routes behind the admin key (reset, red-team run, dev); every test client sends it unless a test removes it
+os.environ["APP_ENV"] = "development"
 os.environ["MOCK_INJECTION"] = "false"
 os.environ["MOCK_RISK"] = "false"  # the real assessor; its Claude classifier stays off because MOCK_CLAUDE is true
 os.environ["ANTHROPIC_API_KEY"] = ""
@@ -35,6 +37,19 @@ from pathlib import Path  # noqa: E402
 import pytest  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Every TestClient sends the admin key, so the many tests that reset the demo need no change. test_admin.py removes it to test the lock.
+from starlette.testclient import TestClient  # noqa: E402
+
+_client_init = TestClient.__init__
+
+
+def _client_init_with_admin_key(self, *args, **kwargs):
+    _client_init(self, *args, **kwargs)
+    self.headers.setdefault("X-Admin-Key", os.environ["ADMIN_KEY"])
+
+
+TestClient.__init__ = _client_init_with_admin_key
 
 
 @pytest.fixture(scope="session")

@@ -266,6 +266,6 @@ def test_run_route_guards(monkeypatch):
         assert client.post("/api/redteam/run", json={"n": 5000}).status_code == 422
         r = client.post("/api/redteam/run", json={"n": 200})
         assert r.status_code == 409 and "MOCK_CLAUDE" in r.text  # a live run spends money: refused on mocks
-        monkeypatch.setattr(get_settings(), "redteam_token", "secret")
-        assert client.post("/api/redteam/run", json={"n": 200}).status_code == 401
+        client.headers.pop("X-Admin-Key")  # the admin key is covered in test_admin.py; here only that a missing key is refused first
+        assert client.post("/api/redteam/run", json={"n": 200}).status_code == 403
         assert client.get("/api/redteam/jobs/rt_nope").status_code == 404
