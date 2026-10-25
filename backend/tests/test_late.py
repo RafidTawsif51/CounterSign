@@ -114,7 +114,7 @@ def test_a_late_denial_blocks_updates_everything_and_reaches_the_global_channel(
     assert (upd["run_id"], upd["paid"], upd["held"], upd["blocked"]) == (run_id, 37, 1, 2)
     with Session(eng) as s:  # and they were stored on the run channel too
         stored = [e.type for e in s.exec(select(ev.Event).where(ev.Event.run_id == run_id).order_by(ev.Event.at))]
-    assert stored[-1] in ("run.updated", "attack.logged") and "run.updated" in stored
+    assert stored[-1] in ("run.updated", "attack.logged", "run.report") and "run.updated" in stored  # run.report: the rewritten controller report
     second = client.post(f"/api/payments/{BANK}/ask", json={"question": "why was this held"}).json()
     assert "blocked" in second["answer"] and second["answer"] != first["answer"]  # re-warmed for the seeded attack, so it may be a cache hit
     ask.invalidate(BANK)

@@ -80,7 +80,13 @@ class Settings(BaseSettings):
     # Urgency / secrecy / authority classifier verdicts keyed by content hash.
     risk_cache_dir: str = "./.cache/risk"
 
+    # Claude-written run reports keyed by a hash of the structured facts they were written from.
+    report_cache_dir: str = "./.cache/reports"
+
     frontend_url: str = ""
+
+    # POST /api/redteam/run spends Claude API money. When this is set the route needs the header x-redteam-token with this value.
+    redteam_token: str = ""
 
     # Where the generated vendor sites are published (GitHub Pages). Each vendor's website_url is <this>/<vendor-slug>/.
     pages_base_url: str = "https://aayushswami123.github.io/Countersign"

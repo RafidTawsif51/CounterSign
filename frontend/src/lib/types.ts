@@ -103,7 +103,7 @@ export interface Signal {
   evidence_id: string;
 }
 
-// Hard rules from risk.py. amount_over_max is the spec's "more than 50% above the 12-month max".
+// Hard rules from risk.py. amount_over_max is "more than 30% above the 12-month max" (the spec says 50%; see risk.AMOUNT_OVER_MAX_FACTOR).
 export type HardRule = "destination_changed" | "new_vendor" | "hidden_instructions" | "amount_over_max" | "contacts_differ";
 
 export interface RiskAssessment {
@@ -284,6 +284,14 @@ export interface RunReportEvent extends EventBase {
   paid_usd: number;
   blocked_usd: number;
   findings: string[]; // untrusted
+  /** The controller report (services/report.py): plain text, Claude-written when it worked, else the summary again. Absent on older events. */
+  report?: string | null;
+  report_source?: "claude" | "basic" | null;
+  /** paid, stopped, protected (strings) and needs_decision (list); null for a basic report. Built from structured fields only. */
+  sections?: { paid: string; stopped: string; needs_decision: string[]; protected: string } | null;
+  held_usd?: number | null;
+  /** True when sent again after the run because a late call outcome changed it; the newest run.report wins. */
+  updated?: boolean;
 }
 export interface AttackLoggedEvent extends EventBase {
   type: "attack.logged";
@@ -325,7 +333,6 @@ export type RunEventType = RunEvent["type"];
 
 // ---------- API responses ----------
 // Shapes below are taken from the backend's route code (docs/ does not cover them yet) and checked against a live run.
-// One is still a proposal with no backend behind it: RedTeamResults.
 
 /** How a transfer went out (payments.py): "nessie" sandbox, "mock" adapter, or "mock_fallback" when Nessie failed. */
 export type TransferMode = "nessie" | "mock" | "mock_fallback";
@@ -699,8 +706,9 @@ export interface LeaderboardResponse {
 export type RedTeamFamily = "bank_change" | "poisoned_invoice" | "ceo_pressure" | "lookalike_domain" | "amount_padding";
 
 /**
- * GET /api/redteam/results. Proposed shape: backend/app/redteam/ is empty and the route does not exist yet (Aditya's
- * harness). Metrics follow CLAUDE.md "Red-team harness". Confirm with Aditya before relying on extra fields.
+ * GET /api/redteam/results (backend/app/redteam/api.py). The backend returns exactly these keys and no others; the fuller
+ * results (per-case rows, usage, method notes) are in demo/redteam-results.json. 404 until a measured run has finished.
+ * Metrics follow CLAUDE.md "Red-team harness".
  */
 export interface RedTeamResults {
   /** "mock" until a measured run exists, so the page can say the numbers are samples. */

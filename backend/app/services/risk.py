@@ -97,6 +97,10 @@ _RULE_DECISION = {
     "amount_over_max": Decision.controller_review,
 }
 HIDDEN_RULE_MIN_CONFIDENCE = 0.5
+# An invoice above this multiple of the vendor's 12-month maximum goes to the controller. The spec says 1.5 (more than 50% over). The red team
+# (docs/redteam.md) found that padding up to about 1.5 times the maximum from a real address scored 0 to 15 and was paid; 1.3 is the knee of the
+# curve measured on the seed's 1,069 normal historical invoices with enough history (2.0% of them exceed it, against 0.6% at 1.5, 3.7% at 1.2 and 11.6% at 1.0).
+AMOUNT_OVER_MAX_FACTOR = 1.3
 
 
 @dataclass(frozen=True)
@@ -205,7 +209,7 @@ class _BaseAssessor:
             fired.append("hidden_instructions")
         if ctx.requested_contacts_differ:
             fired.append("contacts_differ")
-        if ctx.history_amounts and payment.amount_usd > 1.5 * max(ctx.history_amounts):
+        if ctx.history_amounts and payment.amount_usd > AMOUNT_OVER_MAX_FACTOR * max(ctx.history_amounts):
             fired.append("amount_over_max")
         return fired
 

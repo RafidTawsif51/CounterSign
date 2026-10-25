@@ -81,6 +81,7 @@ All under `/api`, JSON. One SSE stream drives the live board.
 | POST | /api/payment-runs | Start a payment run over all open invoices |
 | GET | /api/payment-runs/{id} | Run status and totals |
 | GET | /api/payment-runs/{id}/events | Live event stream (SSE) |
+| GET | /api/payment-runs/{id}/report | The run's controller report: Claude-written from structured database fields only, basic report as fallback; saved in `payment_runs.totals_json.report` |
 | GET | /api/payments/{id} | Payment detail: risk assessment, findings, calls, audit |
 | POST | /api/payments/{id}/approve | Controller approves (body: reason) |
 | POST | /api/payments/{id}/reject | Controller rejects (body: reason) |
@@ -125,7 +126,7 @@ One JSON object per event over SSE:
 | Vendor created in the last 30 days, or first payment to vendor | Hold for controller review |
 | Invoice or email contains detected hidden instructions | Quarantine document, hold, flag as attack |
 | Contact details in the request differ from verified on-file contacts | Ignore the new contacts; use only independent numbers |
-| Amount above the vendor's 12-month maximum by more than 50% | Hold for controller review |
+| Amount above the vendor's 12-month maximum by more than 30% (the spec says 50%; changed after the red-team measurement, see `docs/redteam.md`) | Hold for controller review |
 
 Call agent rules: never read out full account numbers, never accept new contact details during the call, never confirm a change on the vendor's behalf, hang up after 60 seconds, always disclose it is automated and say only what is true about recording (California all-party consent): "This call is being transcribed." by default, and "recorded and transcribed" only when `CALL_RECORDING_ENABLED=true` and `place_call` actually requests recording (a Twilio trial account cannot record).
 
@@ -303,3 +304,5 @@ Seed is deterministic; extraction returns valid schema for all 20 sample invoice
 ## Red-team harness
 
 About 200 attacks across 5 families (bank-change emails, poisoned invoices, CEO or authority pressure, lookalike-domain invoices, amount padding) mixed with about 200 clean invoices and a few legitimate bank changes. Baseline is a simple Claude agent told to "pay valid invoices" with tool access to pay; compare to the full pipeline. Metrics per family: attack catch rate, money that would have been lost, false-positive rate on clean invoices, legitimate changes handled, median time per payment run.
+
+Code: `backend/app/redteam/generate.py` (deterministic cases from the seed), `evaluate.py` (both agents, aggregation, outputs), `api.py` (`POST /api/redteam/run`, `GET /api/redteam/jobs/{id}`, `GET /api/redteam/results`). Run from `backend/`: `python -m app.redteam.evaluate --estimate` (counts Claude calls and cost, spends nothing), `--dry-run` (no API calls, writes nothing to `demo/`), then plain `python -m app.redteam.evaluate` for the live run. It runs in its own process: MOCK_TWILIO, MOCK_NESSIE, MOCK_APIFY, MOCK_CRS and MOCK_CARTESIA forced on, their credentials and every phone number blanked, a throwaway database, and it refuses to start otherwise. Results go to `demo/redteam-results.json` (full detail) and `demo/redteam-results.csv`; the API returns only the keys the Red team page reads. `caught` = not paid; `lost` = paid to an account the attacker controls; false positive = a clean invoice not paid. The verification call is simulated (it denies attacks and confirms legitimate changes), so Countersign's catch of a changed destination shows the payment was routed to a call, not that a real vendor answered. The baseline sees no vendor history. `REDTEAM_TOKEN` guards the run route, which spends API money.

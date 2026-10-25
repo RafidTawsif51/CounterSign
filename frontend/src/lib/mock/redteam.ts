@@ -1,5 +1,6 @@
-// Mock GET /api/redteam/results. Sample numbers, not a measurement: the harness (backend/app/redteam) is not built yet,
-// and the response says source "mock" so the page labels them. Shaped like CLAUDE.md's plan: about 200 attacks over
+// Mock GET /api/redteam/results, for the offline demo (VITE_USE_MOCKS). Sample numbers, not a measurement: the real harness
+// (backend/app/redteam) writes demo/redteam-results.json, and this response says source "mock" so the page labels them.
+// Shaped like CLAUDE.md's plan: about 200 attacks over
 // 5 families mixed with about 200 clean invoices, a baseline Claude agent told to "pay valid invoices" against the
 // full pipeline. Countersign's misses here pay the real vendor's verified account (no bank change), so they move no
 // money to a scammer; the baseline's misses do.

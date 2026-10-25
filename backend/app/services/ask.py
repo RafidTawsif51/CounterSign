@@ -66,7 +66,7 @@ PLAIN_RULE = {
     "new_vendor": "the vendor is new or this is the first payment to it",
     "hidden_instructions": "hidden instructions were found in the document, so it was quarantined",
     "contacts_differ": "the contact details in the request differ from the contacts on file",
-    "amount_over_max": "the amount is more than 50 percent above the vendor's 12-month maximum",
+    "amount_over_max": f"the amount is more than {round((risk.AMOUNT_OVER_MAX_FACTOR - 1) * 100)} percent above the vendor's 12-month maximum",
 }
 
 SYSTEM = """You explain one accounts-payable decision to a controller or a judge. You are read-only: you have no tools except answer_question and you cannot approve, pay, hold, change or send anything.

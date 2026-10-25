@@ -89,7 +89,7 @@ def build_cards(s) -> list[dict]:
         {
             "title": "freestyle_amount_padding",
             "does": "Sends a 'revised invoice' that supersedes the real one with a much larger amount, to the account already on file.",
-            "catches": "Amount more than 50 percent above the vendor's 12-month maximum (hard rule: hold for controller review) and amount outlier (15), plus the lookalike domain.",
+            "catches": "Amount more than 30 percent above the vendor's 12-month maximum (hard rule: hold for controller review) and amount outlier (15), plus the lookalike domain.",
             "request": {
                 "attacker_name": "Freestyle Ben",
                 "card": "freestyle",

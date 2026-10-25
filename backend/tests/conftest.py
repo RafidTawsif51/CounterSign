@@ -8,6 +8,7 @@ os.environ["UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
 os.environ["EXTRACT_CACHE_DIR"] = os.path.join(_tmp, "extract_cache")
 os.environ["INJECTION_CACHE_DIR"] = os.path.join(_tmp, "injection_cache")
 os.environ["RISK_CACHE_DIR"] = os.path.join(_tmp, "risk_cache")
+os.environ["REPORT_CACHE_DIR"] = os.path.join(_tmp, "report_cache")
 os.environ["CONTACTS_CACHE_DIR"] = os.path.join(_tmp, "contacts_cache")
 os.environ["LIVENESS_PATH"] = os.path.join(_tmp, "last_success.json")
 os.environ["FRONTEND_URL"] = "https://countersign.example"

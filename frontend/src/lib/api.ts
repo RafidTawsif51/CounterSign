@@ -101,7 +101,8 @@ export const api = {
   launchAttack: (req: LaunchAttackRequest) => post<LaunchAttackResponse>("/api/attacks", req),
   leaderboard: () => get<LeaderboardResponse>("/api/attacks/leaderboard"),
 
-  /** Not on the backend yet: backend/app/redteam is empty. The mock answers results; /red-team shows the error live. */
+  /** backend/app/redteam/api.py. Starts a live run in its own process (202 {job_id, n, status_url}); it spends API money, so the page never calls it.
+   *  Results are 404 until a measured run has finished (demo/redteam-results.json). */
   runRedTeam: (n: number) => post<void>("/api/redteam/run", { n }),
   redTeamResults: () => get<RedTeamResults>("/api/redteam/results"),
 

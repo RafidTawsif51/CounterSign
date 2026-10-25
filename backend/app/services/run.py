@@ -692,11 +692,10 @@ async def execute_run(run_id: str, invoice_ids: list[str], registry: Optional[se
                 notes.append(f"{vname}: {stats.notes.get(pay.id, pay.status.value)}")
         log.info("run %s done in %ss: %s", run_id, wall, totals)
         await ev.emit(ev.RunCompleted(run_id=run_id, paid=totals["paid"], held=totals["held"], blocked=totals["blocked"], total_usd=totals["total_usd"]))
-        await ev.emit(ev.RunReport(
-            run_id=run_id,
-            summary=(f"{len(invoice_ids)} invoices processed: {totals['paid']} paid (${totals['total_usd']:,.2f}), {totals['held']} held for the controller, "
-                     f"{totals['blocked']} blocked (${totals['blocked_usd']:,.2f} protected)."),
-            paid=totals["paid"], held=totals["held"], blocked=totals["blocked"], paid_usd=totals["total_usd"], blocked_usd=totals["blocked_usd"], findings=notes))
+        from app.services import report  # lazy, like ask below
+
+        # The basic summary and findings as before, plus a Claude-written controller report when it works (services/report.py). Never raises.
+        await report.finish(run_id, invoice_count=len(invoice_ids), notes=notes)
         from app.services import ask  # lazy: ask reads what this run just wrote, so the demo's /ask answers are instant
 
         warm = asyncio.create_task(ask.warm())
