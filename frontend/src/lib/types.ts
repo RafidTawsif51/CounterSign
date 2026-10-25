@@ -103,7 +103,7 @@ export interface Signal {
   evidence_id: string;
 }
 
-// Hard rules from risk.py. amount_over_max is the spec's "more than 50% above the 12-month max".
+// Hard rules from risk.py. amount_over_max is "more than 30% above the 12-month max" (the spec says 50%; see risk.AMOUNT_OVER_MAX_FACTOR).
 export type HardRule = "destination_changed" | "new_vendor" | "hidden_instructions" | "amount_over_max" | "contacts_differ";
 
 export interface RiskAssessment {

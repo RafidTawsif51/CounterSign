@@ -125,7 +125,7 @@ One JSON object per event over SSE:
 | Vendor created in the last 30 days, or first payment to vendor | Hold for controller review |
 | Invoice or email contains detected hidden instructions | Quarantine document, hold, flag as attack |
 | Contact details in the request differ from verified on-file contacts | Ignore the new contacts; use only independent numbers |
-| Amount above the vendor's 12-month maximum by more than 50% | Hold for controller review |
+| Amount above the vendor's 12-month maximum by more than 30% (the spec says 50%; changed after the red-team measurement, see `docs/redteam.md`) | Hold for controller review |
 
 Call agent rules: never read out full account numbers, never accept new contact details during the call, never confirm a change on the vendor's behalf, hang up after 60 seconds, always disclose it is automated and say only what is true about recording (California all-party consent): "This call is being transcribed." by default, and "recorded and transcribed" only when `CALL_RECORDING_ENABLED=true` and `place_call` actually requests recording (a Twilio trial account cannot record).
 

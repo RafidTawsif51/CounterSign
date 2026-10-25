@@ -101,7 +101,7 @@ Request:
 
 What the judge does: Sends a 'revised invoice' that supersedes the real one with a much larger amount, to the account already on file.
 
-What Countersign catches: Amount more than 50 percent above the vendor's 12-month maximum (hard rule: hold for controller review) and amount outlier (15), plus the lookalike domain.
+What Countersign catches: Amount more than 30 percent above the vendor's 12-month maximum (hard rule: hold for controller review) and amount outlier (15), plus the lookalike domain.
 
 Request:
 

@@ -536,6 +536,23 @@ def aggregate(cases: list, base: dict, cs: dict, base_batch_s: list, cs_batch_s:
     }
 
 
+def carry_timing(doc: dict, api_calls: int, official: bool) -> None:
+    """A rerun served entirely from the on-disk caches makes no Claude call, so its wall time says nothing about speed. Keep the Countersign
+    timing of the last run that did make live calls, and say so in the file, rather than publish a time that is mostly cache reads."""
+    if not official or api_calls > 0:
+        doc["details"]["timing_from"] = doc["details"]["job_id"]
+        return
+    try:
+        prev = json.loads(RESULTS_JSON.read_text())
+        doc["median_run_seconds"]["countersign"] = prev["median_run_seconds"]["countersign"]
+        doc["details"]["batch_seconds"]["countersign_measured"] = prev["details"]["batch_seconds"]["countersign_measured"]
+        doc["details"]["timing_from"] = prev["details"].get("timing_from") or prev["details"]["job_id"]
+        doc["details"]["timing_note"] = (f"This run made 0 Claude calls (all served from the on-disk caches), so its own wall time is not a measurement. "
+                                         f"The Countersign timing is carried over from {doc['details']['timing_from']}, which made live calls.")
+    except (OSError, ValueError, KeyError):
+        doc["details"]["timing_note"] = "This run made 0 Claude calls (all served from the on-disk caches), so the Countersign time here is cache reads, not a measurement."
+
+
 API_KEYS = ("source", "generated_at", "families", "legit_changes", "median_run_seconds")
 
 
@@ -727,6 +744,7 @@ def main(argv: Optional[list] = None) -> int:
             ],
         }
         doc = aggregate(cases, base, cs, base_batch_s, cs_batch_s, meta)
+        carry_timing(doc, meta["usage"]["api_calls"], live and not a.out_dir)
         progress.set(phase="writing")
         if a.dry_run or a.out_dir:
             out = Path(a.out_dir) if a.out_dir else work / "out"

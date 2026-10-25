@@ -193,9 +193,11 @@ def test_hard_rule_contacts_differ_forces_hold():
     assert "independent numbers" in a.hard_rule_actions["contacts_differ"]
 
 
-def test_hard_rule_amount_over_max_by_50_percent():
-    assert risk.assess(pay(16000), ctx()).hard_rules_fired == []  # 1.45x of the 11,000 max
-    a = risk.assess(pay(16600), ctx())
+def test_hard_rule_amount_over_max_by_30_percent():
+    # The spec says 50%; the red team measured 30% as the best trade (docs/redteam.md). risk.AMOUNT_OVER_MAX_FACTOR is the one place to change it.
+    assert risk.AMOUNT_OVER_MAX_FACTOR == 1.3
+    assert risk.assess(pay(14200), ctx()).hard_rules_fired == []  # 1.29x of the 11,000 max
+    a = risk.assess(pay(14400), ctx())
     assert a.hard_rules_fired == ["amount_over_max"] and a.decision == Decision.controller_review
 
 

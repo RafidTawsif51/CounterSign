@@ -82,8 +82,8 @@ function Results({ data }: { data: RedTeamResults }) {
           <Money amount={lostCountersign} className="mt-1 block text-xl font-medium" />
         </div>
         <p className="max-w-[44ch] text-sm text-ink-muted">
-          Counted only when the money went to an account the attacker controls. A miss that pays the vendor's verified account
-          moves no money to a scammer.
+          Counted only when the money went to an account the attacker controls. A padded invoice paid to the vendor's own
+          account is an overpayment, not a payment to a scammer, and is not counted here.
         </p>
       </section>
 
