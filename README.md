@@ -6,8 +6,9 @@ Countersign is an AI accounts-payable agent that runs a company's weekly vendor 
 **The demo moment:** a judge emails "we changed banks" from a lookalike domain; Countersign holds the payment, calls the real vendor at the number on the vendor's own website, hears "No, we never changed banks", and blocks it.
 
 **Live link:** _coming soon (placeholder)_
+**Video:** [countersign-launch.mp4](demo/launch-video/countersign-launch.mp4) (1:41, Devpost and backup demo) and a [30-second cut](demo/launch-video/countersign-30s.mp4). See [Launch video](#launch-video).
 
-Contents: [How it works](#how-it-works) · [Run it locally](#run-it-locally) · [Deploy](#deploy) · [Sponsor features used](#sponsor-features-used) · [Real vs simulated](#real-vs-simulated) · [Security](#security) · [Auditor access (MCP)](#auditor-access-mcp) · [Red team results](#red-team-results) · [Known limitations](#known-limitations) · [Path to production](#path-to-production) · [Frontend](#frontend) · [CRS integration](#crs-integration) · [Built with](#built-with)
+Contents: [How it works](#how-it-works) · [Launch video](#launch-video) · [Run it locally](#run-it-locally) · [Deploy](#deploy) · [Sponsor features used](#sponsor-features-used) · [Real vs simulated](#real-vs-simulated) · [Security](#security) · [Auditor access (MCP)](#auditor-access-mcp) · [Red team results](#red-team-results) · [Known limitations](#known-limitations) · [Path to production](#path-to-production) · [Frontend](#frontend) · [CRS integration](#crs-integration) · [Built with](#built-with)
 
 ## How it works
 
@@ -18,10 +19,20 @@ One payment's journey, with the service that does each step:
 3. **The risk engine scores and holds (our code).** Hard rules (new bank account, new vendor, hidden instructions, changed contact details, amount more than 30% over the vendor's 12-month maximum) always hold, whatever any model says. A weighted score covers the rest, including lookalike domains and urgency language (Claude Haiku classifies the urgency).
 4. **Apify finds the number to call.** For a held change, our Vendor Contact Verifier Actor reads the vendor's own website and returns its phone number, the page it came from and a confidence. The number in the email is never used.
 5. **CRS checks identity.** Three CRS sandbox checks run before the call: reverse phone on the number we will dial, email risk on whoever asked for the change, and identity verification. A failed check keeps the payment held even if the call later confirms.
-6. **Twilio and Cartesia make the call.** Twilio dials the vendor; Cartesia speaks the question ("Did your company make this change? Please say yes or no."). Twilio's speech recognition hears the answer, and Claude Haiku plus a keyword check classify it as confirmed, denied, unclear or no answer.
+6. **Twilio and Cartesia make the call.** Twilio dials the vendor and Cartesia speaks. The disclosure and the question ("Did your company make this change?") always play in full before Twilio listens, so talking over the agent cannot cut it off. Claude Haiku understands what the vendor says and answers it politely ("Who is this?", "Which account?", "Hold on", "Can I talk to a person?"), while the outcome (confirmed, denied, unclear, no answer) still comes from a fixed classifier, never from the conversation.
 7. **Nessie pays (Capital One).** Confirmed and CRS clear: the new account is saved as verified and the payment goes out as a Nessie sandbox transfer. Denied: the payment is blocked and the request is marked as fraud. Anything else waits for the controller.
 
 Every step is written to an append-only audit log, and the payment detail screen shows it as "How this decision was made". "Ask about this payment" answers why a payment was paid, held or blocked, citing stored evidence ids.
+
+## Launch video
+
+[`demo/launch-video/countersign-launch.mp4`](demo/launch-video/countersign-launch.mp4) (1:41) and [`countersign-30s.mp4`](demo/launch-video/countersign-30s.mp4) (0:30).
+
+- Every shot is a recording of the running app with every service live (no mock flags), driven by Playwright in Chrome.
+- The call is a real Twilio call with the agent voiced by Cartesia, recorded with the phone on speaker. A teammate plays Summit Concrete, and the caption says so. The payment is blocked on screen.
+- Narration is Cartesia (voice Zander, model sonic-3.6). No music.
+- Every number on screen and in the narration is measured; [`credits.md`](demo/launch-video/credits.md) lists the source of each, plus every tool and sponsor. The script with timestamps is [`script.md`](demo/launch-video/script.md).
+- Rebuild: the raw takes live in `demo/raw/` (not in git); `python3 demo/launch-video/build.py` cuts them per `timeline.json`.
 
 ## Run it locally
 
@@ -104,6 +115,7 @@ Each service sits behind an interface with a mock and its own flag (`MOCK_CLAUDE
 | Urgency, secrecy and authority classifier (Haiku) | `backend/app/services/risk.py` | Hold reasons such as "urgency language" |
 | Classifying the vendor's spoken answer (Haiku, with a keyword check beside it) | `backend/app/services/verify.py` (`classify_answer`) | Call outcome on the call card |
 | "Ask about this payment": read-only answers that cite evidence ids (Haiku) | `backend/app/services/ask.py` | Payment detail, "Ask about this payment" |
+| The call as a conversation: Haiku reads the call so far and what the vendor said (as untrusted data) and replies in one to three polite sentences. Every reply passes a safety check in code (no digits but the last four, no claim that anything was approved, no new contact details or callbacks); a late or unsafe reply falls back to the scripted line. It never sets the outcome | `backend/app/services/conversation.py`, `verify.py` (`finish_answer`) | The call card and `/call`: the agent answering "Who is this?" or "Which account?" |
 | Run report for the controller, written from structured database fields only (Sonnet) | `backend/app/services/report.py` | Run report after a payment run |
 | Red-team baseline: a plain Claude agent told to "pay valid invoices" | `backend/app/redteam/evaluate.py` | Red team page |
 
@@ -119,13 +131,15 @@ Reverse phone (Accurate Append), email risk (AtData Fraud Finder) and identity v
 | Telephone-ready audio: WAV, 16-bit PCM, 16 kHz mono, so Twilio fetches clips fast | `voice.py` | |
 | Clips generated ahead of time and cached by a hash of the text, served to Twilio at `/api/voice/audio/{name}` | `voice.py`, `backend/app/integrations.py` | |
 | The call says it is automated and only what is true about recording ("This call is being transcribed.") | `voice.py` (`disclosure`) | First line of the call |
+| Conversational replies voiced during the call, within 1.5 s, falling back to a pre-recorded line if Cartesia is slower | `voice.py` (`ensure_clip`), `verify.py` | The agent's replies to questions on the call |
+| The launch video's narration (voice Zander) | `demo/launch-video/` | The video |
 
 ### Twilio
 
 | Feature | Where | See it in the demo |
 |---|---|---|
 | Programmable Voice: one outbound call per held change, created in one function (`place_call`) | `backend/app/services/voice.py` | Call card, "call by Twilio" |
-| TwiML with `<Play>` (the Cartesia clip), `<Gather input="speech" speechModel="phone_call">` for the answer, `<Redirect>` and `<Hangup>` | `voice.py`, `backend/app/integrations.py` | The transcript on the call card |
+| TwiML: the disclosure and question as `<Play>` (Cartesia clips) before listening, then `<Gather input="speech" speechModel="phone_call">` around a short cue the vendor may talk over, `<Redirect>` and `<Hangup>`. Greetings and "who is this" repeat the question instead of counting as answers; a "yes" under 0.45 speech confidence is asked once more | `voice.py`, `backend/app/integrations.py` | The transcript on the call card and `/call` |
 | Status callbacks for no answer, busy and failed | `integrations.py` (`/api/webhooks/twilio/status`) | "Nobody answered" outcome |
 | A secret token per call in every webhook URL, optional `X-Twilio-Signature` check, and an allow list of numbers checked before dialing | `integrations.py`, `voice.py`, `verify.py` | |
 
@@ -225,7 +239,7 @@ Per sponsor:
 
 - **Anthropic:** layers 1 to 3 are probabilistic. A polite bank-change email worded like an order ("update remittance, effective immediately") was quarantined by the classifier in the audit; safe, but a legitimate change written that way would not reach a call. The first, uncached Ask answer took up to 5.3 s in the audit.
 - **CRS:** the sandbox only answers for its test personas, so our fictional vendors and senders are mapped onto them; a sender outside the vendor's domain always gets the fraud persona. Thresholds are not validated. See [CRS known limits](#known-limits).
-- **Cartesia:** every sentence is generated ahead of time and played as a clip, so the agent speaks a fixed script and cannot hold a free conversation.
+- **Cartesia:** the disclosure, the question and the closing lines are generated before dialing; conversational replies are voiced during the call and, if Cartesia takes longer than 1.5 s, the matching pre-recorded line is used instead. Conversational turns are capped at three per call.
 - **Twilio:** the account is a trial. It can call only verified numbers and accepts only the basic call options, so there is no recording (the call says "being transcribed", which is what it is), no machine detection and no Twilio time limit; our code enforces the 60 s limit. Speech recognition is Twilio's: the one-word answer "Yes." came back with confidence 0.67. Media Streams are not used; the call works through Gather webhooks.
 - **Apify:** the Actor is private until it is published. A lookup is cached for an hour, which also hides an Apify outage for that vendor during the hour. A copy of a vendor site would also return a high-confidence number, so safety rests on reading only the website on file for the vendor, never a domain from the email.
 - **Nessie:** sandbox money only. In one audit transfer Nessie showed the amount without cents (14686 for $14,686.27); we have not found out whether the sandbox or our request did that. Every full run creates 37 sandbox transfers.
@@ -256,6 +270,7 @@ React, Vite and TypeScript with Tailwind CSS, in `frontend/`. `frontend/DESIGN.m
 | `/leaderboard` | Rob Countersign leaderboard for the second screen, light like every page; `?tv=1` for the TV, in dark |
 | `/red-team` | Red-team results: catch rate by attack family, baseline agent against Countersign |
 | `/status` | System status: what is real, sandboxed or simulated, and how we know |
+| `/call?payment=<id>` | The verification call as a phone-sized live view for a second screen or a video: the number, the 60 s limit, each line as it is spoken, the outcome. It says it is our view of the call, and "Simulated call" when no phone was dialed |
 | `/about` | The landing page for judges and sponsors: hero with a sample-run feed, the payment journey, the scam step by step, security, proof, and links into every screen |
 
 ### Run and build
