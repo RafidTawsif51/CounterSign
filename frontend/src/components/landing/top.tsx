@@ -1,76 +1,16 @@
-// Project page, top of the page: the navbar, the hero with its sample-run feed, and the sponsor strip.
-// Navbar: our build of Resizable Navbar (manuarora700, 21st.dev). Hero feed: Animated List; badge: Animated Shiny Text; headline:
+// Project page, top of the page: the hero with its sample-run feed, and the sponsor strip.
+// Hero feed: Animated List; badge: Animated Shiny Text; headline:
 // Encrypted Text; background: a still grid after Animated Grid Pattern (dillionverma). Restyled to DESIGN.md.
 
-import { BookCheck, Crosshair, Lock, Menu, PhoneCall, Play, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { BookCheck, Crosshair, Lock, PhoneCall, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { CountersignMark } from "@/components/shared/countersign-mark";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { cn } from "@/lib/utils";
 import type { PaymentStatus } from "@/lib/types";
 import { AnimatedList, EncryptedText, Marquee, ShinyText } from "./primitives";
-
-const LINKS: { label: string; href: string; app?: boolean; newTab?: boolean }[] = [
-  { label: "How it works", href: "#journey" },
-  { label: "Security", href: "#security" },
-  { label: "Proof", href: "#proof" },
-  { label: "Live demo", href: "/", app: true },
-  { label: "Leaderboard", href: "/leaderboard", newTab: true },
-];
-
-function NavLink({ l, onClick, className }: { l: (typeof LINKS)[number]; onClick?: () => void; className?: string }) {
-  const cls = cn("rounded-md px-2 py-1 text-sm text-ink-muted transition-colors hover:bg-sunken hover:text-ink", className);
-  if (l.app) return <Link to={l.href} className={cls} onClick={onClick}>{l.label}</Link>;
-  return <a href={l.href} className={cls} onClick={onClick} {...(l.newTab ? { target: "_blank", rel: "noreferrer" } : {})}>{l.label}</a>;
-}
-
-/** Full width at the top; once the page scrolls it narrows into a bordered bar. A hairline, never a shadow. */
-export function Navbar() {
-  const [scrolled, setScrolled] = useState(false);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 24);
-    on();
-    window.addEventListener("scroll", on, { passive: true });
-    return () => window.removeEventListener("scroll", on);
-  }, []);
-  return (
-    <header className="sticky top-0 z-20 px-2 pt-2 sm:px-4">
-      <div
-        className={cn(
-          "mx-auto flex h-12 items-center gap-3 rounded-lg border px-3 transition-[max-width,background-color,border-color] duration-200",
-          scrolled || open ? "max-w-[880px] border-rule bg-surface" : "max-w-[1120px] border-transparent bg-paper",
-        )}
-      >
-        <Link to="/about" className="flex items-center gap-2 rounded-md font-semibold">
-          <CountersignMark />
-          Countersign
-        </Link>
-        <nav aria-label="Page" className="ml-4 hidden items-center gap-1 md:flex">
-          {LINKS.map((l) => <NavLink key={l.label} l={l} />)}
-        </nav>
-        <Button asChild variant="primary" size="sm" className="ml-auto hidden sm:inline-flex">
-          <Link to="/attack"><Crosshair {...iconProps} />Try to rob our AI</Link>
-        </Button>
-        <Button variant="ghost" size="icon-sm" className="ml-auto md:hidden sm:ml-0" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? <X {...iconProps} /> : <Menu {...iconProps} />}
-        </Button>
-      </div>
-      {open && (
-        <nav aria-label="Page" className="mx-auto mt-1 flex max-w-[880px] flex-col rounded-lg border border-rule bg-surface p-2 md:hidden">
-          {LINKS.map((l) => <NavLink key={l.label} l={l} onClick={() => setOpen(false)} className="py-2" />)}
-          <Button asChild variant="primary" size="sm" className="mt-2 sm:hidden">
-            <Link to="/attack"><Crosshair {...iconProps} />Try to rob our AI</Link>
-          </Button>
-        </nav>
-      )}
-    </header>
-  );
-}
 
 // The sample run, in the order the agent handles it. Amounts are the seeded week's real invoices.
 type FeedItem = { id: string; status: PaymentStatus | null; title: string; detail: string; amount?: number };

@@ -48,9 +48,9 @@ All colors are CSS variables. Use the Tailwind names, never raw hex in component
 | `--rule-strong` | `#CFCCC1` | `border-rule-strong` | Control borders (buttons, inputs) |
 | `--accent` | `#1F3A5F` | `bg-accent`, `text-accent` | Primary action, focus ring, links, selected state |
 
-### Dark (leaderboard second screen)
+### Dark (leaderboard on a TV, `?tv=1`)
 
-Apply with `data-theme="dark"` on `<html>` or on any subtree (the leaderboard page sets it on its root). Dark text uses the paper color so the dark screen reads as an inverted ledger.
+Apply with `data-theme="dark"` on `<html>` or on any subtree (the leaderboard sets it on its root with `?tv=1` only). Dark text uses the paper color so the dark screen reads as an inverted ledger.
 
 | Token | Hex |
 |---|---|
@@ -92,8 +92,8 @@ Tints are derived, not hand-picked: `color-mix(status, surface)` at 8% in light 
 | `text-sm` | 13 / 18 | Secondary text, table metadata, column headers |
 | `text-base` | 14 / 20 | Body (default) |
 | `text-md` | 16 / 24 | Section headings, emphasized lines |
-| `text-lg` | 20 / 28 | Page titles, drawer titles |
-| `text-xl` | 28 / 34 | Rare. A run title on the board |
+| `text-lg` | 20 / 28 | Drawer titles, step titles |
+| `text-xl` | 28 / 34 | Page titles (`PageHeader`, the board's run title), section headings on the project page |
 | `text-2xl` | 40 / 44 | One headline figure per screen at most (for example the run total) |
 
 Line lengths stay under 80 characters for prose. Headings use sentence case.
@@ -138,7 +138,7 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `InvoicePreview` | `inbox/invoice-preview.tsx` | The invoice page at US Letter proportions with "Reveal hidden content": hidden text is outlined in brick in place, legible, with its technique and confidence on a brick tab. 150ms, no zoom. |
 | `AttackCardPicker` | `attack/attack-card-picker.tsx` | Selectable cards over native radios (arrow keys, focus ring). The label selects; "What we'll check" is outside it, so expanding never selects. Selected: accent edge and tint. |
 | `PinnedAttack` | `board/pinned-attack.tsx` | A judge's attack pinned above the ledger in an accent outline, with its own row that reveals the result. The attack console never shows the result. |
-| Leaderboard | `pages/Leaderboard.tsx` | Second screen, always dark. "Money moved to attackers" is the one headline figure (text-2xl mono). New attempts slide in at the top; a miss stays, marked "Logged as new test case". `?tv=1`: zoom 1.5, refresh every 10 s, cursor hidden after 3 s idle. The bounty QR (fixed dark-on-white print colors) shows only when `VITE_BOUNTY_EMAIL` is set. |
+| Leaderboard | `pages/Leaderboard.tsx` | Second screen. Light like every other page; dark with `?tv=1`, for a TV across the room. "Money moved to attackers" is the one headline figure (text-2xl mono). New attempts slide in at the top; a miss stays, marked "Logged as new test case". `?tv=1`: zoom 1.5, refresh every 10 s, cursor hidden after 3 s idle. The bounty QR (fixed dark-on-white print colors) shows only when `VITE_BOUNTY_EMAIL` is set. |
 | Red team chart | `redteam/catch-rate-chart.tsx` | Recharts grouped bars: baseline in muted ink, Countersign in accent, square marks, 2px gap, rate printed on every bar, inline legend above the plot, axes labeled in place, hover tooltip with counts. |
 | `InlineError` | `shared/inline-error.tsx` | Every failed fetch: "{What} did not load." plus a plain sentence from `ApiError` and a "Try again" button. Never JSON, never a stack trace, never a status color. A cell-sized lookup (a row's invoice number) shows a quiet dash instead. |
 | System status | `pages/SystemStatus.tsx` | One list: Real (accent badge), Sandboxed or Simulated (neutral), each with one line on how we know. A component whose MOCK_* flag is on says "Running on its mock on this server" under its line, so a label never overstates what is running. |
@@ -150,18 +150,17 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 
 ## Project page
 
-`/about` (`pages/About.tsx`, sections in `components/landing/`) is the landing page for judges, sponsors and anyone who arrives without a guide. It sits outside the app shell, like the leaderboard. Same tokens, type, hairlines and payment-state colors as the app; paid green, held amber and blocked brick mean the same thing here as on the board.
+`/about` (`pages/About.tsx`, sections in `components/landing/`) is the landing page for judges, sponsors and anyone who arrives without a guide. It sits inside the app shell like every other page (sidebar "About Countersign"). Same tokens, type, hairlines and payment-state colors as the app; paid green, held amber and blocked brick mean the same thing here as on the board.
 
 It is the one page with these exceptions to the rules above, and only these:
 
 - A hero: the headline "Every payment, countersigned." in `text-2xl`, resolved once on load from scrambled glyphs (`EncryptedText`, laid out in flow from the start so nothing shifts), a challenge badge whose text takes one sheen pass after load, and a faint still ledger grid behind it.
 - Two loops: the hero's sample-run feed (`AnimatedList`, labeled "Sample run", seeded invoices only) and the sponsor strip (`Marquee`, text wordmarks, pauses on hover and focus).
 - Scroll reveals on three sections only (journey, scam story, proof): one fade with a 4px blur, once. The journey beam fills node to node once when it scrolls into view, and proof figures count up once.
-- A navbar that narrows into a bordered bar after the page scrolls. A hairline, never a shadow.
 
 Still never, here too: gradient backgrounds, glow, glass, shadows, pills, emoji, ALL CAPS labels, arrows on buttons, a word in a different color in a headline, card grids with identical shadows. Every animation has a reduced-motion path that shows the final state with no movement. Every number is one we measured.
 
-Components are our own builds of 21st.dev originals (Resizable Navbar, Encrypted Text, Animated Shiny Text, Animated List, Marquee, Animated Beam with a Multi Step Loader caption, Sticky Scroll Reveal, Feature Section with Hover Effects, Number Ticker, Comparison, CTA with Dashed Grid Lines, Interactive Hover Button, Blur Fade), credited in the README, written for framer-motion and restyled to these tokens.
+Components are our own builds of 21st.dev originals (Encrypted Text, Animated Shiny Text, Animated List, Marquee, Animated Beam with a Multi Step Loader caption, Sticky Scroll Reveal, Feature Section with Hover Effects, Number Ticker, Comparison, CTA with Dashed Grid Lines, Interactive Hover Button, Blur Fade), credited in the README, written for framer-motion and restyled to these tokens.
 
 ## Motion
 

@@ -23,10 +23,10 @@ export function App() {
           <Route path="/attack" element={<AttackConsole />} />
           <Route path="/red-team" element={<RedTeam />} />
           <Route path="/status" element={<SystemStatus />} />
+          {/* The project page for judges and sponsors, inside the app like every other page (DESIGN.md, Project page). */}
+          <Route path="/about" element={<About />} />
           <Route path="*" element={<NotFound />} />
         </Route>
-        {/* Full screen, no shell: the project page for judges and sponsors (DESIGN.md, Project page). */}
-        <Route path="/about" element={<About />} />
         {/* Full screen, no shell: second display. */}
         <Route path="/leaderboard" element={<Leaderboard />} />
         {/* A developer page: the design tokens rendered. Not in the product build. */}

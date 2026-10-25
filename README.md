@@ -253,7 +253,7 @@ React, Vite and TypeScript with Tailwind CSS, in `frontend/`. `frontend/DESIGN.m
 | `/payments/:id` | Payment detail drawer: why it was paid, held or blocked, the evidence, the verification call, "Ask about this payment", the audit trail, and approve or reject for held payments |
 | `/inbox` | AP inbox: vendor threads, lookalike domains and Reply-To mismatches marked inline, invoice preview with "Reveal hidden content" |
 | `/attack` | Attack console: pick an attack card or write your own; the result plays out on the board |
-| `/leaderboard` | Rob Countersign leaderboard for the second screen, always dark; `?tv=1` for the TV |
+| `/leaderboard` | Rob Countersign leaderboard for the second screen, light like every page; `?tv=1` for the TV, in dark |
 | `/red-team` | Red-team results: catch rate by attack family, baseline agent against Countersign |
 | `/status` | System status: what is real, sandboxed or simulated, and how we know |
 | `/about` | The landing page for judges and sponsors: hero with a sample-run feed, the payment journey, the scam step by step, security, proof, and links into every screen |
@@ -303,7 +303,7 @@ Press ? in the app for this list. Single keys do nothing while you type in a fie
 - [Recharts](https://recharts.org): the red-team chart
 - [Lucide](https://lucide.dev): icons
 - [21st.dev](https://21st.dev): `21st review`, the UI checks we ran on every screen during design QA
-- [21st.dev](https://21st.dev) components, rebuilt for framer-motion and restyled to `DESIGN.md` for the `/about` landing page: Resizable Navbar, Encrypted Text, Sticky Scroll Reveal, Feature Section with Hover Effects (manuarora700); Animated Shiny Text, Animated List, Marquee, Animated Beam, Number Ticker, Blur Fade, Interactive Hover Button (dillionverma, Magic UI); Multi Step Loader, Stats with Number Ticker, CTA with Dashed Grid Lines (Aceternity UI); Comparison (olewandowski1)
+- [21st.dev](https://21st.dev) components, rebuilt for framer-motion and restyled to `DESIGN.md` for the `/about` landing page: Encrypted Text, Sticky Scroll Reveal, Feature Section with Hover Effects (manuarora700); Animated Shiny Text, Animated List, Marquee, Animated Beam, Number Ticker, Blur Fade, Interactive Hover Button (dillionverma, Magic UI); Multi Step Loader, Stats with Number Ticker, CTA with Dashed Grid Lines (Aceternity UI); Comparison (olewandowski1)
 - [IBM Plex Sans and Mono](https://github.com/IBM/plex), via Fontsource
 
 ## CRS integration
