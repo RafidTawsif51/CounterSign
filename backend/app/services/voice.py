@@ -260,23 +260,32 @@ def call_intro(company: str = COMPANY_NAME, settings: Optional[Settings] = None)
 
 
 class CallScript:
-    """Every sentence the verification call can speak. All of them are generated as clips before dialing."""
+    """Every sentence the verification call can speak. All of them are generated as clips before dialing.
+
+    Talking over the agent: the intro, the disclosure and the question always play in full, because Twilio is not listening
+    while they play. Listening starts on `listen`, a short cue the vendor may talk over (anything said then is an answer).
+    "Hello?", "Who is this?" or "Sorry, what?" is not an answer: the agent says who it is if asked and repeats the question
+    (`repeat`, `repeat_who`), without using up the one re-ask."""
 
     def __init__(self, vendor_name: str, last4: str) -> None:
         self.intro = call_intro()
-        self.question = (
-            f"We received a request to change where we send {vendor_name}'s payments, to an account ending {last4}. "
-            "Did your company make this change? Please say yes or no."
-        )
-        self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account? Please say yes or no."
+        ask = (f"We received a request to change where we send {vendor_name}'s payments, to an account ending {last4}. "
+               "Did your company make this change?")
+        self.question = ask
+        self.listen = "Please say yes or no."
+        self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account?"
         self.clarify = f"Sorry, I need a yes or no. Did your company ask us to send payments to a new account ending {last4}?"
+        self.repeat = f"Sure. {ask}"
+        self.repeat_who = f"This is an automated assistant for {COMPANY_NAME} accounts payable, calling about {vendor_name}'s bank account. {ask}"
+        self.confirm_again = f"Just to confirm: did your company ask us to change {vendor_name}'s bank account to the one ending {last4}?"
         self.hold = "Sure, take your time."
         self.confirmed = "Thank you. I have noted your answer and will pass it to our accounts payable team. Goodbye."
         self.denied = "Thank you. We will not process that change and our controller has been alerted. Goodbye."
         self.unclear = "Thank you. I will pass this to a person on our accounts payable team, who will follow up. Goodbye."
 
     def all_texts(self) -> list[str]:
-        return [self.intro, self.question, self.retry, self.clarify, self.hold, self.confirmed, self.denied, self.unclear]
+        return [self.intro, self.question, self.listen, self.retry, self.clarify, self.repeat, self.repeat_who, self.confirm_again,
+                self.hold, self.confirmed, self.denied, self.unclear]
 
     def closing(self, outcome: str) -> str:
         return {"confirmed": self.confirmed, "denied": self.denied}.get(outcome, self.unclear)
@@ -289,15 +298,46 @@ def is_hold(text: str) -> bool:
     return bool(_HOLD_RE.search((text or "").lower().replace("\u2019", "'")))
 
 
-def decide(answer: str, outcome: str, reasked: bool) -> str:
+# Not an answer: a greeting, a question about who is calling, or a request to hear it again. Checked before any yes or no, so a
+# "Yes? Who is this?" over the question can never confirm a bank change.
+_WHO_RE = re.compile(r"\b(who('s| is| are)? (this|calling|you)|who am i speaking|what (company|is this|'s this)|where are you calling from|what is this (about|regarding)|what's this (about|regarding))\b")
+_REPEAT_RE = re.compile(r"\b(repeat|say (that|it) again|come again|pardon|didn't (hear|catch)|did not (hear|catch)|can't hear|cannot hear|what did you say|sorry what|excuse me)\b|^\W*(what|sorry|huh|hello|hi|hey)\W*$|^\W*(hello|hi|hey)\b")
+MAX_REPEATS = 2  # repeats of the question per call, on top of the one re-ask; the 60 s rule still ends the call
+
+
+def interjection(text: str) -> Optional[str]:
+    """'who' (asked who is calling), 'repeat' (a greeting or did not hear), or None (it may be an answer)."""
+    s = " ".join(re.sub(r"[^\w' ]+", " ", (text or "").lower().replace("\u2019", "'")).split())  # punctuation is speech-engine noise
+    if not s:
+        return None
+    if _WHO_RE.search(s):
+        return "who"
+    if _REPEAT_RE.search(s) and not re.search(r"\b(no|never|not|didn't|did not|we did|changed|correct|that's right|that is right)\b", s):
+        return "repeat"
+    return None
+
+
+# A "yes" this unsure is asked once more before it can confirm a bank change (a confirmed call writes a verified account).
+# Our real one-word "Yes." came back at 0.67.
+MIN_CONFIRM_CONFIDENCE = 0.45
+
+
+def decide(answer: str, outcome: str, reasked: bool, repeats: int = 0, confidence: Optional[float] = None) -> str:
     """What the call does with an answer, the same in both modes. "close" ends it with `outcome`; "hold" plays the wait clip
-    and listens again; "reask" plays the clarifying clip once. A hold or a re-ask uses up the single extra try, and an empty
-    answer never re-asks (silence already had its own retry)."""
+    and listens again; "reask" plays the clarifying (or confirm-again) clip once; "repeat" says who is calling if asked and asks
+    the question again, up to MAX_REPEATS times, without using the re-ask. An empty answer never re-asks (silence already had
+    its own retry)."""
     text = (answer or "").strip()
-    if reasked or not text:
+    if not text:
+        return "close"
+    if interjection(text) and repeats < MAX_REPEATS:
+        return "repeat"
+    if reasked:
         return "close"
     if is_hold(text):
         return "hold"
+    if outcome == "confirmed" and confidence is not None and confidence < MIN_CONFIRM_CONFIDENCE:
+        return "reask"
     return "reask" if outcome == "unclear" else "close"
 
 
@@ -328,24 +368,29 @@ GATHER_TIMEOUT_SECONDS = 10
 GATHER_HINTS = "yes, no, yeah, nope, correct, that is right, we did, we did not, we never changed banks, I don't know"
 
 
-def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings: Optional[Settings] = None, first: bool = True) -> str:
-    """Intro (first pass only), then a speech Gather around the question (or the retry prompt). Silence redirects to retry_url."""
-    prompt = script.question if first else script.retry
-    gather = (
-        f'<Gather input="speech" speechTimeout="auto" timeout="{GATHER_TIMEOUT_SECONDS}" speechModel="phone_call" language="en-US" hints="{_esc(GATHER_HINTS)}" '
+def _listen(script: CallScript, gather_url: str, timeout: int, settings: Optional[Settings] = None, cue: bool = True) -> str:
+    """The listening window: a speech Gather around the short cue. Talking over the cue is fine: whatever is said is the answer."""
+    return (
+        f'<Gather input="speech" speechTimeout="auto" timeout="{timeout}" speechModel="phone_call" language="en-US" hints="{_esc(GATHER_HINTS)}" '
         f'action="{_esc(gather_url)}" method="POST">'
-        f"{_speak(prompt, settings)}</Gather>"
+        f"{_speak(script.listen, settings) if cue else ''}</Gather>"
     )
-    return _twiml((_speak(script.intro, settings) if first else "") + gather + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
+
+
+def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings: Optional[Settings] = None, first: bool = True) -> str:
+    """Intro (first pass only) and the question (or the retry prompt), played in full with Twilio not listening, so talking over
+    them cannot cut them off or be taken as the answer. Then the listening window. Silence redirects to retry_url."""
+    prompt = script.question if first else script.retry
+    return _twiml((_speak(script.intro, settings) if first else "") + _speak(prompt, settings)
+                  + _listen(script, gather_url, GATHER_TIMEOUT_SECONDS, settings) + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
 
 
 def twiml_regather(script: CallScript, text: str, gather_url: str, end_url: str, settings: Optional[Settings] = None) -> str:
-    """Play `text` (clarifying or hold clip) inside a speech Gather; silence goes to end_url, which finishes the call as unclear."""
-    gather = (
-        f'<Gather input="speech" speechTimeout="auto" timeout="6" language="en-US" action="{_esc(gather_url)}" method="POST">'
-        f"{_speak(text, settings)}</Gather>"
-    )
-    return _twiml(gather + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
+    """Say `text` in full (a repeat of the question, the clarifying or confirm-again line, or the hold line), then listen again.
+    After the hold line the window opens without the cue, so a vendor finding their notes is not prompted. Silence goes to end_url."""
+    hold = text == script.hold
+    return _twiml(_speak(text, settings) + _listen(script, gather_url, GATHER_TIMEOUT_SECONDS if hold else 6, settings, cue=not hold)
+                  + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
 
 
 def twiml_close(text: str, settings: Optional[Settings] = None) -> str:
@@ -411,7 +456,8 @@ _last_poll: dict[str, float] = {}  # vendor_id -> time.monotonic() of the page's
 
 
 def register_web_call(call_id: str, vendor_id: str, vendor_name: str, token: str, script: CallScript, settings: Optional[Settings] = None) -> None:
-    texts = {"intro": script.intro, "question": script.question, "clarify": script.clarify, "hold": script.hold,
+    texts = {"intro": script.intro, "question": script.question, "listen": script.listen, "clarify": script.clarify, "hold": script.hold,
+             "repeat": script.repeat, "repeat_who": script.repeat_who, "confirm_again": script.confirm_again,
              "confirmed": script.confirmed, "denied": script.denied, "unclear": script.unclear}
     web_calls[call_id] = {"vendor_id": vendor_id, "vendor_name": vendor_name, "token": token, "texts": texts,
                           "clips": {k: clip_url(v, settings) for k, v in texts.items()}, "reasked": False, "answered": False,

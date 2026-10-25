@@ -170,22 +170,28 @@ async def call_twiml(call_id: str, request: Request, background: BackgroundTasks
 
 
 @voice_router.post("/gather/{call_id}")
-async def call_gather(call_id: str, request: Request, background: BackgroundTasks, r: int = 0, form: dict = Depends(twilio_form)) -> Response:
+async def call_gather(call_id: str, request: Request, background: BackgroundTasks, r: int = 0, n: int = 0, form: dict = Depends(twilio_form)) -> Response:
     """The vendor's spoken answer. Classified within the 3 s Claude cap and answered inside Twilio's 5 s: a closing line and a
-    hangup, or (once, r=1 afterwards) a clarifying or "take your time" clip and another Gather. Applied in the background."""
+    hangup; or (once, r=1 afterwards) a clarifying, confirm-again or "take your time" clip and another Gather; or, for a greeting
+    or a "who is this", the question again (n counts those, up to voice.MAX_REPEATS). Applied in the background."""
     answer = (form.get("SpeechResult") or "").strip()
+    try:
+        confidence: Optional[float] = float(form["Confidence"]) if form.get("Confidence") not in (None, "") else None
+    except (TypeError, ValueError):
+        confidence = None
     with Session(db.engine) as s:
         call, payment, script = _context(s, call_id)
         if call.outcome is not None:  # Twilio retried, or the 60 s rule already ended the call
             return _xml(voice.twiml_close(script.closing(call.outcome.value)))
-    res = await verify.finish_answer(call_id, answer, bool(r))
+    res = await verify.finish_answer(call_id, answer, bool(r), n, confidence)
     if res is None:
         return _xml(voice.twiml_close(script.unclear))
     if res["action"] == "close":
         background.add_task(verify.handle_outcome, call_id, res["outcome"], res["transcript"], None, True,
                             {**res["evidence"], "confidence": form.get("Confidence")})
         return _xml(voice.twiml_close(res["text"]))
-    return _xml(voice.twiml_regather(script, res["text"], _url(f"/api/voice/gather/{call_id}?r=1", request),
+    nr, nn = int(res["reasked"]), res["repeats"]
+    return _xml(voice.twiml_regather(script, res["text"], _url(f"/api/voice/gather/{call_id}?r={nr}&n={nn}", request),
                                      _url(f"/api/voice/twiml/{call_id}?end=1&r=1", request)))
 
 
@@ -312,15 +318,15 @@ async def web_answer(call_id: str, request: Request, background: BackgroundTasks
         verify.web_answered(call_id)
         return JSONResponse({"ok": True}, headers=NO_STORE)
     verify.web_answered(call_id)  # an answer implies the Answer tap (idempotent)
-    res = await verify.finish_answer(call_id, str(body.get("answer") or "")[:500], entry["reasked"])
+    res = await verify.finish_answer(call_id, str(body.get("answer") or "")[:500], entry["reasked"], entry.get("repeats", 0))
     if res is None:
         raise HTTPException(410, "this call is over")
     final = res["action"] == "close"
     if final:
         background.add_task(verify.handle_outcome, call_id, res["outcome"], res["transcript"], None, True, res["evidence"])
     else:
-        entry["reasked"] = True
-        verify.rearm_answer_watchdog(call_id)  # the call stays open and takes exactly one more answer
+        entry["reasked"], entry["repeats"] = res["reasked"], res["repeats"]
+        verify.rearm_answer_watchdog(call_id)  # the call stays open for the next answer
     return JSONResponse({"action": res["action"], "final": final, "outcome": res["outcome"].value if final else None,
                          "text": res["text"], "clip": voice.clip_url(res["text"])}, headers=NO_STORE)
 

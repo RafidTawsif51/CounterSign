@@ -142,7 +142,7 @@ def test_an_unclear_late_answer_keeps_the_hold_and_changes_no_totals(real_calls)
     cid = open_call(eng, CEO)
     tok = voice._token_path(cid).read_text().strip()
     # r=1: the call has already used its single clarifying re-ask, so this unclear answer is final
-    r = client.post(f"/api/voice/gather/{cid}?r=1&t={tok}", data={"SpeechResult": "um, who is this?"})
+    r = client.post(f"/api/voice/gather/{cid}?r=1&t={tok}", data={"SpeechResult": "um, I'm not sure"})
     assert r.status_code == 200, r.text
     assert status(eng, CEO) == PaymentStatus.held and totals(client, body["run_id"]) == (37, 2, 1)
     types = [m["type"] for m in drain(queue)]
