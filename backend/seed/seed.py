@@ -227,6 +227,7 @@ class SeedSummary:
     last_threads: dict[str, str] = field(default_factory=dict)  # vendor key -> latest thread id
     summit_sept_number: str = ""
     history: dict = field(default_factory=dict)  # thread, late, corrected, holds_cleared, bank_changes, assessments
+    accounts: dict = field(default_factory=dict)  # vendor key -> {routing, number, bank_name} of the current account; full numbers, in memory only (red team)
 
 
 def _wipe(session: Session, keep_attacks: bool) -> None:
@@ -617,6 +618,7 @@ def seed_database(session: Session, *, keep_attacks: bool = False, write_pdfs: b
         last_threads=dict(last_thread),
         summit_sept_number=sept_summit.number,
         history=history_stats,
+        accounts={k: {"routing": lst[-1].routing, "number": lst[-1].number, "bank_name": lst[-1].row.bank_name} for k, lst in accts.items()},
     )
 
 

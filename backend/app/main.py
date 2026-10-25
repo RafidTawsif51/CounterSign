@@ -9,6 +9,7 @@ from sqlmodel import Session
 from app import dev, events, integrations
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
+from app.redteam import api as redteam_api
 from app.services import ask, attacks, bounty, contacts, ingest, reset, review, run, status, vendors
 
 
@@ -63,5 +64,6 @@ api.include_router(reset.router)
 api.include_router(status.router)
 api.include_router(dev.router)
 api.include_router(integrations.router)
+api.include_router(redteam_api.router)
 
 app.include_router(api)

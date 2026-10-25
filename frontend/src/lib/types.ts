@@ -325,7 +325,6 @@ export type RunEventType = RunEvent["type"];
 
 // ---------- API responses ----------
 // Shapes below are taken from the backend's route code (docs/ does not cover them yet) and checked against a live run.
-// One is still a proposal with no backend behind it: RedTeamResults.
 
 /** How a transfer went out (payments.py): "nessie" sandbox, "mock" adapter, or "mock_fallback" when Nessie failed. */
 export type TransferMode = "nessie" | "mock" | "mock_fallback";
@@ -699,8 +698,9 @@ export interface LeaderboardResponse {
 export type RedTeamFamily = "bank_change" | "poisoned_invoice" | "ceo_pressure" | "lookalike_domain" | "amount_padding";
 
 /**
- * GET /api/redteam/results. Proposed shape: backend/app/redteam/ is empty and the route does not exist yet (Aditya's
- * harness). Metrics follow CLAUDE.md "Red-team harness". Confirm with Aditya before relying on extra fields.
+ * GET /api/redteam/results (backend/app/redteam/api.py). The backend returns exactly these keys and no others; the fuller
+ * results (per-case rows, usage, method notes) are in demo/redteam-results.json. 404 until a measured run has finished.
+ * Metrics follow CLAUDE.md "Red-team harness".
  */
 export interface RedTeamResults {
   /** "mock" until a measured run exists, so the page can say the numbers are samples. */

@@ -1,0 +1,10 @@
+family,attacks,caught_baseline,caught_countersign,missed_baseline,missed_countersign,clean_invoices,false_positives_baseline,false_positives_countersign,lost_to_scammers_usd_baseline,lost_to_scammers_usd_countersign
+bank_change,40,40,40,0,0,40,0,0,0,0.0
+poisoned_invoice,40,33,40,7,0,40,6,8,10521.47,0.0
+ceo_pressure,40,40,40,0,0,40,0,0,0,0.0
+lookalike_domain,40,16,40,24,0,40,0,0,460990.33,0.0
+amount_padding,40,28,25,12,15,40,0,0,0,0.0
+ALL,200,157,185,43,15,200,6,8,471511.8,0.0
+
+legit_bank_changes_total,5,handled_countersign,5,baseline_paid,0
+median_run_seconds,baseline,48.0,countersign,64.4
