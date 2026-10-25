@@ -192,7 +192,8 @@ async def call_gather(call_id: str, request: Request, background: BackgroundTask
         return _xml(voice.twiml_close(res["text"]))
     nr, nn = int(res["reasked"]), res["repeats"]
     return _xml(voice.twiml_regather(script, res["text"], _url(f"/api/voice/gather/{call_id}?r={nr}&n={nn}", request),
-                                     _url(f"/api/voice/twiml/{call_id}?end=1&r=1", request)))
+                                     _url(f"/api/voice/twiml/{call_id}?end=1&r=1", request),
+                                     hold=res["action"] == "hold", cue=res["action"] not in ("hold", "converse")))
 
 
 @webhook_router.post("/status/{call_id}/{t}")

@@ -810,7 +810,7 @@ def test_hold_on_regathers_and_uses_up_the_single_re_ask(fdb):
     page = _gather(client, "hold on a second")
     assert "take your time" in page.lower() or "<Play>" in page
     assert "<Gather" in page and _call_row(eng)[0].outcome is None
-    assert _call_row(eng)[0].transcript[-1]["text"] == "Sure, take your time."
+    assert _call_row(eng)[0].transcript[-1]["text"] == "Of course, take your time."
     assert _gather(client, "umm", r=1).endswith("<Hangup/></Response>")  # no second re-ask
     assert _call_row(eng)[0].outcome == CallOutcome.unclear
 
@@ -961,7 +961,7 @@ def test_web_hold_on_listens_again(web):
     client, _, res = web
     tok = _pending(client).json()["call"]["token"]
     first = _answer(client, res, "hold on", tok).json()
-    assert first["action"] == "hold" and first["text"] == "Sure, take your time." and not first["final"]
+    assert first["action"] == "hold" and first["text"] == "Of course, take your time." and not first["final"]
     assert _answer(client, res, "No never", tok).json()["outcome"] == "denied"
 
 
