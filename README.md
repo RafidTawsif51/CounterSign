@@ -386,7 +386,7 @@ For Devpost: Python 3.11, FastAPI, SQLModel, SQLite, Anthropic Claude API (Claud
 
 Backend:
 
-- [FastAPI](https://fastapi.tiangolo.com) and [Uvicorn](https://www.uvicorn.org): the API server
+- [FastAPI](https://fastapi.tiangolo.com) and [Uvicorn](https://www.uvicorn.org): this is for API server
 - [SQLModel](https://sqlmodel.tiangolo.com) and [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/): database models and configuration
 - [HTTPX](https://www.python-httpx.org): calls to Cartesia, Nessie and CRS
 - [pdfplumber](https://github.com/jsvine/pdfplumber) and [pypdf](https://github.com/py-pdf/pypdf): reading invoices, including each character's color, size and position for the hidden-text scan
