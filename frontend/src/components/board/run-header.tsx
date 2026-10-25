@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Play } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Check, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/board/number-ticker";
 import { iconProps } from "@/components/shared/icon";
@@ -29,6 +29,18 @@ export function RunHeader({
   onStart: () => void;
 }) {
   const replay = useDataMode() === "replay";
+  // Stateful start button: idle, starting, running, then "Run complete" for a moment when a live run finishes.
+  const [justFinished, setJustFinished] = useState(false);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running && !replay) {
+      setJustFinished(true);
+      const t = setTimeout(() => setJustFinished(false), 2500);
+      wasRunning.current = running;
+      return () => clearTimeout(t);
+    }
+    wasRunning.current = running;
+  }, [running, replay]);
   const sum = (s: PaymentStatus) => rows.filter((r) => r.status === s).reduce((t, r) => t + r.amount, 0);
   const n = (s: PaymentStatus) => rows.filter((r) => r.status === s).length;
   const decided = rows.filter((r) => r.status !== "pending");
@@ -42,9 +54,13 @@ export function RunHeader({
           <span className="figure text-sm whitespace-nowrap text-ink-muted">{formatDate(startedAt ?? new Date().toISOString())}</span>
         </div>
         {hasRun && (
-          <Button variant="primary" onClick={onStart} disabled={starting || running}>
-            <Play {...iconProps} />
-            {running ? (replay ? "Replay in progress" : "Run in progress") : replay ? "Replay again" : "Start payment run"}
+          <Button variant="primary" onClick={onStart} disabled={starting || running} aria-live="polite">
+            {justFinished && !running ? <Check {...iconProps} /> : <Play {...iconProps} />}
+            {running
+              ? replay ? "Replay in progress" : "Run in progress"
+              : starting ? "Starting run…"
+              : justFinished ? "Run complete"
+              : replay ? "Replay again" : "Start payment run"}
           </Button>
         )}
       </div>

@@ -256,7 +256,7 @@ React, Vite and TypeScript with Tailwind CSS, in `frontend/`. `frontend/DESIGN.m
 | `/leaderboard` | Rob Countersign leaderboard for the second screen, always dark; `?tv=1` for the TV |
 | `/red-team` | Red-team results: catch rate by attack family, baseline agent against Countersign |
 | `/status` | System status: what is real, sandboxed or simulated, and how we know |
-| `/about` | About Countersign: the project page for judges and sponsors, with the real call, how it works, the proof, defenses, auditor access, sponsors and limits, and links into every screen |
+| `/about` | The landing page for judges and sponsors: hero with a sample-run feed, the payment journey, the scam step by step, security, proof, and links into every screen |
 
 ### Run and build
 
@@ -303,7 +303,7 @@ Press ? in the app for this list. Single keys do nothing while you type in a fie
 - [Recharts](https://recharts.org): the red-team chart
 - [Lucide](https://lucide.dev): icons
 - [21st.dev](https://21st.dev): `21st review`, the UI checks we ran on every screen during design QA
-- [21st.dev](https://21st.dev) components, restyled to `DESIGN.md`: [Table of Contents](https://21st.dev/@inference-sh/components/table-of-contents) by inference-sh (the About page's scroll-spy rail) and [Vertical How It Works Timeline](https://21st.dev/@ln-dev7/components/how-it-works-02) by ln-dev7 (its step rail)
+- [21st.dev](https://21st.dev) components, rebuilt for framer-motion and restyled to `DESIGN.md` for the `/about` landing page: Resizable Navbar, Encrypted Text, Sticky Scroll Reveal, Feature Section with Hover Effects (manuarora700); Animated Shiny Text, Animated List, Marquee, Animated Beam, Number Ticker, Blur Fade, Interactive Hover Button (dillionverma, Magic UI); Multi Step Loader, Stats with Number Ticker, CTA with Dashed Grid Lines (Aceternity UI); Comparison (olewandowski1)
 - [IBM Plex Sans and Mono](https://github.com/IBM/plex), via Fontsource
 
 ## CRS integration

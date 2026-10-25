@@ -150,15 +150,18 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 
 ## Project page
 
-`/about` (`pages/About.tsx`) is the one page for a judge or sponsor who arrives without a guide. It sits outside the app shell, like the leaderboard, and links into every screen. It explains; it does not sell. Same tokens, type, hairlines and tables as the app, in light.
+`/about` (`pages/About.tsx`, sections in `components/landing/`) is the landing page for judges, sponsors and anyone who arrives without a guide. It sits outside the app shell, like the leaderboard. Same tokens, type, hairlines and payment-state colors as the app; paid green, held amber and blocked brick mean the same thing here as on the board.
 
-- Opens with one statement in `text-xl` (the pitch line) and three sentences on what Countersign is and who it is for, then the three ways in: "Try to rob us" (primary), "Open the payment run", "Leaderboard". No hero image, no illustration.
-- Navigation follows the reader: from `lg` up, a sticky "On this page" rail (`shared/table-of-contents.tsx`) sits left of the sections, a hairline with an accent edge on the section in view. Below `lg`, the same sections are one hairline row under the title bar, scrolling sideways, the current one underlined in accent. Clicking scrolls smoothly unless the reader prefers reduced motion. Sections are separated by hairlines and headed in `text-md`.
-- How it works is a step rail: a dashed `rule-strong` line with a square numbered node per step (`rounded-sm`, mono `01`), the step's icon and name, what happens, and the service right-aligned. Rows, not cards.
-- Facts are tables and lists, not card grids. The one headline figure is "$0 lost to scammers" in the red-team section (`text-2xl`, mono). Every number on the page is one we measured and says where it came from.
-- The real call is shown as a ledger: elapsed time in mono, right-aligned, one row per step, ending in the payment's status badge.
-- Real vs simulated comes from `GET /api/system/status`, falling back to the documented list, labeled as such.
-- Still never: gradients, glass, blobs, shadows, centered layouts, pills, emoji, animation on load or on scroll.
+It is the one page with these exceptions to the rules above, and only these:
+
+- A hero: the headline "Every payment, countersigned." in `text-2xl`, resolved once on load from scrambled glyphs (`EncryptedText`, laid out in flow from the start so nothing shifts), a challenge badge whose text takes one sheen pass after load, and a faint still ledger grid behind it.
+- Two loops: the hero's sample-run feed (`AnimatedList`, labeled "Sample run", seeded invoices only) and the sponsor strip (`Marquee`, text wordmarks, pauses on hover and focus).
+- Scroll reveals on three sections only (journey, scam story, proof): one fade with a 4px blur, once. The journey beam fills node to node once when it scrolls into view, and proof figures count up once.
+- A navbar that narrows into a bordered bar after the page scrolls. A hairline, never a shadow.
+
+Still never, here too: gradient backgrounds, glow, glass, shadows, pills, emoji, ALL CAPS labels, arrows on buttons, a word in a different color in a headline, card grids with identical shadows. Every animation has a reduced-motion path that shows the final state with no movement. Every number is one we measured.
+
+Components are our own builds of 21st.dev originals (Resizable Navbar, Encrypted Text, Animated Shiny Text, Animated List, Marquee, Animated Beam with a Multi Step Loader caption, Sticky Scroll Reveal, Feature Section with Hover Effects, Number Ticker, Comparison, CTA with Dashed Grid Lines, Interactive Hover Button, Blur Fade), credited in the README, written for framer-motion and restyled to these tokens.
 
 ## Motion
 
