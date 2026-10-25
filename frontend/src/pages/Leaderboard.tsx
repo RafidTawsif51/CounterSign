@@ -11,6 +11,7 @@ import { InlineError } from "@/components/shared/inline-error";
 import { BOUNTY_EMAIL, api } from "@/lib/api";
 import { useDataMode } from "@/lib/data-mode";
 import { subscribeLeaderboard } from "@/lib/events";
+import { replayLabel } from "@/lib/replay";
 import { formatClock, formatRelativeTime, formatUSD } from "@/lib/format";
 import { useServiceModes } from "@/lib/services";
 import type { AttackLoggedEvent, LeaderboardRow } from "@/lib/types";
@@ -80,7 +81,7 @@ export function Leaderboard() {
         <div className="min-w-0">
           <h1 className="flex items-center gap-3 text-xl font-semibold">
             Rob Countersign
-            {mode === "replay" && <span className="rounded-sm border border-ink-muted px-2 py-0.5 text-sm font-medium">Replay of a recording</span>}
+            {mode === "replay" && <span className="rounded-sm border border-ink-muted px-2 py-0.5 text-sm font-medium">{replayLabel()}</span>}
           </h1>
           <p className="mt-1 text-md text-ink-muted">
             Try to get our AI to pay the wrong account. All money is sandbox money.

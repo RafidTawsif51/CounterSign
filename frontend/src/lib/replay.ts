@@ -113,6 +113,8 @@ export function replayRequest<T>(method: string, path: string): T {
 }
 
 /** For labels: was this service live when it was recorded? */
+/** The badge text: "a real run" only when every service was live when the recording was made, otherwise just "a recording". */
+export const replayLabel = (): string => (loaded?.meta.all_live ? "Replay of a real run" : "Replay of a recording");
 export const recordedSimulated = (service: string): boolean => (loaded?.meta.services[service] ?? "simulated") !== "live";
 
 export const inReplay = () => getDataMode() === "replay";
