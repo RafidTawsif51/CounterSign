@@ -56,7 +56,7 @@ from app.models import (
     VerificationCall,
     utcnow,
 )
-from app.services import contacts, identity, payments, voice
+from app.services import contacts, conversation, identity, payments, voice
 
 log = logging.getLogger("countersign.verify")
 
@@ -955,14 +955,33 @@ async def finish_answer(call_id: str, answer: str, reasked: bool, repeats: int =
         script = voice.call_script(vendor.name, (invoice.remittance_json or {})["account_last4"])
         answer = (answer or "").strip()
         kind = voice.interjection(answer)
+        first = not reasked and repeats == 0  # the question goes into the transcript once, before the first thing the vendor said
+        history = list(call.transcript or []) + ([{"speaker": "agent", "text": script.question}] if first else [])
+        # Claude's reading and reply, fetched alongside the classifier so the turn stays inside Twilio's wait. It never sets the outcome.
+        talk = (asyncio.create_task(conversation.respond(script, history, answer))
+                if answer and repeats < conversation.MAX_TURNS and conversation.enabled() else None)
         if kind and repeats < voice.MAX_REPEATS:  # a greeting or "who is this" is not an answer: never scored, never confirms
             outcome, evidence = CallOutcome.unclear, {"classifier": "interjection", "reason": f"not an answer ({kind}); the question was repeated"}
         else:
             outcome, evidence = await classify_answer(answer)
         action = voice.decide(answer, outcome.value, reasked, repeats, confidence)
-        first = not reasked and repeats == 0  # the question goes into the transcript once, before the first thing the vendor said
+        turn = await talk if talk else None
+        said: Optional[str] = None  # a conversational reply, used only while there is no clear yes or no
+        if turn is not None and outcome == CallOutcome.unclear:
+            evidence = {**evidence, "conversation": turn.reason, "intent": turn.intent}
+            if turn.intent in conversation.ENDS_CALL:
+                action = "close"  # unclear: the scripted goodbye says a person from accounts payable will follow up
+            elif turn.reply:
+                said = turn.reply
+                action = "hold" if action == "hold" else "converse"
         lines = ([{"speaker": "agent", "text": script.question}] if first else []) + [{"speaker": "vendor", "text": answer or "(no response)"}]
-        if action == "repeat":
+        if said is not None and not await voice.ensure_clip(said, 1.5):
+            said = None  # could not voice it in time: the scripted line below, whose clip was made before dialing
+            if action == "converse":
+                action = "repeat" if kind else "reask" if not reasked else "close"
+        if said is not None:
+            reply, key = said, "conversation"
+        elif action == "repeat":
             reply, key = (script.repeat_who, "repeat_who") if kind == "who" else (script.repeat, "repeat")
         elif action == "hold":
             reply, key = script.hold, "hold"
@@ -984,7 +1003,7 @@ async def finish_answer(call_id: str, answer: str, reasked: bool, repeats: int =
     else:
         voice.log_state(call_id, "answered-with-outcome", outcome=outcome.value)
     return {"action": action, "key": key, "text": reply, "outcome": outcome, "evidence": evidence, "transcript": transcript,
-            "script": script, "repeats": repeats + (1 if action == "repeat" else 0), "reasked": reasked or action in ("reask", "hold")}
+            "script": script, "repeats": repeats + (1 if action in ("repeat", "converse") else 0), "reasked": reasked or action in ("reask", "hold")}
 
 
 async def start_verification(payment_id: str, session: Optional[Session] = None) -> VerificationResult:

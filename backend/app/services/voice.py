@@ -222,6 +222,20 @@ def _generate_clip(text: str, s: Settings) -> Path:
     return path
 
 
+async def ensure_clip(text: str, seconds: float, settings: Optional[Settings] = None) -> bool:
+    """Voice a line during the call (a conversational reply), within `seconds`. True if the clip is ready to play. On a timeout or
+    an error the caller falls back to a scripted line, whose clip was made before dialing."""
+    s = settings or get_settings()
+    if audio_path(_clip_name(text)) is not None:
+        return True
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_generate_clip, text, s), seconds)
+    except Exception:  # noqa: BLE001
+        log.warning("in-call clip was late or failed; a scripted line is used instead")
+        return False
+    return audio_path(_clip_name(text)) is not None
+
+
 async def tts_clip(text: str, settings: Optional[Settings] = None) -> str:
     """Generate (or reuse) a mono 16 kHz WAV for this text and return its public URL.
 
@@ -268,20 +282,21 @@ class CallScript:
     (`repeat`, `repeat_who`), without using up the one re-ask."""
 
     def __init__(self, vendor_name: str, last4: str) -> None:
+        self.vendor_name, self.last4 = vendor_name, last4  # the facts the conversational replies may use (services/conversation.py)
         self.intro = call_intro()
         ask = (f"We received a request to change where we send {vendor_name}'s payments, to an account ending {last4}. "
                "Did your company make this change?")
         self.question = ask
-        self.listen = "Please say yes or no."
-        self.retry = "Sorry, I did not catch that. Did your company ask us to change its bank account?"
-        self.clarify = f"Sorry, I need a yes or no. Did your company ask us to send payments to a new account ending {last4}?"
+        self.listen = "A simple yes or no is all I need."
+        self.retry = "Sorry, I didn't quite catch that. Did your company ask us to change its bank account?"
+        self.clarify = f"Thanks. Just so I record it correctly: did your company ask us to send payments to a new account ending {last4}?"
         self.repeat = f"Sure. {ask}"
         self.repeat_who = f"This is an automated assistant for {COMPANY_NAME} accounts payable, calling about {vendor_name}'s bank account. {ask}"
         self.confirm_again = f"Just to confirm: did your company ask us to change {vendor_name}'s bank account to the one ending {last4}?"
-        self.hold = "Sure, take your time."
-        self.confirmed = "Thank you. I have noted your answer and will pass it to our accounts payable team. Goodbye."
-        self.denied = "Thank you. We will not process that change and our controller has been alerted. Goodbye."
-        self.unclear = "Thank you. I will pass this to a person on our accounts payable team, who will follow up. Goodbye."
+        self.hold = "Of course, take your time."
+        self.confirmed = "Thank you, that's very helpful. I've noted your answer for our accounts payable team. Have a good day."
+        self.denied = "Thank you for letting us know. We will not make that change, and our controller has been alerted. Have a good day."
+        self.unclear = "Thanks for your time. Someone from our accounts payable team will follow up with you. Goodbye."
 
     def all_texts(self) -> list[str]:
         return [self.intro, self.question, self.listen, self.retry, self.clarify, self.repeat, self.repeat_who, self.confirm_again,
@@ -385,11 +400,14 @@ def twiml_question(script: CallScript, gather_url: str, retry_url: str, settings
                   + _listen(script, gather_url, GATHER_TIMEOUT_SECONDS, settings) + f'<Redirect method="POST">{_esc(retry_url)}</Redirect>')
 
 
-def twiml_regather(script: CallScript, text: str, gather_url: str, end_url: str, settings: Optional[Settings] = None) -> str:
-    """Say `text` in full (a repeat of the question, the clarifying or confirm-again line, or the hold line), then listen again.
-    After the hold line the window opens without the cue, so a vendor finding their notes is not prompted. Silence goes to end_url."""
-    hold = text == script.hold
-    return _twiml(_speak(text, settings) + _listen(script, gather_url, GATHER_TIMEOUT_SECONDS if hold else 6, settings, cue=not hold)
+def twiml_regather(script: CallScript, text: str, gather_url: str, end_url: str, settings: Optional[Settings] = None,
+                   hold: bool = False, cue: Optional[bool] = None) -> str:
+    """Say `text` in full (a repeat of the question, a conversational reply, the clarifying or confirm-again line, or the hold
+    line), then listen again. After a hold the window opens without the cue and waits longer, so a vendor finding their notes is
+    not prompted; a conversational reply already ends by asking, so it needs no cue either. Silence goes to end_url."""
+    hold = hold or text == script.hold
+    cue = (not hold) if cue is None else cue
+    return _twiml(_speak(text, settings) + _listen(script, gather_url, GATHER_TIMEOUT_SECONDS if hold else 8, settings, cue=cue)
                   + f'<Redirect method="POST">{_esc(end_url)}</Redirect>')
 
 
