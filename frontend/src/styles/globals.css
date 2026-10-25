@@ -195,6 +195,8 @@
   --animate-sheet-out: sheet-out 150ms cubic-bezier(0.2, 0, 0, 1);
   /* The only loop in the app: the mark of a verification call in progress. Slow and calm, opacity only. */
   --animate-call-pulse: call-pulse 2s ease-in-out infinite;
+  /* Project page sponsor strip only (DESIGN.md, Project page). Duration is set per use. */
+  --animate-marquee: marquee 40s linear infinite;
 
   @keyframes fade-in {
     from {
@@ -221,6 +223,10 @@
     to {
       transform: translateX(100%);
     }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(-50% - 1.25rem)); }
   }
   @keyframes call-pulse {
     50% {
