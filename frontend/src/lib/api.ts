@@ -92,7 +92,7 @@ export const api = {
   startRun: () => post<StartRunResponse>("/api/payment-runs"),
   run: (runId: string) => get<RunStatusResponse>(`/api/payment-runs/${runId}`),
   /** The newest full payment run on the server (404 when there is none), so a second tab or a phone can follow it. */
-  latestRun: () => get<{ run_id: string; status: string; started_at: string; completed_at: string | null; invoice_count: number }>("/api/payment-runs/latest"),
+  latestRun: () => get<{ run: { run_id: string; status: string; started_at: string; completed_at: string | null; invoice_count: number } | null }>("/api/payment-runs/latest"),
 
   payment: (paymentId: string) => get<PaymentDetail>(`/api/payments/${paymentId}`),
   /** Held payments only. Pays the vendor's last verified account, never the requested one. */

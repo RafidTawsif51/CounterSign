@@ -163,12 +163,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState === "hidden") return;
       api
         .latestRun()
-        .then((r) => {
-          if (stop || r.run_id === ignored.current) return;
-          storeRun(r.run_id);
-          setRunId(r.run_id);
+        .then(({ run }) => {
+          if (stop || !run || run.run_id === ignored.current) return;
+          storeRun(run.run_id);
+          setRunId(run.run_id);
         })
-        .catch(() => {}); // none yet, or the server is away: the board keeps offering a new run
+        .catch(() => {}); // the server is away: the board keeps offering a new run
     };
     look();
     const id = setInterval(look, 3000);

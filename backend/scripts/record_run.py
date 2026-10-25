@@ -50,7 +50,7 @@ def main() -> int:
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     a = ap.parse_args()
 
-    run_id = a.run or (fetch(a.api, "/api/payment-runs/latest") or {}).get("run_id")
+    run_id = a.run or ((fetch(a.api, "/api/payment-runs/latest") or {}).get("run") or {}).get("run_id")
     if not run_id:
         print("No payment run to record. Start a run first (or pass --run).", file=sys.stderr)
         return 1

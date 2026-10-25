@@ -323,3 +323,23 @@
     --row-flag-tint: var(--status-blocked-tint);
   }
 }
+
+/* Touch targets: on a touch screen or a phone-width window, a control is at least 44px in both directions. The dense desktop sizes in
+   DESIGN.md are unchanged for a mouse. `touch-hit` grows only the tappable area (for a chip inside a line of text), not its look. */
+@utility touch-target {
+  @media (pointer: coarse), (max-width: 639px) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@utility touch-hit {
+  position: relative;
+  @media (pointer: coarse), (max-width: 639px) {
+    &::after {
+      content: "";
+      position: absolute;
+      inset: -14px -10px;
+    }
+  }
+}

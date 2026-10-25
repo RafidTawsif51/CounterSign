@@ -106,6 +106,7 @@ function AttackScreen() {
               onChange={(e) => setName(e.target.value)}
               maxLength={80}
               autoComplete="nickname"
+              className="touch-target"
               placeholder="Judge Priya"
               aria-invalid={tried && !name.trim() ? true : undefined}
             />
@@ -145,7 +146,7 @@ function AttackScreen() {
           )}
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button type="submit" variant="primary" disabled={!def || launch.isPending}>
+            <Button type="submit" variant="primary" className="touch-target" disabled={!def || launch.isPending}>
               <Crosshair {...iconProps} />
               {launch.isPending ? "Launching" : "Launch attack"}
             </Button>

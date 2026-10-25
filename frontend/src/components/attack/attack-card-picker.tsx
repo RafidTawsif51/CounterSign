@@ -81,7 +81,7 @@ function Card<T extends string>({ option, name, selected, onSelect }: { option: 
           aria-expanded={open}
           aria-controls={listId}
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-1 text-sm text-ink-muted transition-colors hover:text-ink"
+          className="touch-target flex items-center gap-1 text-sm text-ink-muted transition-colors hover:text-ink"
         >
           <ChevronDown {...iconProps} className={cn("transition-transform", open && "rotate-180")} />
           What we'll check

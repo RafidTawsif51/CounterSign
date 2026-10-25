@@ -73,15 +73,16 @@ export function AskPanel({ detail }: { detail: PaymentDetail }) {
             maxLength={500}
             placeholder="Ask why it was paid, held or blocked"
             aria-label="Question about this payment"
+            className="touch-target"
           />
-          <Button type="submit" disabled={ask.isPending || question.trim().length < 3}>
+          <Button type="submit" className="touch-target" disabled={ask.isPending || question.trim().length < 3}>
             Ask
           </Button>
         </form>
 
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
           {suggestedQuestions(detail.payment.status).map((q) => (
-            <Button key={q} variant="link" size="sm" className="h-6 text-sm" disabled={ask.isPending} onClick={() => submit(q)}>
+            <Button key={q} variant="link" size="sm" className="touch-target h-6 text-sm" disabled={ask.isPending} onClick={() => submit(q)}>
               {q}
             </Button>
           ))}

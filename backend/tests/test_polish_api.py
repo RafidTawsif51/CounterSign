@@ -9,12 +9,14 @@ from tests.test_run import BANK, CEO, env, go  # noqa: F401  (env is a fixture: 
 pytestmark = pytest.mark.slow
 
 
-def test_latest_run_is_404_before_any_run_then_the_newest_full_run(env):
+def test_latest_run_is_null_before_any_run_then_the_newest_full_run(env):
     client, eng = env
-    assert client.get("/api/payment-runs/latest").status_code == 404  # the seed's 50 historical runs do not count
+    none = client.get("/api/payment-runs/latest")
+    assert none.status_code == 200 and none.json() == {"run": None}  # the seed's 50 historical runs do not count; "none yet" is not an error
     body, _ = go(client)
     got = client.get("/api/payment-runs/latest")
-    assert got.status_code == 200 and got.json()["run_id"] == body["run_id"] and got.json()["status"] == "completed" and got.json()["invoice_count"] == 40
+    run = got.json()["run"]
+    assert got.status_code == 200 and run["run_id"] == body["run_id"] and run["status"] == "completed" and run["invoice_count"] == 40
 
 
 def test_an_attack_run_and_a_red_team_batch_are_never_the_latest_run(env):
@@ -24,7 +26,7 @@ def test_an_attack_run_and_a_red_team_batch_are_never_the_latest_run(env):
         for i, kind in enumerate(("attack", "redteam")):
             s.add(PaymentRun(id=f"run_{kind}_x", totals_json={"invoice_count": 1, "kind": kind}))
         s.commit()
-    assert client.get("/api/payment-runs/latest").json()["run_id"] == body["run_id"]
+    assert client.get("/api/payment-runs/latest").json()["run"]["run_id"] == body["run_id"]
 
 
 def test_the_run_route_still_serves_a_real_run_id(env):

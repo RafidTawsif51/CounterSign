@@ -741,8 +741,8 @@ def latest_run(session: Session = Depends(get_session)) -> dict:
     for r in session.exec(select(PaymentRun).order_by(PaymentRun.started_at.desc()).limit(50)).all():
         saved = r.totals_json or {}
         if "invoice_count" in saved and saved.get("kind") not in ("attack", "redteam"):
-            return {"run_id": r.id, "status": r.status.value, "started_at": r.started_at, "completed_at": r.completed_at, "invoice_count": saved["invoice_count"]}
-    raise HTTPException(404, "no payment run yet")
+            return {"run": {"run_id": r.id, "status": r.status.value, "started_at": r.started_at, "completed_at": r.completed_at, "invoice_count": saved["invoice_count"]}}
+    return {"run": None}  # 200, not 404: "no run yet" is an ordinary answer and should not show as an error in the browser
 
 
 @router.get("/payment-runs/{run_id}")
