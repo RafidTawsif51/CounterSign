@@ -124,7 +124,8 @@ function Box({ finding, scale, pageWidth }: { finding: InjectionFinding; scale: 
         {label}, {Math.round(finding.confidence * 100)}% confidence
         {off ? " \u2192" : ""}
       </span>
-      <span className="block text-[11px] leading-[1.35] text-blocked-ink">{finding.snippet}</span>
+      {/* Account and routing numbers in the attacker's text keep their last four only (DESIGN.md: no full account numbers). */}
+      <span className="block text-[11px] leading-[1.35] text-blocked-ink">{finding.snippet.replace(/\d{5,}/g, (m) => `\u2022\u2022\u2022\u2022 ${m.slice(-4)}`)}</span>
     </div>
   );
 }
