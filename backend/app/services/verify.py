@@ -633,22 +633,25 @@ async def handle_outcome(
         write_audit("payment", payment.id, "agent", "request_marked_fraud",
                     {**proof, "message_id": message.id if message else None, "invoice_id": invoice.id}, session=session)
     elif outcome == CallOutcome.confirmed:
-        acct = _write_verified_account(session, vendor.id, rem, call.id)
-        payment.destination_account_id = acct.id
-        payment.status = PaymentStatus.pending  # released
-        write_audit("vendor", vendor.id, "agent", "bank_account_verified", {**proof, "account_last4": acct.account_last4}, session=session)
         crs_block = crs_release_blocker(session, payment.id)
         if crs_block:  # the CRS gate holds in both paths (inline mock and webhooks): money never moves on a call alone
+            # and the requested account is NOT promoted: it stays an unverified candidate, so approving pays the old verified
+            # account and a later invoice to the requested one still trips destination_changed.
             payment.status = PaymentStatus.held
             held_reason = crs_block
-            write_audit("payment", payment.id, "agent", "held_after_verification", {**proof, "rules": ["crs_identity_check"]}, session=session)
-        elif pay:
-            others = _unresolved_rules(session, payment.id)
+            write_audit("payment", payment.id, "agent", "held_after_verification",
+                        {**proof, "rules": ["crs_identity_check"], "account_promoted": False}, session=session)
+        else:
+            acct = _write_verified_account(session, vendor.id, rem, call.id)
+            payment.destination_account_id = acct.id
+            payment.status = PaymentStatus.pending  # released
+            write_audit("vendor", vendor.id, "agent", "bank_account_verified", {**proof, "account_last4": acct.account_last4}, session=session)
+            others = _unresolved_rules(session, payment.id) if pay else []
             if others:
                 payment.status = PaymentStatus.held
                 held_reason = f"call confirmed the account, but {', '.join(others)} still needs the controller"
                 write_audit("payment", payment.id, "agent", "held_after_verification", {**proof, "rules": others}, session=session)
-            else:
+            elif pay:
                 follow_up = "pay"
     elif outcome == CallOutcome.no_answer:
         if attempts < MAX_TRIES:

@@ -1379,6 +1379,19 @@ def test_crs_review_or_fail_keeps_a_confirmed_call_held_with_the_crs_reasons(ses
     assert "held_after_verification" in actions(session)
 
 
+def test_crs_fail_keeps_the_requested_account_unverified_after_a_confirmed_call(session, crs, phones, monkeypatch):
+    crs.fraud_p19 = 88
+    use_crs(monkeypatch)
+    call_world(session, monkeypatch, sender="ar@test-co.example")
+    before = verify.current_verified_account(session, "ven_t").id
+    res = run(verify.start_verification("pay_t", session))
+    assert res.outcome == CallOutcome.confirmed and res.payment_status == PaymentStatus.held
+    session.expire_all()
+    assert verify.current_verified_account(session, "ven_t").id == before  # the trusted account did not move
+    assert not [a for a in session.exec(select(VendorBankAccount).where(VendorBankAccount.vendor_id == "ven_t")) if a.verified_by_call_id]
+    assert not session.exec(select(AuditLog).where(AuditLog.entity_id == "ven_t", AuditLog.action == "bank_account_verified")).first()
+
+
 def test_crs_denied_call_blocks_whatever_crs_said(session, crs, phones, monkeypatch):
     use_crs(monkeypatch)
     call_world(session, monkeypatch, sender="ar@test.example", answer="No, we never changed banks")
