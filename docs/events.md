@@ -236,7 +236,7 @@ Not in the spec; this shape is ours. A verification call finished after `run.com
 
 ### run.report
 
-Not in the spec; this shape is ours. Sent right after `run.completed`.
+Not in the spec; this shape is ours. Sent right after `run.completed`, and sent again (`updated: true`) when a late call outcome changes the run's totals. The first seven fields are the original basic report and never change. The last five carry the controller report (`services/report.py`).
 
 | Field | Type |
 |---|---|
@@ -245,6 +245,13 @@ Not in the spec; this shape is ours. Sent right after `run.completed`.
 | paid_usd | float |
 | blocked_usd | float (money protected) |
 | findings | list[str], one line per notable attack |
+| report | str or null, plain text: Paid, Stopped, Needs a decision, Dollars protected. Claude-written when it worked, otherwise the summary again |
+| report_source | "claude" or "basic" |
+| sections | object or null: `paid`, `stopped`, `protected` (str) and `needs_decision` (list[str]); null for a basic report |
+| held_usd | float, money waiting on the controller |
+| updated | bool, true when sent again after the run |
+
+The report is written from structured database fields only (totals, one record per held or blocked payment with the names of the rules and signals, CRS status, where the phone number came from, the call outcome). No email, invoice, snippet, transcript or invoice number is passed to Claude. Its answer is checked (every dollar figure must be one it was given; no links or markup; em dashes replaced) and falls back to the basic report if it is invalid, fails, or takes over 8 seconds. It is cached by a hash of the facts, saved in `payment_runs.totals_json.report`, and served by `GET /api/payment-runs/{id}/report`. One-invoice attack runs and red-team batches always get the basic report, so a judge's attack is never held up by a model call.
 
 ```json
 {"type": "run.report", "run_id": "run_042", "summary": "40 invoices processed: 37 paid ($239,559.28), 1 held for controller review, 2 blocked ($28,250.00 protected).",

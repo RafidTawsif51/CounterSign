@@ -284,6 +284,14 @@ export interface RunReportEvent extends EventBase {
   paid_usd: number;
   blocked_usd: number;
   findings: string[]; // untrusted
+  /** The controller report (services/report.py): plain text, Claude-written when it worked, else the summary again. Absent on older events. */
+  report?: string | null;
+  report_source?: "claude" | "basic" | null;
+  /** paid, stopped, protected (strings) and needs_decision (list); null for a basic report. Built from structured fields only. */
+  sections?: { paid: string; stopped: string; needs_decision: string[]; protected: string } | null;
+  held_usd?: number | null;
+  /** True when sent again after the run because a late call outcome changed it; the newest run.report wins. */
+  updated?: boolean;
 }
 export interface AttackLoggedEvent extends EventBase {
   type: "attack.logged";

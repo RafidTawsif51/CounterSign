@@ -17,7 +17,7 @@ from sqlmodel import Session
 from app import db, events as ev
 from app.audit import write_audit
 from app.models import Invoice, Message, Payment, PaymentRun, RunStatus
-from app.services import ask, run
+from app.services import ask, report, run
 
 log = logging.getLogger("countersign.late")
 
@@ -58,6 +58,10 @@ async def _apply(payment_id: str) -> None:
         _, st, t = updated
         await ev.emit(ev.RunUpdated(run_id=run_id, payment_id=payment_id, status=st, paid=t["paid"], held=t["held"], blocked=t["blocked"],
                                     total_usd=t["total_usd"], blocked_usd=t["blocked_usd"]))
+        # The run's report is out of date now. Rewrite it in the background so the webhook that brought the outcome is not kept waiting.
+        rtask = asyncio.create_task(report.finish(run_id, late=True))
+        run._tasks.add(rtask)
+        rtask.add_done_callback(run._tasks.discard)
     ask.invalidate(payment_id)
     if payment_id in ask.SEEDED_PAYMENTS:
         task = asyncio.create_task(ask.warm((payment_id,)))

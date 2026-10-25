@@ -81,6 +81,7 @@ All under `/api`, JSON. One SSE stream drives the live board.
 | POST | /api/payment-runs | Start a payment run over all open invoices |
 | GET | /api/payment-runs/{id} | Run status and totals |
 | GET | /api/payment-runs/{id}/events | Live event stream (SSE) |
+| GET | /api/payment-runs/{id}/report | The run's controller report: Claude-written from structured database fields only, basic report as fallback; saved in `payment_runs.totals_json.report` |
 | GET | /api/payments/{id} | Payment detail: risk assessment, findings, calls, audit |
 | POST | /api/payments/{id}/approve | Controller approves (body: reason) |
 | POST | /api/payments/{id}/reject | Controller rejects (body: reason) |

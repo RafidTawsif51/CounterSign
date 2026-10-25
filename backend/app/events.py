@@ -178,7 +178,9 @@ class RunCompleted(EventBase):
 
 
 class RunReport(EventBase):
-    """End-of-run summary. Fields beyond run_id are not in the spec; this shape is ours."""
+    """End-of-run summary. Fields beyond run_id are not in the spec; this shape is ours. The first seven fields are the original
+    basic report and never change. The rest carry the controller report (services/report.py): Claude-written when it worked, otherwise
+    the basic summary again. It is sent after run.completed, and again when a late call outcome changes the run (updated is true)."""
 
     type: Literal["run.report"] = "run.report"
     run_id: str
@@ -189,6 +191,11 @@ class RunReport(EventBase):
     paid_usd: float
     blocked_usd: float
     findings: list[str]
+    report: Optional[str] = None  # plain text, short paragraphs; written from structured database fields only
+    report_source: Optional[Literal["claude", "basic"]] = None
+    sections: Optional[dict] = None  # paid, stopped, needs_decision (list), protected; None for a basic report
+    held_usd: Optional[float] = None  # money waiting on the controller
+    updated: bool = False  # true when sent again after the run, because a late call outcome changed it
 
 
 class RunUpdated(EventBase):

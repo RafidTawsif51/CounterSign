@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # Urgency / secrecy / authority classifier verdicts keyed by content hash.
     risk_cache_dir: str = "./.cache/risk"
 
+    # Claude-written run reports keyed by a hash of the structured facts they were written from.
+    report_cache_dir: str = "./.cache/reports"
+
     frontend_url: str = ""
 
     # POST /api/redteam/run spends Claude API money. When this is set the route needs the header x-redteam-token with this value.
