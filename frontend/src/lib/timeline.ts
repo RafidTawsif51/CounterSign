@@ -100,12 +100,21 @@ export function buildTimeline(d: PaymentDetail, modes: ServiceModes): TimelineSt
   if (crsRan && d.identity) {
     const live = d.identity.source === "crs-sandbox";
     const word = { verified: "Verified", unverified: "Not verified", flagged: "Flagged" }[d.identity.status];
+    // d.identity is the vendor's own standing. The check on whoever asked for the change is a separate subject, stored on this
+    // payment's crs_identity_check audit row: a lookalike sender fails there while the vendor itself stays verified.
+    const crsRow = [...d.audit].reverse().find((a) => a.action === "crs_identity_check");
+    const request = crsRow?.detail?.request as { status?: string; requested_by_domain?: string; checks?: { result: string; reasons: string[] }[] } | undefined;
+    const requestFlagged = !!request?.status && request.status !== "pass";
+    const requestReasons = (request?.checks ?? []).filter((c) => c.result !== "pass").flatMap((c) => c.reasons.slice(0, 2));
     steps.push({
       key: "crs",
-      title: "Checked the vendor's identity",
-      result: `${word}, match ${d.identity.match_score.toFixed(2)}`,
+      title: requestFlagged ? "Checked the vendor's identity and the request" : "Checked the vendor's identity",
+      result: requestFlagged
+        ? `Vendor ${word.toLowerCase()}. Request${request?.requested_by_domain ? ` from ${request.requested_by_domain}` : ""} ${request?.status === "fail" ? "failed" : "needs review"}${requestReasons.length ? `: ${requestReasons.join(", ")}` : ""}`
+        : `${word}, match ${d.identity.match_score.toFixed(2)}`,
       service: live ? "CRS sandbox" : "CRS",
       mode: live ? "real" : "simulated",
+      evidence: requestFlagged || undefined,
     });
   }
 

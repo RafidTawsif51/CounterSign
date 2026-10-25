@@ -224,6 +224,8 @@ def _attack_for(s: Session, msg: Optional[Message], fired: bool, a: Optional[Ass
         snap["amount_usd"] = amount
         snap["paid_usd"] = amount if status == PaymentStatus.paid else 0.0
     top = reasons if reasons is not None else ([r[:160] for r in a.reasons[:3]] if a else None)
+    if top == [CALL_IN_PROGRESS] and snap.get("reasons"):
+        top = None  # a passing state: keep the risk reasons on the leaderboard, the call's outcome replaces them later
     if top is not None:
         snap["reasons"] = [scrub_emails(r) for r in top] if atk.source == AttackSource.bounty_email else top
     atk.detail_json = snap  # a new dict, so the JSON column is saved

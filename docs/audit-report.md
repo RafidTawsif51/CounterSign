@@ -220,11 +220,14 @@ Replay: `python -m scripts.record_run --run run_4f9a5a6091f9` saved the "No" run
 
 The "Yes" call went to Summit's real domain on purpose: with the lookalike sender, CRS fails whatever the vendor says, which is correct (a confirmed call alone never moves money), so the classic card can never end in a payment.
 
-Open issues from the rehearsal:
-- Rehearsal rows are on the leaderboard: "Real call test (denied)" (actually answered yes, held), "Real call: vendor denied" and "Real call: vendor confirmed" (counted as a miss with $18,613.56 moved). They should be removed before judging; `keep_leaderboard=false` would also remove the real attempts.
-- Leaderboard `top_reasons` keeps "verification call in progress" after the call ends.
-- `warm_cache` prints "0.0s" for the Apify lookup even when the Actor ran live.
-- The browser check of payment detail, call card, board colors and leaderboard was not done: the Chrome extension was not connected. The "No" run can still be checked through the replay.
+Browser check (after the calls): the paid "Yes" payment shows Paid with every service named on its timeline and the Nessie transfer; its call card shows the website number ("Not taken from the email"), Cartesia, Twilio and Apify, the transcript and "Confirmed. New account saved, verified by this call." The replay of the "No" run is labeled "Replay of a real run", ends Blocked ("Denied on call"), and the board colors are right (blocked red, held amber, paid green).
+
+Issues from the rehearsal and their state:
+- **Fixed:** the payment timeline's CRS step showed only the vendor's own result ("Verified, match 1.00") on a payment whose request CRS had failed. It now reads "Vendor verified. Request from summit-concrete.co failed: email risk score 88, ..." in the attack-evidence color (`frontend/src/lib/timeline.ts`, checked in the browser on the replay).
+- **Fixed:** leaderboard reasons kept "verification call in progress" after the call ended, replacing the risk reasons. The in-progress note no longer overwrites them (`backend/app/services/run.py`, `verify.py`; test `test_a_call_in_progress_does_not_replace_the_leaderboard_reasons`).
+- **Fixed:** the three rehearsal rows were deleted from the leaderboard (database backed up first). In the replay file the attacker label was renamed "Team rehearsal" and the deleted row removed from its leaderboard snapshot; `meta.edited` in the file says exactly what changed.
+- **Open:** the 8 remaining leaderboard rows are all "Judge Priya" from earlier testing, so the status panel's "8 attempts from judges and hackers" is not yet true. Clear them with a reset without `keep_leaderboard` before judging opens.
+- **Open:** `warm_cache` prints "0.0s" for the Apify lookup even when the Actor ran live.
 
 ## Fixes since the audit
 

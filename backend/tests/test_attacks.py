@@ -434,6 +434,19 @@ def test_leaderboard_totals(env):
     assert len(client.get("/api/attacks/leaderboard?limit=2").json()["attempts"]) == 2
 
 
+def test_a_call_in_progress_does_not_replace_the_leaderboard_reasons(env):
+    client, eng = env
+    a = client.post("/api/attacks", json=CLASSIC).json()
+    wait(client, a["run_id"])
+    with Session(eng) as s:
+        msg = s.get(Message, a["message_id"])
+        before = s.exec(select(Attack).where(Attack.payload_ref == msg.id)).one().detail_json["reasons"]
+        run._attack_for(s, msg, False, None, PaymentStatus.held, None, [run.CALL_IN_PROGRESS])  # what a live call's hold writes
+        s.commit()
+        after = s.exec(select(Attack).where(Attack.payload_ref == msg.id)).one().detail_json["reasons"]
+    assert before and after == before and run.CALL_IN_PROGRESS not in after
+
+
 # ================================================================ cards, PDFs, results and dollars
 
 

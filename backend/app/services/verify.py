@@ -626,7 +626,7 @@ async def handle_outcome(
             atk.result = AttackResult.caught
             snap = dict(atk.detail_json or {})
             snap["outcome"] = "blocked"
-            snap["reasons"] = ["The vendor denied the bank change on the verification call"] + [r for r in snap.get("reasons", [])][:2]
+            snap["reasons"] = ["The vendor denied the bank change on the verification call"] + [r for r in snap.get("reasons", []) if r != "verification call in progress"][:2]
             atk.detail_json = snap
             session.add(atk)
         write_audit("payment", payment.id, "agent", "blocked_by_verification", proof, session=session)
