@@ -303,6 +303,7 @@ Press ? in the app for this list. Single keys do nothing while you type in a fie
 - [Recharts](https://recharts.org): the red-team chart
 - [Lucide](https://lucide.dev): icons
 - [21st.dev](https://21st.dev): `21st review`, the UI checks we ran on every screen during design QA
+- [21st.dev](https://21st.dev) components, restyled to `DESIGN.md`: [Table of Contents](https://21st.dev/@inference-sh/components/table-of-contents) by inference-sh (the About page's scroll-spy rail) and [Vertical How It Works Timeline](https://21st.dev/@ln-dev7/components/how-it-works-02) by ln-dev7 (its step rail)
 - [IBM Plex Sans and Mono](https://github.com/IBM/plex), via Fontsource
 
 ## CRS integration
