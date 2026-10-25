@@ -17,7 +17,7 @@ import { useServiceModes } from "@/lib/services";
 import type { AttackLoggedEvent, LeaderboardRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-// Rob Countersign: the second screen across the table. Always dark. Every attempt from the attack console, judges and
+// Rob Countersign: the second screen across the table. Light like every other page; dark with ?tv=1 (a TV across the room). Every attempt from the attack console, judges and
 // the bounty inbox, live; a miss is never hidden, it becomes a new test case. ?tv=1 is for the TV: 1.5x type, a
 // periodic refresh as a safety net under the live stream, and the cursor out of the way.
 
@@ -72,7 +72,7 @@ export function Leaderboard() {
 
   return (
     <div
-      data-theme="dark"
+      data-theme={tv ? "dark" : undefined}
       className={cn("min-h-screen bg-paper text-ink", idle && "cursor-none")}
       // zoom scales the px-based type scale and spacing together, which a root font size would not.
       style={scale !== 1 ? { zoom: scale } : undefined}

@@ -178,7 +178,7 @@ export function ScamStory() {
               ))}
             </ol>
             <div className="hidden lg:block">
-              <div className="sticky top-28">
+              <div className="sticky top-20">
                 <div key={active} className="animate-fade-in">{STORY[active].visual}</div>
               </div>
             </div>
