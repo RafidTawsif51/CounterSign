@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     # Locks POST /api/demo/reset, POST /api/redteam/run (it spends Claude API money) and every /api/dev/* route: they need the header
     # X-Admin-Key with this value, and answer 403 without it. Blank means locked for everyone. See app/admin.py.
     admin_key: str = ""
+    # Bearer token for the read-only auditor MCP server at /mcp (app/mcp_server.py). Blank means /mcp answers 503 for everyone.
+    mcp_read_token: str = ""
     # "production" does not register /api/dev/* at all. Anything else (the default) registers them, behind the admin key.
     app_env: str = "development"
 

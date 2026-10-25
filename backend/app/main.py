@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app import dev, events, integrations
+from app import dev, events, integrations, mcp_server
 from app.config import get_settings
 from app.db import create_all, get_session, is_postgres
 from app.redteam import api as redteam_api
@@ -69,3 +69,4 @@ api.include_router(integrations.router)
 api.include_router(redteam_api.router)
 
 app.include_router(api)
+mcp_server.attach(app)  # read-only auditor MCP server at /mcp, behind MCP_READ_TOKEN

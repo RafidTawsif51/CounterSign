@@ -87,6 +87,7 @@ class AuditActor(str, enum.Enum):
     agent = "agent"
     human = "human"
     system = "system"
+    mcp_reader = "mcp_reader"  # the read-only auditor MCP server (app/mcp_server.py); it only ever appends its own call log
 
 
 def enum_col(enum_cls: type[enum.Enum], nullable: bool = False) -> Column:

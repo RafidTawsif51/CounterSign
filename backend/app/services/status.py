@@ -75,4 +75,7 @@ def system_status(session: Session = Depends(get_session)) -> list[dict]:
     ]
     if s.demo_call_route_map:
         rows.append({"name": "Demo call routing", "mode": "simulated", "detail": "Demo: calls routed to team phone"})
+    if s.mcp_read_token:
+        rows.append({"name": "Auditor access (MCP)", "mode": "real",
+                     "detail": "Read-only: a controller or auditor inspects runs, payments and the audit log from their own Claude; it cannot approve, pay, call or change anything"})
     return rows
