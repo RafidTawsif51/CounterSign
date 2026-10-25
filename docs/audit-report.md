@@ -6,7 +6,7 @@ Date: Oct 24, 2026 (evening). Branch audited: `main` at `6027b13` (frontend-poli
 
 Method: read the spec and docs, ran the full backend suite and the frontend build, then tested services and judge flows against an isolated backend (`:8765`, own database, own uploads) with real Claude, Apify, CRS, Nessie and Cartesia and with Twilio mocked, so no phone could ring. Your own backend (`:8000`) and its database were not touched, except for the one real call described in Part 3. Sandbox money only. No keys, tokens or full phone or account numbers appear below.
 
-**Not done yet:** the answered "No" call (blocked) and "Yes" call (paid). They are waiting for your "go". One real call was placed earlier today and went to voicemail (see Part 3). Everything marked "simulated call" below used the mock call, which denies attacks by design, so the denial itself is not proof of a real vendor answering.
+**Real calls done:** the answered "No" call (blocked) and "Yes" call (paid) ran on Oct 24 at about 21:03 and 21:05 PDT with every service live. Results and timings are in "Real calls with every service live" near the end. The rehearsal also found a bug (a confirmed call promoted the requested account even when CRS held the payment), fixed in `ae8f2eb`. Everything marked "simulated call" below used the mock call, which denies attacks by design, so the denial itself is not proof of a real vendor answering.
 
 ## 1. Honest summary
 
@@ -55,7 +55,7 @@ Legend: Built = code exists. E2E = works end to end. Live = tested with real ser
 | Risk engine, hard rules, weighted score | Yes | Yes | Live | Scores 20 to 100 with reasons on every payment; `test_risk_real.py` |
 | Hidden-instruction detector, PDF and email | Yes | Yes | Live | 9 of 9 poisoned documents flagged (white text, tiny font, off page, zero width, CSS class, display none, HTML comment, same color, seeded poisoned PDF); 0 of 3 clean PDFs flagged; classifier caught 2 of 2 novel phrasings and passed 2 of 2 benign ones |
 | Payment run board, live status | Yes | Yes | Live | 40-invoice run in 6.9 s (37 paid, 3 stopped); board follows the stream |
-| Verification call (independent number, voice, outcome) | Yes | Partly | Live, 1 real call | Real call placed, Cartesia voice spoke, Apify number used, outcome captured. Went to voicemail, so outcome was unclear and the payment was held (safe). Answered No and Yes calls: **pending your go** |
+| Verification call (independent number, voice, outcome) | Yes | Yes | Live, 4 real calls | Voicemail call earlier (unclear, held). Answered calls: "No, we never changed banks" denied and blocked 29 s after dialing; "Yes, we did" confirmed, paid by Nessie and promoted the account 31 s after dialing. See "Real calls with every service live" |
 | Defend the decision (/ask), under 5 s, cited | Yes | Yes | Live | 9 of 9 suggested questions plus 2 more answered in 1.9 to 5.3 s with evidence ids; "ignore your rules" refused every time and statuses did not change. Two answers ran slightly over 5 s in the browser (5.3 s); the first uncached answer is the slow one |
 | Payment execution in Nessie | Yes | Yes | Live | 37 of 37 `transfer_mode: nessie`; one transfer read back from Capital One |
 | Audit trail | Yes | Yes | Live | Each payment lists created, risk_assessed, held, crs, contact, call, approved by human, paid |
@@ -97,7 +97,7 @@ All spec routes exist except `WS /api/voice/stream` (replaced by Twilio Gather w
 | Apify | Actor on Summit Concrete, Alder Lumber (conflicting), the attacker site, Redwood (no phone), Haulaway (contact page 404) | Summit: one number, high. Alder: two numbers, conflicting, low. Attacker site: one number (different), high. Redwood: none found, low. Haulaway: found on the home page only, high. 2.2 to 6.2 s each |
 | CRS | Vendor and request checks on Summit and Northside through a real run | Vendor: pass (reverse phone, owner identity). Attacker request: fail (email risk 88, phone owner mismatch, SSN and birth date mismatch). Wrong password: `crs_unavailable`, review, never a pass |
 | Nessie | Full run | 37 paid, all `transfer_mode: nessie`; one transfer fetched from Capital One (status pending) |
-| Twilio and Cartesia, answered "No" and "Yes" calls | **Pending your "go"** | One real call earlier today: placed 02:35:33 UTC, outcome at about 02:36:10 (about 37 s). A voicemail system answered, so the agent heard carrier messages, asked twice, said it would pass to a person, hung up. Outcome unclear, payment held, no transfer. Apify number, CRS and risk steps all ran live in that call |
+| Twilio and Cartesia, answered "No" and "Yes" calls | Done, see "Real calls with every service live" | "No": denied, blocked. "Yes": confirmed, paid by Nessie, account promoted. Earlier, one real call earlier today: placed 02:35:33 UTC, outcome at about 02:36:10 (about 37 s). A voicemail system answered, so the agent heard carrier messages, asked twice, said it would pass to a person, hung up. Outcome unclear, payment held, no transfer. Apify number, CRS and risk steps all ran live in that call |
 | Deployed site | Not testable | No public deployment exists. The only public URL is the ngrok tunnel to your laptop (backend only; the frontend is not served there). A phone check on the public domain cannot be done |
 
 ## 5. Judge flows in the browser (isolated backend, simulated call)
@@ -164,7 +164,7 @@ Estimates assume one person who knows the code.
 | # | Fix | Why it matters | Time | File | Priority |
 |---|---|---|---|---|---|
 | 1 | Close duplicate and stale event streams (one leaderboard stream per page, close the run stream when leaving a payment) | A judge's third attack freezes for about a minute on the local setup | 1 to 2 h | `frontend/src/lib/events.ts`, `components/payment/live-processing.tsx`, `components/shared/run-context.tsx` | **Fixed** |
-| 2 | Run the answered "No" and "Yes" calls and the replay recording | The moment of the demo has only been tested as voicemail | 30 min with the phone holder | `backend/scripts/record_run.py` | Must do |
+| 2 | Run the answered "No" and "Yes" calls and the replay recording | The moment of the demo has only been tested as voicemail | 30 min with the phone holder | `backend/scripts/record_run.py` | **Done** (replay of the "No" call recorded, all services live) |
 | 3 | Gate `/api/dev/*` behind a debug flag | Anyone can push fake attack rows and run events onto the live leaderboard (reproduced; rows vanish on refresh but show on the projector) | 10 min | `backend/app/main.py` (the `include_router(dev.router)` line) | **Fixed** (admin key; not registered when `APP_ENV=production`) |
 | 4 | Require `REDTEAM_TOKEN` (refuse when blank) | `POST /api/redteam/run` accepted an empty request and started a real job, which spends Claude credits (my probe started one and I killed it within seconds) | 10 min | `backend/app/redteam/api.py` | **Fixed** (needs `X-Admin-Key`; a blank `ADMIN_KEY` locks it; replaces `REDTEAM_TOKEN`) |
 | 5 | Protect or disable public `POST /api/demo/reset` and approve and reject if the site is public | Anyone with the URL can wipe the leaderboard (reproduced) or approve a held payment (it still pays only the verified account) | 30 min | `backend/app/services/reset.py`, `review.py` | Reset: **Fixed** (admin key). Approve and reject: **still open**, by design for the demo; decide before any public deploy |
@@ -197,6 +197,35 @@ Estimates assume one person who knows the code.
 
 Screenshots are in `/private/tmp/audit/judge/` (judge flows, Ask, PDF reveal, approval, offline banner) and `/private/tmp/audit/after/` (screens from the polish pass). The scripts that produced them are in the session scratchpad.
 
+## Real calls with every service live
+
+Oct 24, about 21:00 PDT, backend on `main` with the fix below, all `MOCK_*` flags off: Claude, Twilio, Cartesia, Apify, CRS (sandbox) and Nessie (sandbox) real. Launched with the exact request the attack console sends for the classic card (`source: "console"`, Summit thread `thr_summit_0919`). The verified number is Summit's fictional 555-0100 from its hosted website; `DEMO_CALL_ROUTES` sent the call to the teammate's phone, which is the only number on `ALLOWED_CALL_NUMBERS`. Times are seconds after the launch request.
+
+| Step | "No" call (lookalike sender, the classic card) | "Yes" call (Summit's real address) |
+|---|---|---|
+| Sender | `ar@summit-concrete.co`, Reply-To `billing@summit-concrete.co`, "process today" | `billing@summitconcrete.com`, no Reply-To, no pressure line |
+| Attack accepted | 0.08 s | 0.11 s |
+| Risk scored, held | 1.0 s, score 100: new account, lookalike (edit distance 2), Reply-To mismatch, urgency, first-time sender; hard rule `destination_changed` | 2.6 s (classifier ran live on the new text), score 50: new account, urgency ("this week"), outside usual hours; hard rule `destination_changed` |
+| CRS | 1.1 s, **fail**: reverse phone pass (the number is the vendor's), fraud finder fail (email risk 88, phone owner mismatch), identity fail. All on the lookalike sender | 2.5 s, **pass** |
+| Apify | 1.1 s, number ending 0100 from `summit-concrete/contact.html`, high confidence, 4 source types agree. Served from the 1-hour cache, filled by a live Actor run (`lhlNJdMZaFcadJWvl`) during `warm_cache` | Same, cached |
+| Call started | 2.4 s | 3.8 s |
+| Transcript (vendor) | "No, we never changed Banks." | "Yes, we did." |
+| Outcome | 31.5 s, **denied** (keyword and Claude agree), 29.1 s after dialing | 32.5 s, **confirmed** (keyword and Claude agree), 28.8 s after dialing |
+| Money | **Blocked**, request marked fraud, requested account closed and never trusted. $0 moved | **Paid** at 34.5 s, `transfer_mode: nessie`, transfer `99ad8821…`, 2.0 s after the outcome. Harborline ending 6213 promoted (`verified_by_call_id` set), Evergreen ending 2204 closed |
+| Leaderboard | "caught", outcome "blocked", $0 paid | "missed", outcome "paid", $18,613.56 sandbox moved (see open issues: a legitimate change sent through the attack console counts as an attack) |
+
+Replay: `python -m scripts.record_run --run run_4f9a5a6091f9` saved the "No" run (19 events) to `frontend/public/replay/recorded-run.json` with `all_live: true`, so the replay is labeled "Replay of a real run".
+
+**Bug found and fixed during the rehearsal.** The first attempt was answered "Yes" to the lookalike sender. CRS held the payment, so nothing moved, but the confirmed call had already promoted the attacker's account (ending 6213) to Summit's verified account: a later invoice to it would not have tripped `destination_changed`, and approving would have paid it. `verify.handle_outcome` now checks CRS before promoting; on CRS review or fail the requested account stays an unverified candidate and approving pays the old verified account. Commit `ae8f2eb`, test `test_crs_fail_keeps_the_requested_account_unverified_after_a_confirmed_call` (fails without the fix). A demo reset restored Summit's seeded account, so no bad state is left. Speech recognition was right on all three answered calls; the Twilio speech confidence on the bare "Yes." was only 0.67.
+
+The "Yes" call went to Summit's real domain on purpose: with the lookalike sender, CRS fails whatever the vendor says, which is correct (a confirmed call alone never moves money), so the classic card can never end in a payment.
+
+Open issues from the rehearsal:
+- Rehearsal rows are on the leaderboard: "Real call test (denied)" (actually answered yes, held), "Real call: vendor denied" and "Real call: vendor confirmed" (counted as a miss with $18,613.56 moved). They should be removed before judging; `keep_leaderboard=false` would also remove the real attempts.
+- Leaderboard `top_reasons` keeps "verification call in progress" after the call ends.
+- `warm_cache` prints "0.0s" for the Apify lookup even when the Actor ran live.
+- The browser check of payment detail, call card, board colors and leaderboard was not done: the Chrome extension was not connected. The "No" run can still be checked through the replay.
+
 ## Fixes since the audit
 
 Done after this report was first written. Each has tests; the full backend suite and the frontend build pass.
@@ -207,5 +236,7 @@ Done after this report was first written. Each has tests; the full backend suite
 | Admin key | `ADMIN_KEY` and `APP_ENV` in config and `.env.example`. `POST /api/demo/reset`, `POST /api/redteam/run` and every `/api/dev/*` route need the header `X-Admin-Key` and answer 403 without it, with a wrong key, or while `ADMIN_KEY` is blank. With `APP_ENV=production` the `/api/dev/*` routes are not registered (404 even with the key). `GET /api/redteam/results` and the read routes stay public. `REDTEAM_TOKEN` is gone | `backend/tests/test_admin.py` (24 tests: each route with no key, a wrong key and the right key; a blank key locks everyone out; the key is checked before the body; a refused reset leaves the leaderboard alone; read routes stay public; dev routes absent in production) |
 | Admin key in the frontend | Reset demo, Present and the red-team call ask for the key once, in a dialog, and keep it in `sessionStorage` for that tab only. A 403 forgets the key and asks again. It is not read from the environment, so it is not in the build | Browser test: Present prompts, a wrong key shows "The server did not accept that key", the right key resets and enters presentation mode, the second reset does not ask again, nothing is stored in `localStorage`, and the built bundle holds only the storage key name |
 
-Still open from the must-fix list: the deployment decision (Vultr and GoDaddy), `demo/pitch-script.md` and the backup video, the README sponsor and limitations sections, and the answered "No" and "Yes" calls. Your local `.env` needs `ADMIN_KEY` set, or Reset demo and Present will answer 403.
+| Account promoted despite a CRS hold | A confirmed call now checks CRS before writing the requested account as verified; on review or fail the account stays an unverified candidate (`backend/app/services/verify.py`) | `test_crs_fail_keeps_the_requested_account_unverified_after_a_confirmed_call`; full backend suite 817 passed; found on a real call, see "Real calls with every service live" |
+
+Still open from the must-fix list: the deployment decision (Vultr and GoDaddy), `demo/pitch-script.md` and the backup video, and the README sponsor and limitations sections. `ADMIN_KEY` is now set in the local `.env`.
 
