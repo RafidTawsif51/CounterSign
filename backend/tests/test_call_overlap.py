@@ -100,3 +100,16 @@ def test_the_softphone_repeats_without_using_the_re_ask(web):
     second = _answer(client, res, "No", entry["token"]).json()
     assert second["final"] and second["outcome"] == "denied"
     assert _web_state(eng, res.call_id)[0].outcome == CallOutcome.denied
+
+
+def test_the_question_is_on_the_board_from_pickup_and_never_twice(fdb):
+    client, eng = fdb
+    client.post("/api/voice/twiml/cal_t")  # the vendor picks up
+    call, _ = _call_row(eng)
+    s = voice.call_script("x", "0000")
+    assert [l["speaker"] for l in call.transcript] == ["agent"] and call.transcript[0]["text"].endswith("Did your company make this change?")
+    client.post("/api/voice/twiml/cal_t")  # Twilio fetches it again: still once
+    gather(client, "No, we never changed banks")
+    call, _ = _call_row(eng)
+    asks = [l for l in call.transcript if l["speaker"] == "agent" and l["text"].endswith("Did your company make this change?")]
+    assert len(asks) == 1 and [l["speaker"] for l in call.transcript] == ["agent", "vendor", "agent"]

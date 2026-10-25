@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/shared/app-shell";
 import { About } from "@/pages/About";
 import { AttackConsole } from "@/pages/AttackConsole";
+import { CallView } from "@/pages/CallView";
 import { Board } from "@/pages/Board";
 import { DesignCheck } from "@/pages/DesignCheck";
 import { Inbox } from "@/pages/Inbox";
@@ -27,6 +28,8 @@ export function App() {
           <Route path="/about" element={<About />} />
           <Route path="*" element={<NotFound />} />
         </Route>
+        {/* Full screen, no shell: the verification call as a phone-sized live view, beside the board or in the video. */}
+        <Route path="/call" element={<CallView />} />
         {/* Full screen, no shell: second display. */}
         <Route path="/leaderboard" element={<Leaderboard />} />
         {/* A developer page: the design tokens rendered. Not in the product build. */}
