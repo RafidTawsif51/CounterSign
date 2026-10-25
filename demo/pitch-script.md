@@ -18,6 +18,7 @@
 - [ ] Browser tab 1: the Attack console (`/attack`), name field empty. Tab 2: the System status page (`/status`). Leaderboard on the second screen (press L).
 - [ ] Vendor's phone: ringer on, not on Do Not Disturb, voicemail not in the way. Answer within 2 rings. Say the line slowly and clearly.
 - [ ] Presentation mode on (press F).
+- [ ] Auditor access: System status shows "Auditor access (MCP): read-only", and `claude mcp get countersign-auditor` says Connected (see "Auditor access (MCP), live" below).
 
 ## The 3-minute pitch
 
@@ -136,6 +137,28 @@ The call says up front that it is an automated assistant and that the call is be
 
 **What did you build this weekend?**
 The whole pipeline: the seeded company, extraction, injection defense, risk engine, payment run with a live board, the verification call, Ask, the audit trail, the attack console, leaderboard and red-team harness. Plus a custom Apify Actor and fictional vendor websites for it to read.
+
+## Auditor access (MCP), live
+
+Use it when a judge asks "how would the controller or an auditor trust this?", at the Anthropic, Atlassian or Microsoft booths, or in the questions after the pitch. Not part of the 3 minutes.
+
+**Setup, once before judging** (details in `docs/mcp.md`):
+
+- `MCP_READ_TOKEN` is set in `.env` and the backend on 8000 was restarted after it was set. System status shows "Auditor access (MCP): read-only".
+- Claude Code on the demo laptop is connected: `claude mcp get countersign-auditor` shows `http://localhost:8000/mcp` and Connected. If it is missing: `claude mcp add --transport http countersign-auditor http://localhost:8000/mcp --header "Authorization: Bearer $MCP_READ_TOKEN"`.
+- Run at least one weekly payment run beforehand (Start payment run on the board), so "this week" has data.
+
+**On stage.** Open a terminal in the repo, start `claude`, and ask exactly:
+
+> Did any money go to an unverified account?
+
+**Presenter:** "This is the controller's view. My own Claude, connected to Countersign through a read-only MCP server. It can see every run, payment and audit entry. It cannot approve, pay, call or change anything."
+
+What appears: Claude calls `list_payments` and `list_payment_runs` (you see the tool calls), then answers "No": it counts every paid payment (1,196 in our database tonight) and says $0 went to an unverified destination. It names the blocked attacks and the one still held, and that approving a held payment pays the vendor's last verified account, never the account the email asked for. Measured: 16.6 seconds and 4 tool calls on the live backend.
+
+**Presenter:** "Every one of those calls is in the audit log too, as mcp_reader, and the email text it read comes back labeled untrusted, so a scammer's invoice can't talk to the auditor's AI either."
+
+If it is slow or fails: say "the controller can ask this any time" and show the same answer on the System status page and the board (Paid, Held, Blocked). Do not retry on stage.
 
 ## 30-second booth version
 
