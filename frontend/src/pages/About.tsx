@@ -3,6 +3,7 @@
 
 import { Hero, SponsorStrip } from "@/components/landing/top";
 import { ClosingCta, Footer, Journey, Proof, ScamStory, Security } from "@/components/landing/sections";
+import { HAS_APP } from "@/lib/landing";
 
 export function About() {
   return (
@@ -17,7 +18,8 @@ export function About() {
         <ScamStory />
         <Security />
         <Proof />
-        <ClosingCta />
+        {/* The closing call to action sends people into the live system, so a landing build without an app leaves it out. */}
+        {HAS_APP && <ClosingCta />}
       </main>
       <Footer />
     </div>

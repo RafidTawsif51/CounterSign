@@ -1,5 +1,6 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/shared/app-shell";
+import { LANDING_ONLY } from "@/lib/landing";
 import { About } from "@/pages/About";
 import { AttackConsole } from "@/pages/AttackConsole";
 import { CallView } from "@/pages/CallView";
@@ -13,6 +14,17 @@ import { RedTeam } from "@/pages/RedTeam";
 import { SystemStatus } from "@/pages/SystemStatus";
 
 export function App() {
+  // The landing-only build (deploy/landing) is the project page alone, full screen, at every path.
+  if (LANDING_ONLY) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<About />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    );
+  }
   return (
     <BrowserRouter>
       <Routes>

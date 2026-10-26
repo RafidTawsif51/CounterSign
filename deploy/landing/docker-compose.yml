@@ -1,0 +1,26 @@
+# The landing page on a Vultr instance. From this folder:  DOMAIN=example.tech docker compose up -d --build
+# (or put DOMAIN=... in deploy/landing/.env, which git ignores). No secrets are needed: the page is static.
+
+services:
+  landing:
+    build:
+      context: ../../frontend
+      dockerfile: ../deploy/landing/Dockerfile
+      args:
+        VITE_APP_URL: ${APP_URL:-}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to the site's domain, for example DOMAIN=countersign.tech}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and Caddy's state survive restarts and rebuilds, so a redeploy never asks Let's Encrypt again.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
