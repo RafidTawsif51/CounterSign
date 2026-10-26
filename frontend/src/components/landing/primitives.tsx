@@ -1,4 +1,4 @@
-// Motion primitives for the project page (/about) only. Each is our own build of a 21st.dev component, restyled to DESIGN.md and
+// Motion primitives for the project page (/) only. Each is our own build of a 21st.dev component, restyled to DESIGN.md and
 // written for framer-motion (the app's one motion library). Credits:
 //   EncryptedText (manuarora700), AnimatedShinyText, AnimatedList, Marquee, NumberTicker, BlurFade (dillionverma, Magic UI).
 // Every one has a reduced-motion path that renders the final state with no movement. See DESIGN.md, Project page.

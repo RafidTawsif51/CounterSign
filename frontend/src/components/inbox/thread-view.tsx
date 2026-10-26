@@ -149,7 +149,7 @@ function MessageItem({
           <ShieldAlert {...iconProps} />
           <span className="font-medium">{detectionLabel(detection)}:</span>
           <span>{detection.reason}.</span>
-          <Link to={`/payments/${detection.paymentId}`} className="text-accent underline-offset-4 hover:underline">
+          <Link to={`/app/payments/${detection.paymentId}`} className="text-accent underline-offset-4 hover:underline">
             Open payment
           </Link>
         </p>

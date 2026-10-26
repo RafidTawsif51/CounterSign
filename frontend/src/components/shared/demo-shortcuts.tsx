@@ -35,7 +35,7 @@ const dialogOpen = () => document.querySelector('[role="dialog"], [role="alertdi
 export function openLeaderboardWindow() {
   // A named popup: pressing L again focuses the same window instead of opening another. It inherits this tab's
   // session, so it starts in the same live or offline mode.
-  const win = window.open("/leaderboard", "countersign-leaderboard", "popup,width=1280,height=800");
+  const win = window.open("/app/leaderboard", "countersign-leaderboard", "popup,width=1280,height=800");
   if (win) win.focus();
   else toast.error("Leaderboard window blocked", { description: "Allow pop-ups for this site, or open it from the sidebar." });
 }
@@ -59,7 +59,7 @@ export function DemoShortcuts({
   act.current = (action) => {
     switch (action) {
       case "start":
-        navigate("/");
+        navigate("/app");
         if (running || starting.current) {
           toast("The payment run is already in progress");
           return;
@@ -73,7 +73,7 @@ export function DemoShortcuts({
         onReset();
         return;
       case "attack":
-        navigate("/attack");
+        navigate("/app/attack");
         return;
       case "leaderboard":
         openLeaderboardWindow();

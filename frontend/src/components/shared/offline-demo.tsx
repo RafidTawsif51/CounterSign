@@ -92,7 +92,7 @@ export function DataModeIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <Link
-            to="/status"
+            to="/app/status"
             className="hidden h-7 items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 text-sm text-ink-muted transition-colors hover:text-ink md:inline-flex"
           >
             <FlaskRound {...iconProps} />
@@ -113,7 +113,7 @@ export function DataModeIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <Link
-            to="/status"
+            to="/app/status"
             className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-ink bg-surface px-2 text-sm font-medium text-ink"
           >
             <WifiOff {...iconProps} />

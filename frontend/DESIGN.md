@@ -18,7 +18,7 @@ These are hard rules. A screen that breaks one is not done.
 
 - No purple or blue gradients. No gradient text. No glassmorphism, backdrop blur, glow effects or blurred blobs.
 - No emoji as icons. No sparkle icons for AI. AI output is labeled by what it did ("Held by risk check"), not decorated.
-- No hero sections or marketing copy inside the app. The one exception is the project page at `/about`, outside the app shell; see Project page.
+- No hero sections or marketing copy inside the app. The one exception is the project page at `/`, outside the app shell; see Project page.
 - No cards inside cards inside cards. Prefer tables, lists and hairline dividers. One panel level, maximum.
 - No "Welcome back!" or similar fluff. No lorem ipsum. No generic placeholders ("Item 1", "John Doe", "Acme"). All copy is specific to AP work and uses the demo data (Ridgeline Builders, its vendors, Maria, Dev).
 - No centered-everything layouts. Content is left-aligned on a grid. Numbers are right-aligned.
@@ -127,7 +127,7 @@ Countersign components live beside them: `board/`, `payment/`, `call/`, `inbox/`
 | `Button` | `ui/button.tsx` | Variants: `primary` (one per view, the main action), `secondary` (default), `ghost` (tertiary, toolbar), `danger` (reject and block only), `link`. Sizes: `sm` 28px, `md` 32px, `icon` 32px, `icon-sm` 28px. Icon on the left, 16px. |
 | `Badge` | `ui/badge.tsx` | Radius 4. `neutral`, `accent`, and one variant per payment status. |
 | `Table` | `ui/table.tsx` | 36px header, 40px rows, no wrapping, hover only on rows without `.row-flag`. |
-| `Sheet` | `ui/sheet.tsx` | Right-side drawer, 560px, used for payment detail at `/payments/:id`. |
+| `Sheet` | `ui/sheet.tsx` | Right-side drawer, 560px, used for payment detail at `/app/payments/:id`. |
 | `StatusBadge` | `shared/status-badge.tsx` | Tinted fill, `-ink` text, square marker. Pending uses an outlined marker. |
 | `Money` | `shared/money.tsx` | The only way to render a dollar amount. |
 | `PageHeader`, `EmptyState` | `shared/` | Every page starts with `PageHeader`; empty screens say what to do next. |
@@ -150,7 +150,7 @@ Formatting lives in `src/lib/format.ts`: `formatUSD`, `formatAccount` (last four
 
 ## Project page
 
-`/about` (`pages/About.tsx`, sections in `components/landing/`) is the landing page for judges, sponsors and anyone who arrives without a guide. It sits inside the app shell like every other page (sidebar "About Countersign"). Same tokens, type, hairlines and payment-state colors as the app; paid green, held amber and blocked brick mean the same thing here as on the board.
+`/` (`pages/About.tsx`, sections in `components/landing/`) is the landing page for judges, sponsors and anyone who arrives without a guide; every visitor lands here first. It is full screen, outside the app shell; the app lives under `/app`, and the sidebar's Countersign logo and "About Countersign" lead back here. Same tokens, type, hairlines and payment-state colors as the app; paid green, held amber and blocked brick mean the same thing here as on the board.
 
 It is the one page with these exceptions to the rules above, and only these:
 

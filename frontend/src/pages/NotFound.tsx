@@ -9,7 +9,7 @@ export function NotFound() {
       <PageHeader title="Page not found" />
       <EmptyState title={`Nothing lives at ${pathname}.`}>
         Every screen is listed in the sidebar.{" "}
-        <Link to="/" className="text-accent underline-offset-4 hover:underline">
+        <Link to="/app" className="text-accent underline-offset-4 hover:underline">
           Go to the payment run
         </Link>
       </EmptyState>

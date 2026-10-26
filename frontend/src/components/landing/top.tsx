@@ -56,7 +56,7 @@ export function Hero() {
       <div className="relative mx-auto grid max-w-[1120px] grid-cols-1 gap-10 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1fr)_440px] lg:pt-20">
         <div>
           {HAS_APP && (
-            <AppLink to="/attack" className="mb-6 inline-flex items-center gap-2 rounded-sm border border-rule-strong bg-surface px-2 py-1 text-sm hover:bg-sunken">
+            <AppLink to="/app/attack" className="mb-6 inline-flex items-center gap-2 rounded-sm border border-rule-strong bg-surface px-2 py-1 text-sm hover:bg-sunken">
               <Crosshair {...iconProps} className="text-ink-muted" />
               <ShinyText>Open challenge: try to get a payment past the agent</ShinyText>
             </AppLink>
@@ -71,8 +71,8 @@ export function Hero() {
           <div className="mt-6 flex flex-wrap gap-2">
             {HAS_APP ? (
               <>
-                <Button asChild variant="primary"><AppLink to="/"><Play {...iconProps} />Start a live payment run</AppLink></Button>
-                <Button asChild><AppLink to="/attack"><Crosshair {...iconProps} />Try to rob our AI</AppLink></Button>
+                <Button asChild variant="primary"><AppLink to="/app"><Play {...iconProps} />Start a live payment run</AppLink></Button>
+                <Button asChild><AppLink to="/app/attack"><Crosshair {...iconProps} />Try to rob our AI</AppLink></Button>
               </>
             ) : (
               <Button asChild variant="primary"><a href="#journey"><Play {...iconProps} />See how it works</a></Button>

@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/shared/app-shell";
 import { LANDING_ONLY } from "@/lib/landing";
 import { About } from "@/pages/About";
@@ -28,25 +28,43 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Every visitor lands on the project page first: full screen, no shell, as in the landing-only build. */}
+        <Route path="/" element={<About />} />
         <Route element={<AppShell />}>
-          <Route path="/" element={<Board />}>
+          <Route path="/app" element={<Board />}>
             <Route path="payments/:paymentId" element={<PaymentDetail />} />
           </Route>
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/attack" element={<AttackConsole />} />
-          <Route path="/red-team" element={<RedTeam />} />
-          <Route path="/status" element={<SystemStatus />} />
-          {/* The project page for judges and sponsors, inside the app like every other page (DESIGN.md, Project page). */}
-          <Route path="/about" element={<About />} />
+          <Route path="/app/inbox" element={<Inbox />} />
+          <Route path="/app/attack" element={<AttackConsole />} />
+          <Route path="/app/red-team" element={<RedTeam />} />
+          <Route path="/app/status" element={<SystemStatus />} />
           <Route path="*" element={<NotFound />} />
         </Route>
         {/* Full screen, no shell: the verification call as a phone-sized live view, beside the board or in the video. */}
-        <Route path="/call" element={<CallView />} />
+        <Route path="/app/call" element={<CallView />} />
         {/* Full screen, no shell: second display. */}
-        <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/app/leaderboard" element={<Leaderboard />} />
+        {/* Paths from before the app moved under /app, so old links and bookmarks still work. */}
+        {LEGACY_PATHS.map((path) => (
+          <Route key={path} path={path} element={<LegacyRedirect />} />
+        ))}
+        <Route path="/about" element={<AboutRedirect />} />
         {/* A developer page: the design tokens rendered. Not in the product build. */}
         {import.meta.env.DEV && <Route path="/design-check" element={<DesignCheck />} />}
       </Routes>
     </BrowserRouter>
   );
+}
+
+const LEGACY_PATHS = ["/inbox", "/attack", "/red-team", "/status", "/call", "/leaderboard", "/payments/:paymentId"];
+
+/** The same screen under /app, with the query (?tv=1, ?payment=...) and hash kept. */
+function LegacyRedirect() {
+  const { pathname, search, hash } = useLocation();
+  return <Navigate to={`/app${pathname}${search}${hash}`} replace />;
+}
+
+function AboutRedirect() {
+  const { hash } = useLocation();
+  return <Navigate to={{ pathname: "/", hash }} replace />;
 }

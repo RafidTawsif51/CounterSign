@@ -123,7 +123,7 @@ function PaymentRowView({ row, mountedAt }: { row: BoardRow; mountedAt: number }
   const navigate = useNavigate();
   const [slideIn] = useState(() => Date.now() - mountedAt > SETTLE_MS);
   const flagged = row.status === "held" || row.status === "blocked";
-  const open = () => navigate(`/payments/${row.paymentId}`);
+  const open = () => navigate(`/app/payments/${row.paymentId}`);
 
   return (
     <MotionRow

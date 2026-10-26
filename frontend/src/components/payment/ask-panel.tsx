@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 // The answer is read-only explanation (POST /api/payments/{id}/ask cannot change anything). No avatar, no typing dots:
 // a thin line runs against the 5-second budget while it waits.
 
-/** Open the drawer at `/payments/:id?ask=1` (the ⌘K "Ask why…" command) and the question field takes focus. */
+/** Open the drawer at `/app/payments/:id?ask=1` (the ⌘K "Ask why…" command) and the question field takes focus. */
 export const ASK_PARAM = "ask";
 
 interface Exchange {

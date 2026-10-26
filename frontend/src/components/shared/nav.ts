@@ -14,13 +14,13 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
-  { to: "/", label: "Payment run", icon: Banknote, key: "P", end: true },
-  { to: "/inbox", label: "Inbox", icon: Inbox, key: "I", liveOnly: true },
-  { to: "/attack", label: "Attack console", icon: Crosshair, key: "A", liveOnly: true },
-  { to: "/leaderboard", label: "Leaderboard", icon: ListOrdered, key: "L", newTab: true },
-  { to: "/red-team", label: "Red team", icon: FlaskConical, key: "T" },
-  { to: "/status", label: "System status", icon: Activity, key: "S" },
-  { to: "/about", label: "About Countersign", icon: BookOpen, key: "O" },
+  { to: "/app", label: "Payment run", icon: Banknote, key: "P", end: true },
+  { to: "/app/inbox", label: "Inbox", icon: Inbox, key: "I", liveOnly: true },
+  { to: "/app/attack", label: "Attack console", icon: Crosshair, key: "A", liveOnly: true },
+  { to: "/app/leaderboard", label: "Leaderboard", icon: ListOrdered, key: "L", newTab: true },
+  { to: "/app/red-team", label: "Red team", icon: FlaskConical, key: "T" },
+  { to: "/app/status", label: "System status", icon: Activity, key: "S" },
+  { to: "/", label: "About Countersign", icon: BookOpen, key: "O", end: true },
 ];
 
 /** The screens to offer: in a replay, only the ones that can run from the recording. */
