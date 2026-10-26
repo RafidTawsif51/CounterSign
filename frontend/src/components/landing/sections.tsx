@@ -11,13 +11,14 @@ import {
   Phone, ScanSearch, ShieldCheck, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CountersignMark } from "@/components/shared/countersign-mark";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { HAS_APP } from "@/lib/landing";
 import { cn } from "@/lib/utils";
+import { AppLink } from "./app-link";
 import { BlurFade, NumberTicker } from "./primitives";
 
 const REPO = "https://github.com/aayushswami123/Countersign";
@@ -328,7 +329,8 @@ export function Proof() {
             </table>
           </div>
           <p className="mt-3 text-sm text-ink-muted">
-            Sources: docs/audit-report.md and docs/security.md in the repository. <Link to="/red-team" className="text-accent hover:underline">Red-team results</Link> are on their own page.
+            Sources: docs/audit-report.md and docs/security.md in the repository.
+            {HAS_APP && <> <AppLink to="/red-team" className="text-accent hover:underline">Red-team results</AppLink> are on their own page.</>}
           </p>
         </BlurFade>
       </div>
@@ -369,13 +371,13 @@ export function ClosingCta() {
           <p className="mt-2 max-w-[560px] text-ink-muted">Send any email or invoice into the live system. Every attempt runs through the real pipeline and lands on the leaderboard.</p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Button asChild variant="primary" className="group relative overflow-hidden">
-              <Link to="/attack">
+              <AppLink to="/attack">
                 {/* Interactive hover button: a darker fill sweeps in on hover. No arrow. */}
                 <span aria-hidden className="absolute inset-0 origin-left scale-x-0 bg-accent-hover transition-transform duration-200 group-hover:scale-x-100" />
                 <span className="relative inline-flex items-center gap-2"><Crosshair {...iconProps} />Try to rob our AI</span>
-              </Link>
+              </AppLink>
             </Button>
-            <Button asChild><a href="/leaderboard" target="_blank" rel="noreferrer"><ListOrdered {...iconProps} />See the leaderboard</a></Button>
+            <Button asChild><AppLink to="/leaderboard" newTab><ListOrdered {...iconProps} />See the leaderboard</AppLink></Button>
           </div>
         </div>
       </div>
@@ -389,8 +391,12 @@ export function Footer() {
       <span className="flex items-center gap-2 font-medium text-ink"><CountersignMark />Countersign</span>
       <span>Built at Cal Hacks 13.0. Fictional company, sandbox money only.</span>
       <span className="flex gap-4 sm:ml-auto">
-        <Link to="/" className="text-accent hover:underline">Live demo</Link>
-        <a href="/leaderboard" target="_blank" rel="noreferrer" className="text-accent hover:underline">Leaderboard</a>
+        {HAS_APP && (
+          <>
+            <AppLink to="/" className="text-accent hover:underline">Live demo</AppLink>
+            <AppLink to="/leaderboard" newTab className="text-accent hover:underline">Leaderboard</AppLink>
+          </>
+        )}
         <a href={REPO} target="_blank" rel="noreferrer" className="text-accent hover:underline">GitHub</a>
       </span>
     </footer>

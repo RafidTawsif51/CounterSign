@@ -1,0 +1,26 @@
+# Caddy gets and renews the HTTPS certificate for DOMAIN on its own, once the domain's A record points at this server
+# and ports 80 and 443 are open.
+
+{$DOMAIN} {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	# Built assets have content hashes in their names, so they can be cached for good; index.html never is.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@page not path /assets/*
+	header @page Cache-Control "no-cache"
+
+	# A single-page app: any path that is not a file gets index.html, and the app sends it to /.
+	try_files {path} /index.html
+	file_server
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

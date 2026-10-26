@@ -3,13 +3,14 @@
 // Encrypted Text; background: a still grid after Animated Grid Pattern (dillionverma). Restyled to DESIGN.md.
 
 import { BookCheck, Crosshair, Lock, PhoneCall, Play } from "lucide-react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { iconProps } from "@/components/shared/icon";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { HAS_APP } from "@/lib/landing";
 import { cn } from "@/lib/utils";
 import type { PaymentStatus } from "@/lib/types";
+import { AppLink } from "./app-link";
 import { AnimatedList, EncryptedText, Marquee, ShinyText } from "./primitives";
 
 // The sample run, in the order the agent handles it. Amounts are the seeded week's real invoices.
@@ -54,11 +55,13 @@ export function Hero() {
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-60 [background-image:linear-gradient(var(--rule)_1px,transparent_1px),linear-gradient(90deg,var(--rule)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:linear-gradient(to_bottom,black,transparent_85%)]" />
       <div className="relative mx-auto grid max-w-[1120px] grid-cols-1 gap-10 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1fr)_440px] lg:pt-20">
         <div>
-          <Link to="/attack" className="inline-flex items-center gap-2 rounded-sm border border-rule-strong bg-surface px-2 py-1 text-sm hover:bg-sunken">
-            <Crosshair {...iconProps} className="text-ink-muted" />
-            <ShinyText>Open challenge: try to get a payment past the agent</ShinyText>
-          </Link>
-          <h1 className="mt-6 text-2xl font-semibold">
+          {HAS_APP && (
+            <AppLink to="/attack" className="mb-6 inline-flex items-center gap-2 rounded-sm border border-rule-strong bg-surface px-2 py-1 text-sm hover:bg-sunken">
+              <Crosshair {...iconProps} className="text-ink-muted" />
+              <ShinyText>Open challenge: try to get a payment past the agent</ShinyText>
+            </AppLink>
+          )}
+          <h1 className="text-2xl font-semibold">
             <EncryptedText text="Every payment, countersigned." />
           </h1>
           <p className="mt-4 max-w-[600px] text-md text-ink-muted">
@@ -66,8 +69,14 @@ export function Hero() {
             call before any money moves.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
-            <Button asChild variant="primary"><Link to="/"><Play {...iconProps} />Start a live payment run</Link></Button>
-            <Button asChild><Link to="/attack"><Crosshair {...iconProps} />Try to rob our AI</Link></Button>
+            {HAS_APP ? (
+              <>
+                <Button asChild variant="primary"><AppLink to="/"><Play {...iconProps} />Start a live payment run</AppLink></Button>
+                <Button asChild><AppLink to="/attack"><Crosshair {...iconProps} />Try to rob our AI</AppLink></Button>
+              </>
+            ) : (
+              <Button asChild variant="primary"><a href="#journey"><Play {...iconProps} />See how it works</a></Button>
+            )}
           </div>
           <ul className="mt-8 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
             {TRUST.map((t) => (
