@@ -32,7 +32,7 @@ export function CallStrip({ call }: { call: CallView }) {
 
   return (
     <Link
-      to={`/payments/${call.paymentId}`}
+      to={`/app/payments/${call.paymentId}`}
       aria-live="polite"
       className="block rounded-md border border-rule bg-surface transition-colors hover:border-rule-strong"
     >

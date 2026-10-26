@@ -79,7 +79,7 @@ function EntryView({ entry }: { entry: ActivityEntry }) {
   return (
     <li>
       {entry.paymentId ? (
-        <Link to={`/payments/${entry.paymentId}`} className={cn(cls, "transition-colors hover:bg-sunken")}>
+        <Link to={`/app/payments/${entry.paymentId}`} className={cn(cls, "transition-colors hover:bg-sunken")}>
           {body}
         </Link>
       ) : (

@@ -63,7 +63,7 @@ function AttackScreen() {
       });
       // Straight to the payment: its steps play out there, live. The board behind it keeps the attack pinned.
       if (res.queued) toast("Your attack is queued.", { description: "It goes right after the run in progress." });
-      navigate(`/payments/${res.payment_id}`);
+      navigate(`/app/payments/${res.payment_id}`);
     },
   });
 

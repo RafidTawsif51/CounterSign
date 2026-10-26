@@ -330,7 +330,7 @@ export function Proof() {
           </div>
           <p className="mt-3 text-sm text-ink-muted">
             Sources: docs/audit-report.md and docs/security.md in the repository.
-            {HAS_APP && <> <AppLink to="/red-team" className="text-accent hover:underline">Red-team results</AppLink> are on their own page.</>}
+            {HAS_APP && <> <AppLink to="/app/red-team" className="text-accent hover:underline">Red-team results</AppLink> are on their own page.</>}
           </p>
         </BlurFade>
       </div>
@@ -371,13 +371,13 @@ export function ClosingCta() {
           <p className="mt-2 max-w-[560px] text-ink-muted">Send any email or invoice into the live system. Every attempt runs through the real pipeline and lands on the leaderboard.</p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Button asChild variant="primary" className="group relative overflow-hidden">
-              <AppLink to="/attack">
+              <AppLink to="/app/attack">
                 {/* Interactive hover button: a darker fill sweeps in on hover. No arrow. */}
                 <span aria-hidden className="absolute inset-0 origin-left scale-x-0 bg-accent-hover transition-transform duration-200 group-hover:scale-x-100" />
                 <span className="relative inline-flex items-center gap-2"><Crosshair {...iconProps} />Try to rob our AI</span>
               </AppLink>
             </Button>
-            <Button asChild><AppLink to="/leaderboard" newTab><ListOrdered {...iconProps} />See the leaderboard</AppLink></Button>
+            <Button asChild><AppLink to="/app/leaderboard" newTab><ListOrdered {...iconProps} />See the leaderboard</AppLink></Button>
           </div>
         </div>
       </div>
@@ -393,8 +393,8 @@ export function Footer() {
       <span className="flex gap-4 sm:ml-auto">
         {HAS_APP && (
           <>
-            <AppLink to="/" className="text-accent hover:underline">Live demo</AppLink>
-            <AppLink to="/leaderboard" newTab className="text-accent hover:underline">Leaderboard</AppLink>
+            <AppLink to="/app" className="text-accent hover:underline">Live demo</AppLink>
+            <AppLink to="/app/leaderboard" newTab className="text-accent hover:underline">Leaderboard</AppLink>
           </>
         )}
         <a href={REPO} target="_blank" rel="noreferrer" className="text-accent hover:underline">GitHub</a>

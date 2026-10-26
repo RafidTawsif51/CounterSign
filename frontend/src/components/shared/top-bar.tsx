@@ -35,7 +35,7 @@ export function TopBar({
     try {
       await api.resetDemo(true);
       forgetAfterReset();
-      navigate("/");
+      navigate("/app");
       setPresenting(true);
       toast.success("Demo reset", { description: "Presenting. The leaderboard was kept. Press F to leave presentation mode." });
     } catch (err) {
@@ -137,7 +137,7 @@ function RunStatus() {
 /** With the sidebar hidden, the screens a judge needs stay one click away. No developer controls here. */
 function PresentationNav() {
   const nav = useVisibleNav();
-  const items = nav.filter((n) => ["/", "/attack", "/leaderboard", "/red-team", "/status"].includes(n.to));
+  const items = nav.filter((n) => ["/app", "/app/attack", "/app/leaderboard", "/app/red-team", "/app/status"].includes(n.to));
   return (
     <nav aria-label="Screens" className="ml-4 hidden items-center gap-1 md:flex">
       {items.map((n) =>

@@ -1,4 +1,4 @@
-// The project page (/about): the landing page for judges, sponsors and anyone who arrives without a guide. Sections live in
+// The project page (/): the landing page for judges, sponsors and anyone who arrives without a guide. Sections live in
 // components/landing/. See DESIGN.md, Project page: the one place with a hero, a loop and scroll reveals, all off with reduced motion.
 
 import { Hero, SponsorStrip } from "@/components/landing/top";

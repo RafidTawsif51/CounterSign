@@ -31,7 +31,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const visibleNav = useVisibleNav();
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: api.vendors, enabled: open, staleTime: 60_000 });
   const payments = useRunPayments();
-  const openPayment = useMatch("/payments/:paymentId")?.params.paymentId ?? null;
+  const openPayment = useMatch("/app/payments/:paymentId")?.params.paymentId ?? null;
   // "Ask why…": the open payment first, then every payment the run held or blocked.
   const askable = [
     ...payments.filter((p) => p.id === openPayment),
@@ -58,7 +58,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
               <CommandItem
                 key={p.id}
                 value={`ask why ${p.vendor} ${p.status}`}
-                onSelect={() => go(`/payments/${p.id}?${ASK_PARAM}=1`)}
+                onSelect={() => go(`/app/payments/${p.id}?${ASK_PARAM}=1`)}
               >
                 <MessageSquareText {...iconProps} />
                 <span className="truncate">
@@ -86,7 +86,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
         {vendors.data && vendors.data.length > 0 && (
           <CommandGroup heading="Vendors">
             {vendors.data.map((v) => (
-              <CommandItem key={v.id} value={`vendor ${v.name} ${v.trade} ${v.email_domain}`} onSelect={() => go(`/inbox?vendor=${v.id}`)}>
+              <CommandItem key={v.id} value={`vendor ${v.name} ${v.trade} ${v.email_domain}`} onSelect={() => go(`/app/inbox?vendor=${v.id}`)}>
                 <Building2 {...iconProps} />
                 <span className="truncate">{v.name}</span>
                 <CommandShortcut className="flex items-center gap-3 font-sans">
@@ -112,7 +112,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
               <CommandItem
                 key={p.id}
                 value={`payment ${p.vendor} ${p.id} ${p.status}`}
-                onSelect={() => go(`/payments/${p.id}`)}
+                onSelect={() => go(`/app/payments/${p.id}`)}
               >
                 <FileText {...iconProps} />
                 <span className="truncate">{p.vendor}</span>

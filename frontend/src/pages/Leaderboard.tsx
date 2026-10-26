@@ -87,7 +87,7 @@ export function Leaderboard() {
             Try to get our AI to pay the wrong account. All money is sandbox money.
             {modes.known &&
               (simulated ? (
-                <> Some services are simulated in this setup; <a href="/status" className="underline underline-offset-4">System status</a> says which.</>
+                <> Some services are simulated in this setup; <a href="/app/status" className="underline underline-offset-4">System status</a> says which.</>
               ) : (
                 <> Every attempt runs live.</>
               ))}

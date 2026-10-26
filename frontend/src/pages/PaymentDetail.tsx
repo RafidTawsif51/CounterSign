@@ -51,7 +51,7 @@ export function PaymentDetail() {
   const hasCall = Boolean(detail && (detail.calls.length > 0 || (detail.payment.status === "held" && detail.risk?.decision === "hold_and_verify")));
 
   return (
-    <Sheet open onOpenChange={(open) => !open && navigate("/")}>
+    <Sheet open onOpenChange={(open) => !open && navigate("/app")}>
       <SheetContent className="sm:max-w-[640px]">
         {detail ? (
           <EvidenceProvider>

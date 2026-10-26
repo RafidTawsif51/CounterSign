@@ -39,10 +39,11 @@ export function Sidebar() {
         !collapsed && "md:w-[220px]",
       )}
     >
-      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-rule px-[18px]">
+      {/* The way back to the landing page. */}
+      <Link to="/" aria-label="Countersign home" className="flex h-12 shrink-0 items-center gap-2.5 border-b border-rule px-[18px] hover:bg-sunken">
         <CountersignMark />
         <span className={cn("hidden font-semibold tracking-[-0.01em]", !collapsed && "md:inline")}>Countersign</span>
-      </div>
+      </Link>
 
       <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 p-2">
         {nav.map((item) => (
